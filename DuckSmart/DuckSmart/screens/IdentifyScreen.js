@@ -90,7 +90,7 @@ function IdentifyHome({ navigation }) {
             <Text style={s.subHeader}>Identify Duck</Text>
           </View>
           <Pressable style={s.gearButton} onPress={() => {}}>
-            <Text style={s.gearText}>{"\u2699\uFE0E"}</Text>
+            <Text style={s.gearText}>⚙︎</Text>
           </Pressable>
         </View>
 
@@ -169,7 +169,7 @@ function IdentifyHome({ navigation }) {
                 <View style={{ flex: 1 }}>
                   <Text style={s.matchTitle}>{species.name}</Text>
                   <Text style={s.matchSub}>
-                    {species.group} \u2022 {species.size} \u2022 {species.habitats.join(", ")}
+                    {species.group} • {species.size} • {species.habitats.join(", ")}
                   </Text>
                   <Text style={s.matchHint} numberOfLines={2}>
                     {species.keyMarks[0]}
@@ -220,13 +220,13 @@ function SpeciesDetail({ route, navigation }) {
       <ScrollView contentContainerStyle={s.container}>
         <View style={s.detailHeader}>
           <Pressable style={s.backBtn} onPress={() => navigation.goBack()}>
-            <Text style={s.backBtnText}>{"\u2039"}</Text>
+            <Text style={s.backBtnText}>‹</Text>
           </Pressable>
 
           <View style={{ flex: 1 }}>
             <Text style={s.detailTitle}>{sp.name}</Text>
             <Text style={s.detailSub}>
-              {sp.group} \u2022 {sp.size}
+              {sp.group} • {sp.size}
             </Text>
           </View>
         </View>
@@ -247,7 +247,7 @@ function SpeciesDetail({ route, navigation }) {
         <IdentifyCard title="Key Field Marks">
           {sp.keyMarks.map((m, idx) => (
             <View key={idx} style={s.bulletRow}>
-              <Text style={s.bullet}>{"\u2022"}</Text>
+              <Text style={s.bullet}>•</Text>
               <Text style={s.bulletText}>{m}</Text>
             </View>
           ))}
@@ -257,7 +257,7 @@ function SpeciesDetail({ route, navigation }) {
           {sp.lookalikes?.length ? (
             sp.lookalikes.map((m, idx) => (
               <View key={idx} style={s.bulletRow}>
-                <Text style={s.bullet}>{"\u2022"}</Text>
+                <Text style={s.bullet}>•</Text>
                 <Text style={s.bulletText}>{m}</Text>
               </View>
             ))

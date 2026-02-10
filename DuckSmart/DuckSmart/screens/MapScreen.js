@@ -145,20 +145,20 @@ export default function MapScreen({ pins, setPins }) {
                 <Text style={styles.brandSmart}>Smart</Text>
               </Text>
               <Text style={styles.subHeaderSmall}>
-                Map \u2022 Pins & Scouting{permissionState === "denied" ? " \u2022 Location Off" : ""}
+                Map • Pins & Scouting{permissionState === "denied" ? " • Location Off" : ""}
               </Text>
             </View>
           </View>
 
           <View style={{ flexDirection: "row", gap: 10 }}>
             <Pressable style={styles.iconBtn} onPress={goToUser} disabled={!userLoc}>
-              <Text style={styles.iconBtnText}>{"\u25CE"}</Text>
+              <Text style={styles.iconBtnText}>◎</Text>
             </Pressable>
             <Pressable
               style={[styles.iconBtn, isAddMode ? styles.iconBtnActive : null]}
               onPress={isAddMode ? cancelAddPin : startAddPin}
             >
-              <Text style={styles.iconBtnText}>{isAddMode ? "\u2715" : "+"}</Text>
+              <Text style={styles.iconBtnText}>{isAddMode ? "✕" : "+"}</Text>
             </Pressable>
           </View>
         </View>
@@ -178,7 +178,7 @@ export default function MapScreen({ pins, setPins }) {
               key={p.id}
               coordinate={p.coordinate}
               title={p.title}
-              description={`${p.type}${p.notes ? ` \u2022 ${p.notes}` : ""}`}
+              description={`${p.type}${p.notes ? ` • ${p.notes}` : ""}`}
               onPress={() => {
                 setSelectedPinId(p.id);
                 setIsAddMode(false);
@@ -241,11 +241,11 @@ export default function MapScreen({ pins, setPins }) {
                   <View style={{ flex: 1 }}>
                     <Text style={styles.sheetTitle}>{selectedPin.title}</Text>
                     <Text style={styles.sheetSub}>
-                      {selectedPin.type} \u2022 {selectedPin.coordinate.latitude.toFixed(5)}, {selectedPin.coordinate.longitude.toFixed(5)}
+                      {selectedPin.type} • {selectedPin.coordinate.latitude.toFixed(5)}, {selectedPin.coordinate.longitude.toFixed(5)}
                     </Text>
                   </View>
                   <Pressable style={styles.trashBtn} onPress={deleteSelectedPin}>
-                    <Text style={styles.trashBtnText}>{"\uD83D\uDDD1"}</Text>
+                    <Text style={styles.trashBtnText}>🗑</Text>
                   </Pressable>
                 </View>
 

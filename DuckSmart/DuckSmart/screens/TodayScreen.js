@@ -155,12 +155,12 @@ export default function TodayScreen() {
               <Text style={s.brandSmart}>Smart</Text>
             </Text>
             <Text style={s.subHeader}>
-              Today \u2022 {weather.locationName}
+              Today • {weather.locationName}
             </Text>
           </View>
 
           <Pressable style={s.gearButton} onPress={() => {}}>
-            <Text style={s.gearText}>{"\u2699\uFE0E"}</Text>
+            <Text style={s.gearText}>⚙︎</Text>
           </Pressable>
         </View>
 
@@ -202,7 +202,7 @@ export default function TodayScreen() {
               hunt.why.map((item, idx) => (
                 <View key={idx} style={s.whyRow}>
                   <Text style={s.whyBullet}>
-                    {item.type === "up" ? "\u25B2" : "\u25BC"}
+                    {item.type === "up" ? "▲" : "▼"}
                   </Text>
                   <Text style={s.whyText}>{item.text}</Text>
                 </View>
@@ -214,8 +214,8 @@ export default function TodayScreen() {
         {/* Real-time Weather */}
         <TodayCard title="Real-Time Weather">
           <View style={s.metricRow}>
-            <TodayMetricPill label="Temp" value={`${weather.tempF}\u00B0F`} />
-            <TodayMetricPill label="Feels" value={`${weather.feelsLikeF}\u00B0F`} />
+            <TodayMetricPill label="Temp" value={`${weather.tempF}°F`} />
+            <TodayMetricPill label="Feels" value={`${weather.feelsLikeF}°F`} />
             <TodayMetricPill
               label="Wind"
               value={`${weather.windMph} mph ${formatWind(weather.windDeg)}`}
@@ -247,7 +247,7 @@ export default function TodayScreen() {
               {weather.hourly.map((h) => (
                 <View key={h.t} style={s.hourlyCard}>
                   <Text style={s.hourlyTime}>{h.t}</Text>
-                  <Text style={s.hourlyTemp}>{h.temp}\u00B0</Text>
+                  <Text style={s.hourlyTemp}>{h.temp}°</Text>
                   <Text style={s.hourlySmall}>Precip {h.precip}%</Text>
                   <Text style={s.hourlySmall}>Wind {h.wind} mph</Text>
                   <Text style={s.hourlySmall}>Gust {h.gust}</Text>

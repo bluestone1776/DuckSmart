@@ -103,7 +103,7 @@ export default function HistoryScreen({ logs, deleteLog }) {
                     <View style={{ flex: 1 }}>
                       <Text style={styles.historyTitle}>{new Date(l.dateTime).toLocaleString()}</Text>
                       <Text style={styles.historySub}>
-                        {l.environment} \u2022 {l.spread} \u2022 Score {l.huntScore}
+                        {l.environment} • {l.spread} • Score {l.huntScore}
                       </Text>
                       <Image source={ASSETS.spreads[l.spread]} style={styles.spreadThumbSmall} resizeMode="cover" />
                       {l.notes ? (
@@ -114,7 +114,7 @@ export default function HistoryScreen({ logs, deleteLog }) {
                     </View>
 
                     <Pressable onPress={() => confirmDelete(l.id)} style={styles.trashBtn}>
-                      <Text style={styles.trashBtnText}>{"\uD83D\uDDD1"}</Text>
+                      <Text style={styles.trashBtnText}>🗑</Text>
                     </Pressable>
                   </Pressable>
                 );

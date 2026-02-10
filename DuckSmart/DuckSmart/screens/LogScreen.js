@@ -173,7 +173,7 @@ export default function LogScreen({ addLog }) {
             </Modal>
           </Card>
 
-          <Card title="Hunt Score (0\u2013100)">
+          <Card title="Hunt Score (0–100)">
             <View style={{ alignItems: "center" }}>
               <Text style={{ color: "#FFFFFF", fontSize: 44, fontWeight: "900" }}>{huntScore}</Text>
               <Text style={{ color: "#BDBDBD", fontWeight: "900", marginTop: 6 }}>

@@ -24,7 +24,7 @@ export const IDENTIFY_SPECIES = [
       "Common game species in most areas; always confirm season dates and bag limits for your state/zone.",
     tips: [
       "Often vocal on approach; listen for quacks/chuckles.",
-      "Hens can resemble mottled/black duck\u2014use speculum and bill color.",
+      "Hens can resemble mottled/black duck-use speculum and bill color.",
     ],
   },
   {
@@ -44,7 +44,7 @@ export const IDENTIFY_SPECIES = [
     legalNote:
       "Often legal where seasons allow; verify wood duck limits separately (can differ by zone).",
     tips: [
-      "In timber, they rocket through gaps\u2014lead is different than open water birds.",
+      "In timber, they rocket through gaps-lead is different than open water birds.",
       "Listen for squeals/whistles, especially early.",
     ],
   },
@@ -80,7 +80,7 @@ export const IDENTIFY_SPECIES = [
     ],
     lookalikes: ["Blue-winged Teal", "Cinnamon Teal (west)"],
     legalNote: "Often has its own limit in some places; check teal vs duck limits.",
-    tips: ["They juke hard\u2014keep your head on the bird and swing through."],
+    tips: ["They juke hard-keep your head on the bird and swing through."],
   },
   {
     id: "canvasback",

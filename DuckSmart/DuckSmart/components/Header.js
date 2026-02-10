@@ -18,7 +18,7 @@ export default function Header({ subtitle = "Today" }) {
       </View>
 
       <Pressable style={styles.gearButton} onPress={() => {}}>
-        <Text style={styles.gearText}>{"\u2699\uFE0E"}</Text>
+        <Text style={styles.gearText}>⚙︎</Text>
       </Pressable>
     </View>
   );
