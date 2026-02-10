@@ -1,26 +1,28 @@
 {
   "expo": {
-    "name": "smiling-green-bacon",
-    "slug": "snack-1ebab1bf-c5d8-4687-a1e0-d3a2d575cc9a",
+    "name": "DuckSmart",
+    "slug": "ducksmart",
     "version": "1.0.0",
     "orientation": "portrait",
     "icon": "./assets/icon.png",
-    "userInterfaceStyle": "light",
+    "userInterfaceStyle": "dark",
     "newArchEnabled": true,
     "splash": {
       "image": "./assets/splash-icon.png",
       "resizeMode": "contain",
-      "backgroundColor": "#ffffff"
+      "backgroundColor": "#000000"
     },
     "ios": {
-      "supportsTablet": true
+      "supportsTablet": true,
+      "bundleIdentifier": "com.ducksmart.app"
     },
     "android": {
       "adaptiveIcon": {
         "foregroundImage": "./assets/adaptive-icon.png",
-        "backgroundColor": "#ffffff"
+        "backgroundColor": "#000000"
       },
-      "edgeToEdgeEnabled": true
+      "edgeToEdgeEnabled": true,
+      "package": "com.ducksmart.app"
     },
     "web": {
       "favicon": "./assets/favicon.png"

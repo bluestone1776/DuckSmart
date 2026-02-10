@@ -1,0 +1,10 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(dir:*)",
+      "Bash(cd:*)",
+      "Bash(del \"D:\\\\projects\\\\DuckSmart\\\\DuckSmart\\\\DuckSmart\\\\components\\\\AssetExample.js\")",
+      "Bash(find:*)"
+    ]
+  }
+}
