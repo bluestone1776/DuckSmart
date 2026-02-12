@@ -17,31 +17,23 @@ import MapView, { Marker } from "react-native-maps";
 import { sharedStyles as styles } from "../constants/styles";
 import { ASSETS } from "../constants/assets";
 import Card from "../components/Card";
-import Chip from "../components/Chip";
 import Header from "../components/Header";
 
 export default function HistoryScreen({ logs, deleteLog }) {
   const [query, setQuery] = useState("");
-  const [filterEnv, setFilterEnv] = useState("All");
-  const [filterSpread, setFilterSpread] = useState("All");
   const [selectedId, setSelectedId] = useState(null);
   const selected = useMemo(() => logs.find((l) => l.id === selectedId) || null, [logs, selectedId]);
-
-  const environments = useMemo(() => ["All", ...Array.from(new Set(logs.map((l) => l.environment))).sort()], [logs]);
-  const spreads = useMemo(() => ["All", ...Array.from(new Set(logs.map((l) => l.spread))).sort()], [logs]);
 
   const filtered = useMemo(() => {
     const q = (query || "").toLowerCase().trim();
     return logs
       .filter((l) => {
-        if (filterEnv !== "All" && l.environment !== filterEnv) return false;
-        if (filterSpread !== "All" && l.spread !== filterSpread) return false;
         if (!q) return true;
         const hay = [l.environment, l.spread, l.notes, new Date(l.dateTime).toLocaleString()].join(" | ").toLowerCase();
         return hay.includes(q);
       })
       .sort((a, b) => b.createdAt - a.createdAt);
-  }, [logs, query, filterEnv, filterSpread]);
+  }, [logs, query]);
 
   function confirmDelete(id) {
     const log = logs.find((l) => l.id === id);
@@ -58,7 +50,7 @@ export default function HistoryScreen({ logs, deleteLog }) {
         <ScrollView contentContainerStyle={styles.container}>
           <Header subtitle="Hunt History" />
 
-          <Card title="Search & Filters">
+          <Card title="Search">
             <TextInput
               value={query}
               onChangeText={setQuery}
@@ -66,25 +58,14 @@ export default function HistoryScreen({ logs, deleteLog }) {
               placeholderTextColor="#6D6D6D"
               style={styles.input}
             />
-
-            <Text style={styles.inputLabel}>Environment</Text>
-            <ScrollView horizontal showsHorizontalScrollIndicator={false}>
-              <View style={styles.chipRow}>
-                {environments.map((e) => (
-                  <Chip key={e} label={e} selected={filterEnv === e} onPress={() => setFilterEnv(e)} />
-                ))}
-              </View>
-            </ScrollView>
-
-            <Text style={styles.inputLabel}>Spread</Text>
-            <ScrollView horizontal showsHorizontalScrollIndicator={false}>
-              <View style={styles.chipRow}>
-                {spreads.map((s) => (
-                  <Chip key={s} label={s} selected={filterSpread === s} onPress={() => setFilterSpread(s)} />
-                ))}
-              </View>
-            </ScrollView>
           </Card>
+
+          <View style={{ marginTop: 14, padding: 14, borderRadius: 16, backgroundColor: "#0E1A12", borderWidth: 1, borderColor: "#2ECC71" }}>
+            <Text style={{ color: "#2ECC71", fontWeight: "900", fontSize: 13 }}>Free Version</Text>
+            <Text style={{ color: "#BDBDBD", fontWeight: "800", fontSize: 13, marginTop: 6, lineHeight: 18 }}>
+              You can save up to 5 hunt logs for free. Upgrade to the paid version for unlimited logs, cloud backup, and more.
+            </Text>
+          </View>
 
           <Card title="Logs">
             {filtered.length === 0 ? (

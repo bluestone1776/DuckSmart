@@ -181,19 +181,37 @@ export default function LogScreen({ addLog }) {
               </Text>
             </View>
 
-            <View style={styles.presetRow}>
-              {[25, 50, 75, 90].map((v) => (
-                <Pressable key={v} onPress={() => setHuntScore(v)} style={[styles.presetBtn, huntScore === v ? styles.presetBtnActive : null]}>
-                  <Text style={[styles.presetBtnText, huntScore === v ? styles.presetBtnTextActive : null]}>{v}</Text>
-                </Pressable>
-              ))}
-              <Pressable onPress={() => setHuntScore((prev) => clamp(prev + 5, 0, 100))} style={styles.presetBtn}>
-                <Text style={styles.presetBtnText}>+5</Text>
+            <View style={styles.sliderRow}>
+              <Pressable onPress={() => setHuntScore((prev) => clamp(prev - 1, 0, 100))} style={styles.stepBtn}>
+                <Text style={styles.stepBtnText}>–</Text>
               </Pressable>
-              <Pressable onPress={() => setHuntScore((prev) => clamp(prev - 5, 0, 100))} style={styles.presetBtn}>
-                <Text style={styles.presetBtnText}>-5</Text>
+              <View style={styles.sliderTrack}>
+                <View style={[styles.sliderFill, { width: `${huntScore}%` }]} />
+              </View>
+              <Pressable onPress={() => setHuntScore((prev) => clamp(prev + 1, 0, 100))} style={styles.stepBtn}>
+                <Text style={styles.stepBtnText}>+</Text>
               </Pressable>
             </View>
+          </Card>
+
+          <Card title="Weather Brief">
+            <View style={styles.weatherBriefRow}>
+              <View style={styles.weatherBriefPill}>
+                <Text style={styles.weatherBriefLabel}>Temp</Text>
+                <Text style={styles.weatherBriefValue}>--°F</Text>
+              </View>
+              <View style={styles.weatherBriefPill}>
+                <Text style={styles.weatherBriefLabel}>Barometric</Text>
+                <Text style={styles.weatherBriefValue}>-- inHg</Text>
+              </View>
+              <View style={styles.weatherBriefPill}>
+                <Text style={styles.weatherBriefLabel}>Wind</Text>
+                <Text style={styles.weatherBriefValue}>-- mph</Text>
+              </View>
+            </View>
+            <Text style={{ color: "#7A7A7A", fontSize: 12, fontWeight: "700", marginTop: 10, lineHeight: 18 }}>
+              Auto-populated from weather API in a future update. Manual entry coming soon.
+            </Text>
           </Card>
 
           <Card title="Notes">

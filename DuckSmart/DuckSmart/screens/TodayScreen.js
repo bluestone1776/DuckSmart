@@ -9,8 +9,6 @@ import {
   StatusBar,
 } from "react-native";
 import Svg, { Path, Circle, Text as SvgText } from "react-native-svg";
-import { useNavigation } from "@react-navigation/native";
-
 import { COLORS } from "../constants/theme";
 import { clamp } from "../utils/helpers";
 import { formatWind } from "../utils/helpers";
@@ -107,7 +105,6 @@ function TodayHalfGauge({ value, size = 220 }) {
 // --- Main screen ---
 
 export default function TodayScreen() {
-  const navigation = useNavigation();
 
   const environments = ["Marsh", "Timber", "Field", "Open Water", "River"];
   const [environment, setEnvironment] = useState("Marsh");
@@ -164,23 +161,6 @@ export default function TodayScreen() {
           </Pressable>
         </View>
 
-        {/* Environment selector */}
-        <View style={{ marginTop: 12 }}>
-          <Text style={s.sectionLabel}>Environment</Text>
-          <ScrollView horizontal showsHorizontalScrollIndicator={false}>
-            <View style={s.chipRow}>
-              {environments.map((env) => (
-                <TodayChip
-                  key={env}
-                  label={env}
-                  selected={env === environment}
-                  onPress={() => setEnvironment(env)}
-                />
-              ))}
-            </View>
-          </ScrollView>
-        </View>
-
         {/* Hunt probability */}
         <TodayCard
           title="Hunt Probability"
@@ -193,6 +173,17 @@ export default function TodayScreen() {
           }
         >
           <TodayHalfGauge value={hunt.score} />
+
+          <View style={s.engineRow}>
+            <View style={s.enginePill}>
+              <Text style={s.engineLabel}>Push</Text>
+              <Text style={s.engineValue}>{hunt.push ?? "–"}</Text>
+            </View>
+            <View style={s.enginePill}>
+              <Text style={s.engineLabel}>Go</Text>
+              <Text style={s.engineValue}>{hunt.go ?? "–"}</Text>
+            </View>
+          </View>
 
           <View style={s.whyBox}>
             <Text style={s.whyTitle}>Why this score</Text>
@@ -257,6 +248,23 @@ export default function TodayScreen() {
           </ScrollView>
         </TodayCard>
 
+        {/* Environment selector (moved below Hourly Snapshot per client request) */}
+        <View style={{ marginTop: 14 }}>
+          <Text style={s.sectionLabel}>Environment</Text>
+          <ScrollView horizontal showsHorizontalScrollIndicator={false}>
+            <View style={s.chipRow}>
+              {environments.map((env) => (
+                <TodayChip
+                  key={env}
+                  label={env}
+                  selected={env === environment}
+                  onPress={() => setEnvironment(env)}
+                />
+              ))}
+            </View>
+          </ScrollView>
+        </View>
+
         {/* Spread recommendation */}
         <TodayCard title="Recommended Spread Right Now">
           <Text style={s.spreadName}>{spread.name}</Text>
@@ -280,19 +288,6 @@ export default function TodayScreen() {
             </Text>
           </View>
         </TodayCard>
-
-        {/* Quick actions */}
-        <View style={s.quickActions}>
-          <Pressable style={s.actionBtn} onPress={() => navigation.navigate("Log")}>
-            <Text style={s.actionBtnText}>Log Hunt</Text>
-          </Pressable>
-          <Pressable style={s.actionBtn} onPress={() => navigation.navigate("History")}>
-            <Text style={s.actionBtnText}>Hunt History</Text>
-          </Pressable>
-          <Pressable style={s.actionBtn} onPress={() => navigation.navigate("Identify")}>
-            <Text style={s.actionBtnText}>Identify Duck</Text>
-          </Pressable>
-        </View>
 
         <View style={{ height: 22 }} />
       </ScrollView>
@@ -354,6 +349,11 @@ const s = StyleSheet.create({
   gaugeLegendRow: { width: 220, flexDirection: "row", justifyContent: "space-between", marginTop: -6 },
   legendText: { color: COLORS.mutedDarker, fontSize: 12, fontWeight: "700" },
 
+  engineRow: { flexDirection: "row", gap: 10, marginTop: 12, marginBottom: 4 },
+  enginePill: { flex: 1, padding: 12, borderRadius: 14, backgroundColor: COLORS.bgDeep, borderWidth: 1, borderColor: COLORS.borderSubtle, alignItems: "center" },
+  engineLabel: { color: COLORS.mutedDark, fontSize: 11, fontWeight: "700" },
+  engineValue: { marginTop: 4, color: COLORS.green, fontSize: 20, fontWeight: "900" },
+
   whyBox: {
     marginTop: 12,
     padding: 12,
@@ -395,7 +395,4 @@ const s = StyleSheet.create({
   diagramPlaceholderText: { color: COLORS.muted, fontWeight: "800" },
   diagramPlaceholderSub: { color: COLORS.mutedDarker, marginTop: 6, fontSize: 12, fontWeight: "700" },
 
-  quickActions: { marginTop: 14, flexDirection: "row", gap: 10 },
-  actionBtn: { flex: 1, paddingVertical: 14, borderRadius: 16, backgroundColor: COLORS.bg, borderWidth: 1, borderColor: COLORS.border, alignItems: "center" },
-  actionBtnText: { color: COLORS.white, fontWeight: "900" },
 });

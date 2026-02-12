@@ -173,19 +173,24 @@ export default function MapScreen({ pins, setPins }) {
           rotateEnabled={false}
           toolbarEnabled={false}
         >
-          {pins.map((p) => (
-            <Marker
-              key={p.id}
-              coordinate={p.coordinate}
-              title={p.title}
-              description={`${p.type}${p.notes ? ` • ${p.notes}` : ""}`}
-              onPress={() => {
-                setSelectedPinId(p.id);
-                setIsAddMode(false);
-                setDraftCoord(null);
-              }}
-            />
-          ))}
+          {pins.map((p) => {
+            const pinType = PIN_TYPES.find((t) => t.key === p.type);
+            const pinColor = pinType?.color || "#2ECC71";
+            return (
+              <Marker
+                key={p.id}
+                coordinate={p.coordinate}
+                title={p.title}
+                description={`${p.type}${p.notes ? ` • ${p.notes}` : ""}`}
+                pinColor={pinColor}
+                onPress={() => {
+                  setSelectedPinId(p.id);
+                  setIsAddMode(false);
+                  setDraftCoord(null);
+                }}
+              />
+            );
+          })}
           {isAddMode && draftCoord ? <Marker coordinate={draftCoord} pinColor="#2ECC71" title="New Pin" /> : null}
         </MapView>
 

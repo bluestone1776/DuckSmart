@@ -94,6 +94,13 @@ function IdentifyHome({ navigation }) {
           </Pressable>
         </View>
 
+        <View style={{ marginTop: 14, padding: 14, borderRadius: 16, backgroundColor: "#0E1A12", borderWidth: 1, borderColor: "#2ECC71" }}>
+          <Text style={{ color: "#2ECC71", fontWeight: "900", fontSize: 13 }}>Free Version</Text>
+          <Text style={{ color: "#BDBDBD", fontWeight: "800", fontSize: 13, marginTop: 6, lineHeight: 18 }}>
+            Upgrade to the paid version for more species, detailed images, range maps, and AI-powered identification.
+          </Text>
+        </View>
+
         <IdentifyCard title="Quick Search">
           <TextInput
             value={query}

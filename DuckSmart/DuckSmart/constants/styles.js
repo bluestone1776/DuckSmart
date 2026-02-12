@@ -109,11 +109,16 @@ export const sharedStyles = StyleSheet.create({
   miniMapText: { color: COLORS.white, fontWeight: "900" },
   miniMapMuted: { color: COLORS.mutedDark, marginTop: 6, fontWeight: "800" },
 
-  presetRow: { flexDirection: "row", flexWrap: "wrap", gap: 10, marginTop: 12, justifyContent: "center" },
-  presetBtn: { paddingVertical: 10, paddingHorizontal: 14, borderRadius: 14, backgroundColor: COLORS.bgDeep, borderWidth: 1, borderColor: COLORS.border },
-  presetBtnActive: { borderColor: COLORS.green, backgroundColor: COLORS.greenBg },
-  presetBtnText: { color: COLORS.white, fontWeight: "900" },
-  presetBtnTextActive: { color: COLORS.green },
+  sliderRow: { flexDirection: "row", alignItems: "center", gap: 12, marginTop: 14, paddingHorizontal: 4 },
+  stepBtn: { width: 42, height: 42, borderRadius: 12, borderWidth: 1, borderColor: COLORS.border, backgroundColor: COLORS.bgDeep, alignItems: "center", justifyContent: "center" },
+  stepBtnText: { color: COLORS.white, fontSize: 20, fontWeight: "900" },
+  sliderTrack: { flex: 1, height: 10, borderRadius: 5, backgroundColor: COLORS.bgDeep, borderWidth: 1, borderColor: COLORS.borderSubtle, overflow: "hidden" },
+  sliderFill: { height: "100%", backgroundColor: COLORS.green, borderRadius: 5 },
+
+  weatherBriefRow: { flexDirection: "row", gap: 10, marginTop: 10 },
+  weatherBriefPill: { flex: 1, padding: 12, borderRadius: 14, backgroundColor: COLORS.bgDeep, borderWidth: 1, borderColor: COLORS.borderSubtle },
+  weatherBriefLabel: { color: COLORS.mutedDark, fontSize: 11, fontWeight: "700" },
+  weatherBriefValue: { marginTop: 6, color: COLORS.white, fontSize: 15, fontWeight: "900" },
 
   photoRow: { flexDirection: "row", gap: 10, paddingVertical: 6, paddingRight: 6 },
   photoCard: { width: 130, borderRadius: 16, overflow: "hidden", borderWidth: 1, borderColor: COLORS.borderSubtle, backgroundColor: COLORS.bgDeepest },
