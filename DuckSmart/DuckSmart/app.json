@@ -26,6 +26,9 @@
     },
     "web": {
       "favicon": "./assets/favicon.png"
+    },
+    "extra": {
+      "openWeatherMapApiKey": "54a32367fdf9d9d889a75ab2779ec498"
     }
   }
 }

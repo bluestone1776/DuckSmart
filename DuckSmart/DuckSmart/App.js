@@ -1,9 +1,11 @@
-import React, { useState } from "react";
+import React, { useState, useEffect, useCallback } from "react";
 import { NavigationContainer } from "@react-navigation/native";
 import { createBottomTabNavigator } from "@react-navigation/bottom-tabs";
 import { Ionicons } from "@expo/vector-icons";
 
 import { COLORS } from "./constants/theme";
+import { WeatherProvider } from "./context/WeatherContext";
+import { saveLogs, loadLogs, savePins, loadPins } from "./services/storage";
 
 import TodayScreen from "./screens/TodayScreen";
 import MapScreen from "./screens/MapScreen";
@@ -21,23 +23,47 @@ const TAB_ICONS = {
   Identify: { focused: "search", unfocused: "search-outline" },
 };
 
+const SEED_PINS = [
+  {
+    id: "seed-1",
+    title: "North Marsh Edge",
+    type: "Spot",
+    notes: "Good flight line at first light.",
+    coordinate: { latitude: 33.994, longitude: -83.382 },
+    createdAt: Date.now() - 1000 * 60 * 60 * 24,
+  },
+];
+
 export default function App() {
   const [logs, setLogs] = useState([]);
-  const [pins, setPins] = useState([
-    {
-      id: "seed-1",
-      title: "North Marsh Edge",
-      type: "Spot",
-      notes: "Good flight line at first light.",
-      coordinate: { latitude: 33.994, longitude: -83.382 },
-      createdAt: Date.now() - 1000 * 60 * 60 * 24,
-    },
-  ]);
+  const [pins, setPins] = useState(SEED_PINS);
+  const [ready, setReady] = useState(false);
 
-  const addLog = (entry) => setLogs((prev) => [entry, ...prev]);
-  const deleteLog = (id) => setLogs((prev) => prev.filter((l) => l.id !== id));
+  // Load persisted data on startup
+  useEffect(() => {
+    (async () => {
+      const [savedLogs, savedPins] = await Promise.all([loadLogs(), loadPins()]);
+      if (savedLogs.length > 0) setLogs(savedLogs);
+      if (savedPins) setPins(savedPins);
+      setReady(true);
+    })();
+  }, []);
+
+  // Persist logs whenever they change (skip initial empty state)
+  useEffect(() => {
+    if (ready) saveLogs(logs);
+  }, [logs, ready]);
+
+  // Persist pins whenever they change
+  useEffect(() => {
+    if (ready) savePins(pins);
+  }, [pins, ready]);
+
+  const addLog = useCallback((entry) => setLogs((prev) => [entry, ...prev]), []);
+  const deleteLog = useCallback((id) => setLogs((prev) => prev.filter((l) => l.id !== id)), []);
 
   return (
+    <WeatherProvider>
     <NavigationContainer>
       <Tab.Navigator
         screenOptions={({ route }) => ({
@@ -67,5 +93,6 @@ export default function App() {
         <Tab.Screen name="Identify" component={IdentifyStackScreen} />
       </Tab.Navigator>
     </NavigationContainer>
+    </WeatherProvider>
   );
 }

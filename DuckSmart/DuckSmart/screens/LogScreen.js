@@ -24,8 +24,10 @@ import { clamp } from "../utils/helpers";
 import Card from "../components/Card";
 import Chip from "../components/Chip";
 import Header from "../components/Header";
+import { useWeather } from "../context/WeatherContext";
 
 export default function LogScreen({ addLog }) {
+  const { weather: liveWeather } = useWeather();
   const [environment, setEnvironment] = useState("Marsh");
   const [spread, setSpread] = useState("J-Hook");
   const [huntScore, setHuntScore] = useState(72);
@@ -198,19 +200,25 @@ export default function LogScreen({ addLog }) {
             <View style={styles.weatherBriefRow}>
               <View style={styles.weatherBriefPill}>
                 <Text style={styles.weatherBriefLabel}>Temp</Text>
-                <Text style={styles.weatherBriefValue}>--°F</Text>
+                <Text style={styles.weatherBriefValue}>
+                  {liveWeather?.tempF != null ? `${liveWeather.tempF}°F` : "--°F"}
+                </Text>
               </View>
               <View style={styles.weatherBriefPill}>
                 <Text style={styles.weatherBriefLabel}>Barometric</Text>
-                <Text style={styles.weatherBriefValue}>-- inHg</Text>
+                <Text style={styles.weatherBriefValue}>
+                  {liveWeather?.pressureInHg != null ? `${liveWeather.pressureInHg.toFixed(2)} inHg` : "-- inHg"}
+                </Text>
               </View>
               <View style={styles.weatherBriefPill}>
                 <Text style={styles.weatherBriefLabel}>Wind</Text>
-                <Text style={styles.weatherBriefValue}>-- mph</Text>
+                <Text style={styles.weatherBriefValue}>
+                  {liveWeather?.windMph != null ? `${liveWeather.windMph} mph` : "-- mph"}
+                </Text>
               </View>
             </View>
             <Text style={{ color: "#7A7A7A", fontSize: 12, fontWeight: "700", marginTop: 10, lineHeight: 18 }}>
-              Auto-populated from weather API in a future update. Manual entry coming soon.
+              Live weather from your current location.
             </Text>
           </Card>
 

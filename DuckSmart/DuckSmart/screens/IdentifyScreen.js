@@ -8,10 +8,12 @@ import {
   ScrollView,
   StatusBar,
   TextInput,
+  Image,
 } from "react-native";
 import { createNativeStackNavigator } from "@react-navigation/native-stack";
 
 import { COLORS } from "../constants/theme";
+import { ASSETS } from "../constants/assets";
 import {
   IDENTIFY_SPECIES,
   IDENTIFY_REGIONS,
@@ -173,6 +175,9 @@ function IdentifyHome({ navigation }) {
                 onPress={() => navigation.navigate("SpeciesDetail", { id: species.id })}
                 style={s.matchRow}
               >
+                {ASSETS.ducks[species.name] ? (
+                  <Image source={ASSETS.ducks[species.name]} style={s.matchThumb} resizeMode="cover" />
+                ) : null}
                 <View style={{ flex: 1 }}>
                   <Text style={s.matchTitle}>{species.name}</Text>
                   <Text style={s.matchSub}>
@@ -237,6 +242,12 @@ function SpeciesDetail({ route, navigation }) {
             </Text>
           </View>
         </View>
+
+        {ASSETS.ducks[sp.name] ? (
+          <View style={s.heroWrap}>
+            <Image source={ASSETS.ducks[sp.name]} style={s.heroImage} resizeMode="cover" />
+          </View>
+        ) : null}
 
         <IdentifyCard title="At-a-glance">
           <View style={s.pillRow}>
@@ -372,6 +383,7 @@ const s = StyleSheet.create({
   sheetPill: { paddingVertical: 6, paddingHorizontal: 10, borderRadius: 999, borderWidth: 1, borderColor: COLORS.border },
   sheetPillText: { color: COLORS.muted, fontSize: 12, fontWeight: "800" },
 
+  matchThumb: { width: 52, height: 52, borderRadius: 14, borderWidth: 1, borderColor: COLORS.borderSubtle, backgroundColor: COLORS.bgDeep },
   matchRow: { flexDirection: "row", gap: 10, alignItems: "center", paddingVertical: 12, borderTopWidth: 1, borderTopColor: COLORS.borderSubtle },
   matchTitle: { color: COLORS.white, fontWeight: "900", fontSize: 15 },
   matchSub: { color: COLORS.muted, marginTop: 4, fontWeight: "800" },
@@ -395,6 +407,9 @@ const s = StyleSheet.create({
   noteTextMuted: { color: COLORS.mutedDark, fontSize: 13, lineHeight: 18, fontWeight: "700" },
 
   // Detail
+  heroWrap: { marginTop: 14, borderRadius: 18, overflow: "hidden", borderWidth: 1, borderColor: COLORS.borderSubtle, backgroundColor: COLORS.bgDeepest },
+  heroImage: { width: "100%", height: 200 },
+
   detailHeader: { flexDirection: "row", alignItems: "center", gap: 12, marginTop: 6 },
   backBtn: { width: 42, height: 42, borderRadius: 12, borderWidth: 1, borderColor: COLORS.border, backgroundColor: COLORS.bg, alignItems: "center", justifyContent: "center" },
   backBtnText: { color: COLORS.white, fontSize: 22, fontWeight: "900", marginTop: -2 },

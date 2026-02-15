@@ -1,4 +1,4 @@
-import React, { useMemo, useState } from "react";
+import React, { useMemo, useState, useCallback } from "react";
 import {
   SafeAreaView,
   View,
@@ -7,6 +7,8 @@ import {
   Pressable,
   ScrollView,
   StatusBar,
+  RefreshControl,
+  ActivityIndicator,
 } from "react-native";
 import Svg, { Path, Circle, Text as SvgText } from "react-native-svg";
 import { COLORS } from "../constants/theme";
@@ -14,6 +16,7 @@ import { clamp } from "../utils/helpers";
 import { formatWind } from "../utils/helpers";
 import { scoreHuntToday } from "../utils/scoring";
 import { spreadRecommendation } from "../utils/spreads";
+import { useWeather } from "../context/WeatherContext";
 
 // --- Today-specific sub-components ---
 
@@ -105,34 +108,11 @@ function TodayHalfGauge({ value, size = 220 }) {
 // --- Main screen ---
 
 export default function TodayScreen() {
+  const { weather, loading, refresh } = useWeather();
+  const [refreshing, setRefreshing] = useState(false);
 
   const environments = ["Marsh", "Timber", "Field", "Open Water", "River"];
   const [environment, setEnvironment] = useState("Marsh");
-
-  const weather = useMemo(
-    () => ({
-      locationName: "Your Area",
-      tempF: 31,
-      feelsLikeF: 26,
-      windMph: 12,
-      windDeg: 315,
-      pressureInHg: 30.08,
-      deltaTemp24hF: -10,
-      deltaPressure3h: 0.06,
-      precipChance: 35,
-      cloudPct: 70,
-      sunrise: "7:32 AM",
-      sunset: "5:18 PM",
-      hourly: [
-        { t: "Now", temp: 31, precip: 25, wind: 12, gust: 18 },
-        { t: "1p", temp: 33, precip: 30, wind: 13, gust: 20 },
-        { t: "2p", temp: 34, precip: 35, wind: 14, gust: 22 },
-        { t: "3p", temp: 34, precip: 40, wind: 13, gust: 21 },
-        { t: "4p", temp: 32, precip: 30, wind: 11, gust: 17 },
-      ],
-    }),
-    []
-  );
 
   const hunt = useMemo(() => scoreHuntToday(weather), [weather]);
   const spread = useMemo(
@@ -140,10 +120,38 @@ export default function TodayScreen() {
     [environment, weather.windDeg]
   );
 
+  const onRefresh = useCallback(async () => {
+    setRefreshing(true);
+    await refresh();
+    setRefreshing(false);
+  }, [refresh]);
+
+  if (loading && !weather.tempF) {
+    return (
+      <SafeAreaView style={s.safe}>
+        <StatusBar barStyle="light-content" />
+        <View style={{ flex: 1, alignItems: "center", justifyContent: "center" }}>
+          <ActivityIndicator size="large" color={COLORS.green} />
+          <Text style={{ color: COLORS.muted, marginTop: 14, fontWeight: "800" }}>Loading weather...</Text>
+        </View>
+      </SafeAreaView>
+    );
+  }
+
   return (
     <SafeAreaView style={s.safe}>
       <StatusBar barStyle="light-content" />
-      <ScrollView contentContainerStyle={s.container}>
+      <ScrollView
+        contentContainerStyle={s.container}
+        refreshControl={
+          <RefreshControl
+            refreshing={refreshing}
+            onRefresh={onRefresh}
+            tintColor={COLORS.green}
+            colors={[COLORS.green]}
+          />
+        }
+      >
         {/* Header */}
         <View style={s.headerRow}>
           <View>
