@@ -107,7 +107,7 @@ function TodayHalfGauge({ value, size = 220 }) {
 
 // --- Main screen ---
 
-export default function TodayScreen() {
+export default function TodayScreen({ onLogout }) {
   const { weather, loading, refresh } = useWeather();
   const [refreshing, setRefreshing] = useState(false);
 
@@ -164,7 +164,7 @@ export default function TodayScreen() {
             </Text>
           </View>
 
-          <Pressable style={s.gearButton} onPress={() => {}}>
+          <Pressable style={s.gearButton} onPress={onLogout || (() => {})}>
             <Text style={s.gearText}>⚙︎</Text>
           </Pressable>
         </View>

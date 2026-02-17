@@ -14,7 +14,11 @@
     },
     "ios": {
       "supportsTablet": true,
-      "bundleIdentifier": "com.ducksmart.app"
+      "bundleIdentifier": "com.ducksmart.app",
+      "buildNumber": "1",
+      "infoPlist": {
+        "ITSAppUsesNonExemptEncryption": false
+      }
     },
     "android": {
       "adaptiveIcon": {
@@ -22,13 +26,30 @@
         "backgroundColor": "#000000"
       },
       "edgeToEdgeEnabled": true,
-      "package": "com.ducksmart.app"
+      "package": "com.ducksmart.app",
+      "versionCode": 1
     },
     "web": {
       "favicon": "./assets/favicon.png"
     },
     "extra": {
-      "openWeatherMapApiKey": "54a32367fdf9d9d889a75ab2779ec498"
-    }
+      "openWeatherMapApiKey": "54a32367fdf9d9d889a75ab2779ec498",
+      "firebase": {
+        "androidApiKey": "AIzaSyBnwwwpGQv_-UfdxPmDWbQM1tR7Z6obH74",
+        "iosApiKey": "AIzaSyAYuVXKtrMbp1D8pAy0EAFArONDrp6W-iY",
+        "authDomain": "ducksmart-9c80e.firebaseapp.com",
+        "projectId": "ducksmart-9c80e",
+        "storageBucket": "ducksmart-9c80e.firebasestorage.app",
+        "messagingSenderId": "747578003996",
+        "androidAppId": "1:747578003996:android:fa1b978454b9f99fca85d9",
+        "iosAppId": "1:747578003996:ios:7bef85dda10811b4ca85d9"
+      },
+      "eas": {
+        "projectId": "1e281451-6f41-4ee8-a71e-363eff7ee6ee"
+      }
+    },
+    "plugins": [
+      "expo-font"
+    ]
   }
 }

@@ -3,7 +3,7 @@ import { View, Text, Pressable, Image } from "react-native";
 import { sharedStyles as styles } from "../constants/styles";
 import { ASSETS } from "../constants/assets";
 
-export default function Header({ subtitle = "Today" }) {
+export default function Header({ subtitle = "Today", onGearPress }) {
   return (
     <View style={styles.headerRow}>
       <View style={{ flexDirection: "row", alignItems: "center", gap: 12 }}>
@@ -17,7 +17,7 @@ export default function Header({ subtitle = "Today" }) {
         </View>
       </View>
 
-      <Pressable style={styles.gearButton} onPress={() => {}}>
+      <Pressable style={styles.gearButton} onPress={onGearPress || (() => {})}>
         <Text style={styles.gearText}>⚙︎</Text>
       </Pressable>
     </View>

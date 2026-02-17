@@ -1,10 +1,12 @@
 import React, { useState, useEffect, useCallback } from "react";
+import { View, ActivityIndicator, Alert } from "react-native";
 import { NavigationContainer } from "@react-navigation/native";
 import { createBottomTabNavigator } from "@react-navigation/bottom-tabs";
 import { Ionicons } from "@expo/vector-icons";
 
 import { COLORS } from "./constants/theme";
 import { WeatherProvider } from "./context/WeatherContext";
+import { AuthProvider, useAuth } from "./context/AuthContext";
 import { saveLogs, loadLogs, savePins, loadPins } from "./services/storage";
 
 import TodayScreen from "./screens/TodayScreen";
@@ -12,6 +14,7 @@ import MapScreen from "./screens/MapScreen";
 import LogScreen from "./screens/LogScreen";
 import HistoryScreen from "./screens/HistoryScreen";
 import IdentifyStackScreen from "./screens/IdentifyScreen";
+import AuthScreen from "./screens/AuthScreen";
 
 const Tab = createBottomTabNavigator();
 
@@ -34,7 +37,10 @@ const SEED_PINS = [
   },
 ];
 
-export default function App() {
+// --- Main app (tabs + data) — only renders when authenticated ---
+
+function MainApp() {
+  const { logout } = useAuth();
   const [logs, setLogs] = useState([]);
   const [pins, setPins] = useState(SEED_PINS);
   const [ready, setReady] = useState(false);
@@ -49,7 +55,7 @@ export default function App() {
     })();
   }, []);
 
-  // Persist logs whenever they change (skip initial empty state)
+  // Persist logs whenever they change
   useEffect(() => {
     if (ready) saveLogs(logs);
   }, [logs, ready]);
@@ -61,6 +67,13 @@ export default function App() {
 
   const addLog = useCallback((entry) => setLogs((prev) => [entry, ...prev]), []);
   const deleteLog = useCallback((id) => setLogs((prev) => prev.filter((l) => l.id !== id)), []);
+
+  const handleLogout = useCallback(() => {
+    Alert.alert("Log Out", "Are you sure you want to log out?", [
+      { text: "Cancel", style: "cancel" },
+      { text: "Log Out", style: "destructive", onPress: () => logout() },
+    ]);
+  }, [logout]);
 
   return (
     <WeatherProvider>
@@ -86,13 +99,39 @@ export default function App() {
           },
         })}
       >
-        <Tab.Screen name="Today" component={TodayScreen} />
+        <Tab.Screen name="Today">{() => <TodayScreen onLogout={handleLogout} />}</Tab.Screen>
         <Tab.Screen name="Map">{() => <MapScreen pins={pins} setPins={setPins} />}</Tab.Screen>
-        <Tab.Screen name="Log">{() => <LogScreen addLog={addLog} />}</Tab.Screen>
-        <Tab.Screen name="History">{() => <HistoryScreen logs={logs} deleteLog={deleteLog} />}</Tab.Screen>
+        <Tab.Screen name="Log">{() => <LogScreen addLog={addLog} onLogout={handleLogout} />}</Tab.Screen>
+        <Tab.Screen name="History">{() => <HistoryScreen logs={logs} deleteLog={deleteLog} onLogout={handleLogout} />}</Tab.Screen>
         <Tab.Screen name="Identify" component={IdentifyStackScreen} />
       </Tab.Navigator>
     </NavigationContainer>
     </WeatherProvider>
+  );
+}
+
+// --- Auth gate — shows loading / login / main app ---
+
+function AuthGate() {
+  const { user, loading } = useAuth();
+
+  if (loading) {
+    return (
+      <View style={{ flex: 1, backgroundColor: COLORS.black, alignItems: "center", justifyContent: "center" }}>
+        <ActivityIndicator size="large" color={COLORS.green} />
+      </View>
+    );
+  }
+
+  return user ? <MainApp /> : <AuthScreen />;
+}
+
+// --- Root component ---
+
+export default function App() {
+  return (
+    <AuthProvider>
+      <AuthGate />
+    </AuthProvider>
   );
 }

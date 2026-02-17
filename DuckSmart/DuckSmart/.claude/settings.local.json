@@ -9,7 +9,8 @@
       "Bash(python:*)",
       "Bash(npx expo install:*)",
       "Bash(npm install:*)",
-      "Bash(ls:*)"
+      "Bash(ls:*)",
+      "Bash(grep:*)"
     ]
   }
 }

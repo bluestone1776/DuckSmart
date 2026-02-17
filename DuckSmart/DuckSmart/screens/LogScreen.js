@@ -26,7 +26,7 @@ import Chip from "../components/Chip";
 import Header from "../components/Header";
 import { useWeather } from "../context/WeatherContext";
 
-export default function LogScreen({ addLog }) {
+export default function LogScreen({ addLog, onLogout }) {
   const { weather: liveWeather } = useWeather();
   const [environment, setEnvironment] = useState("Marsh");
   const [spread, setSpread] = useState("J-Hook");
@@ -110,7 +110,7 @@ export default function LogScreen({ addLog }) {
       <StatusBar barStyle="light-content" />
       <KeyboardAvoidingView behavior={Platform.OS === "ios" ? "padding" : undefined} style={{ flex: 1 }}>
         <ScrollView contentContainerStyle={styles.container}>
-          <Header subtitle="Log Hunt" />
+          <Header subtitle="Log Hunt" onGearPress={onLogout} />
 
           <Card title="GPS Location">
             {mapRegion ? (

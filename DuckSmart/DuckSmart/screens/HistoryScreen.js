@@ -19,7 +19,7 @@ import { ASSETS } from "../constants/assets";
 import Card from "../components/Card";
 import Header from "../components/Header";
 
-export default function HistoryScreen({ logs, deleteLog }) {
+export default function HistoryScreen({ logs, deleteLog, onLogout }) {
   const [query, setQuery] = useState("");
   const [selectedId, setSelectedId] = useState(null);
   const selected = useMemo(() => logs.find((l) => l.id === selectedId) || null, [logs, selectedId]);
@@ -48,7 +48,7 @@ export default function HistoryScreen({ logs, deleteLog }) {
       <StatusBar barStyle="light-content" />
       <KeyboardAvoidingView behavior={Platform.OS === "ios" ? "padding" : undefined} style={{ flex: 1 }}>
         <ScrollView contentContainerStyle={styles.container}>
-          <Header subtitle="Hunt History" />
+          <Header subtitle="Hunt History" onGearPress={onLogout} />
 
           <Card title="Search">
             <TextInput
