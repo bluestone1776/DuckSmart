@@ -10,16 +10,29 @@ import {
   RefreshControl,
   ActivityIndicator,
   Alert,
+  Modal,
+  Image,
+  Dimensions,
 } from "react-native";
 import Svg, { Path, Circle, Text as SvgText } from "react-native-svg";
 import { COLORS } from "../constants/theme";
+import { ASSETS } from "../constants/assets";
 import { clamp } from "../utils/helpers";
 import { formatWind } from "../utils/helpers";
 import { scoreHuntToday } from "../utils/scoring";
-import { spreadRecommendation } from "../utils/spreads";
 import { useWeather } from "../context/WeatherContext";
 import { scheduleHuntAlerts, cancelHuntAlerts } from "../services/notifications";
+import {
+  WATER_TYPES,
+  WEATHER_OPTIONS,
+  SEASON_OPTIONS,
+  PRESSURE_OPTIONS,
+  SPECIES_OPTIONS,
+  recommendSpread,
+} from "../data/decoySpreadData";
 import AdBanner from "../components/AdBanner";
+
+const SCREEN_WIDTH = Dimensions.get("window").width;
 
 // --- Today-specific sub-components ---
 
@@ -108,6 +121,86 @@ function TodayHalfGauge({ value, size = 220 }) {
   );
 }
 
+// ---------------------------------------------------------------------------
+// Picker row — horizontal scrollable chips acting as a single-select
+// ---------------------------------------------------------------------------
+function PickerRow({ label, options, value, onChange }) {
+  return (
+    <View style={s.pickerSection}>
+      <Text style={s.pickerLabel}>{label}</Text>
+      <ScrollView horizontal showsHorizontalScrollIndicator={false}>
+        <View style={s.chipRow}>
+          {options.map((opt) => (
+            <TodayChip
+              key={opt}
+              label={opt}
+              selected={opt === value}
+              onPress={() => onChange(opt)}
+            />
+          ))}
+        </View>
+      </ScrollView>
+    </View>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Spread image popup modal
+// ---------------------------------------------------------------------------
+function SpreadImageModal({ visible, onClose, spread }) {
+  if (!spread) return null;
+  const img = ASSETS.decoys[spread.key];
+
+  return (
+    <Modal visible={visible} transparent animationType="fade" onRequestClose={onClose}>
+      <Pressable style={s.modalOverlay} onPress={onClose}>
+        <View style={s.modalContent}>
+          <Text style={s.modalTitle}>{spread.name}</Text>
+          <Text style={s.modalSubtitle}>{spread.type}</Text>
+
+          {img ? (
+            <Image
+              source={img}
+              style={s.modalImage}
+              resizeMode="contain"
+            />
+          ) : (
+            <View style={s.modalImagePlaceholder}>
+              <Text style={s.modalImagePlaceholderText}>Image not available</Text>
+            </View>
+          )}
+
+          <View style={s.modalInfoRow}>
+            <View style={s.modalInfoPill}>
+              <Text style={s.modalInfoLabel}>Decoys</Text>
+              <Text style={s.modalInfoValue}>{spread.decoyCount}</Text>
+            </View>
+            <View style={s.modalInfoPill}>
+              <Text style={s.modalInfoLabel}>Calling</Text>
+              <Text style={s.modalInfoValue}>{spread.calling}</Text>
+            </View>
+            <View style={s.modalInfoPill}>
+              <Text style={s.modalInfoLabel}>Best Time</Text>
+              <Text style={s.modalInfoValue}>{spread.bestTime}</Text>
+            </View>
+          </View>
+
+          <Text style={s.modalNotes}>{spread.notes}</Text>
+
+          <View style={s.modalMistakeBox}>
+            <Text style={s.modalMistakeLabel}>Common Mistake</Text>
+            <Text style={s.modalMistakeText}>{spread.mistakes}</Text>
+          </View>
+
+          <Pressable style={s.modalCloseBtn} onPress={onClose}>
+            <Text style={s.modalCloseBtnText}>Close</Text>
+          </Pressable>
+        </View>
+      </Pressable>
+    </Modal>
+  );
+}
+
 // --- Main screen ---
 
 export default function TodayScreen({ onLogout }) {
@@ -115,13 +208,32 @@ export default function TodayScreen({ onLogout }) {
   const [refreshing, setRefreshing] = useState(false);
   const [alertsOn, setAlertsOn] = useState(false);
 
+  // Hunt probability environment selector
   const environments = ["Marsh", "Timber", "Field", "Open Water", "River"];
   const [environment, setEnvironment] = useState("Marsh");
 
   const hunt = useMemo(() => scoreHuntToday(weather), [weather]);
-  const spread = useMemo(
-    () => spreadRecommendation({ environment, windDeg: weather.windDeg }),
-    [environment, weather.windDeg]
+
+  // ---------------------------------------------------------------------------
+  // Decoy Spread Advisor state
+  // ---------------------------------------------------------------------------
+  const [dWater, setDWater] = useState(WATER_TYPES[0]);
+  const [dWeather, setDWeather] = useState(WEATHER_OPTIONS[0]);
+  const [dSeason, setDSeason] = useState(SEASON_OPTIONS[0]);
+  const [dPressure, setDPressure] = useState(PRESSURE_OPTIONS[0]);
+  const [dSpecies, setDSpecies] = useState(SPECIES_OPTIONS[0]);
+  const [spreadModal, setSpreadModal] = useState(null); // spread object or null
+
+  const recommendation = useMemo(
+    () =>
+      recommendSpread({
+        waterType: dWater,
+        weather: dWeather,
+        season: dSeason,
+        pressure: dPressure,
+        species: dSpecies,
+      }),
+    [dWater, dWeather, dSeason, dPressure, dSpecies]
   );
 
   const onRefresh = useCallback(async () => {
@@ -158,9 +270,20 @@ export default function TodayScreen({ onLogout }) {
     );
   }
 
+  const primary = recommendation.primary;
+  const addon = recommendation.addon;
+
   return (
     <SafeAreaView style={s.safe}>
       <StatusBar barStyle="light-content" />
+
+      {/* Spread image popup */}
+      <SpreadImageModal
+        visible={!!spreadModal}
+        onClose={() => setSpreadModal(null)}
+        spread={spreadModal}
+      />
+
       <ScrollView
         contentContainerStyle={s.container}
         refreshControl={
@@ -282,7 +405,7 @@ export default function TodayScreen({ onLogout }) {
           </ScrollView>
         </TodayCard>
 
-        {/* Environment selector (moved below Hourly Snapshot per client request) */}
+        {/* Environment selector (for hunt probability) */}
         <View style={{ marginTop: 14 }}>
           <Text style={s.sectionLabel}>Environment</Text>
           <ScrollView horizontal showsHorizontalScrollIndicator={false}>
@@ -299,28 +422,87 @@ export default function TodayScreen({ onLogout }) {
           </ScrollView>
         </View>
 
-        {/* Spread recommendation */}
-        <TodayCard title="Recommended Spread Right Now">
-          <Text style={s.spreadName}>{spread.name}</Text>
-          <Text style={s.spreadDetail}>{spread.detail}</Text>
+        {/* ================================================================
+            DECOY SPREAD ADVISOR — Selection → Recommendation → Image Popup
+            ================================================================ */}
+        <TodayCard title="Decoy Spread Advisor">
 
-          <View style={s.spreadActionsRow}>
-            <Pressable style={s.primaryBtn} onPress={() => {}}>
-              <Text style={s.primaryBtnText}>View Diagram</Text>
-            </Pressable>
-            <Pressable style={s.secondaryBtn} onPress={() => {}}>
-              <Text style={s.secondaryBtnText}>Save to Hunt Log</Text>
-            </Pressable>
-          </View>
+          {/* Selection pickers */}
+          <PickerRow label="Water Type" options={WATER_TYPES} value={dWater} onChange={setDWater} />
+          <PickerRow label="Weather" options={WEATHER_OPTIONS} value={dWeather} onChange={setDWeather} />
+          <PickerRow label="Season" options={SEASON_OPTIONS} value={dSeason} onChange={setDSeason} />
+          <PickerRow label="Hunting Pressure" options={PRESSURE_OPTIONS} value={dPressure} onChange={setDPressure} />
+          <PickerRow label="Target Species" options={SPECIES_OPTIONS} value={dSpecies} onChange={setDSpecies} />
 
-          <View style={s.diagramPlaceholder}>
-            <Text style={s.diagramPlaceholderText}>
-              Diagram preview placeholder
-            </Text>
-            <Text style={s.diagramPlaceholderSub}>
-              (We'll wire this to your spread images next.)
-            </Text>
-          </View>
+          {/* Recommendation result */}
+          {primary && (
+            <View style={s.recBox}>
+              <Text style={s.recLabel}>Recommended Spread</Text>
+
+              <Pressable
+                style={s.recCard}
+                onPress={() => setSpreadModal(primary)}
+              >
+                {ASSETS.decoys[primary.key] && (
+                  <Image
+                    source={ASSETS.decoys[primary.key]}
+                    style={s.recThumb}
+                    resizeMode="cover"
+                  />
+                )}
+                <View style={s.recInfo}>
+                  <Text style={s.recName}>{primary.name}</Text>
+                  <Text style={s.recType}>{primary.type}</Text>
+                  <Text style={s.recDetail} numberOfLines={2}>
+                    {primary.notes}
+                  </Text>
+                  <View style={s.recMetaRow}>
+                    <Text style={s.recMeta}>Decoys: {primary.decoyCount}</Text>
+                    <Text style={s.recMeta}>Match: {primary.score}%</Text>
+                  </View>
+                </View>
+                <Text style={s.recChevron}>›</Text>
+              </Pressable>
+
+              {/* Runner up spreads */}
+              {recommendation.all.length > 1 && (
+                <View style={s.runnersSection}>
+                  <Text style={s.runnersTitle}>Other Options</Text>
+                  {recommendation.all.slice(1, 4).map((sp) => (
+                    <Pressable
+                      key={sp.key}
+                      style={s.runnerRow}
+                      onPress={() => setSpreadModal(sp)}
+                    >
+                      <View style={{ flex: 1 }}>
+                        <Text style={s.runnerName}>{sp.name}</Text>
+                        <Text style={s.runnerType}>{sp.type} • {sp.decoyCount} decoys</Text>
+                      </View>
+                      <Text style={s.runnerScore}>{sp.score}%</Text>
+                      <Text style={s.recChevron}>›</Text>
+                    </Pressable>
+                  ))}
+                </View>
+              )}
+
+              {/* Confidence Spread add-on tip */}
+              {addon && (
+                <Pressable
+                  style={s.addonTip}
+                  onPress={() => setSpreadModal(addon)}
+                >
+                  <Text style={s.addonIcon}>+</Text>
+                  <View style={{ flex: 1 }}>
+                    <Text style={s.addonTitle}>Add a Confidence Spread</Text>
+                    <Text style={s.addonText}>
+                      Mix {addon.decoyCount} heron, egret, or coot decoys for extra realism.
+                    </Text>
+                  </View>
+                  <Text style={s.recChevron}>›</Text>
+                </Pressable>
+              )}
+            </View>
+          )}
         </TodayCard>
 
         {/* Ad Banner — free version only */}
@@ -427,18 +609,6 @@ const s = StyleSheet.create({
   hourlyTemp: { color: COLORS.white, fontWeight: "900", fontSize: 22, marginTop: 6, marginBottom: 6 },
   hourlySmall: { color: COLORS.mutedDark, fontSize: 11, fontWeight: "700" },
 
-  spreadName: { color: COLORS.white, fontSize: 18, fontWeight: "900" },
-  spreadDetail: { color: COLORS.muted, marginTop: 6, fontSize: 13, lineHeight: 18 },
-  spreadActionsRow: { flexDirection: "row", gap: 10, marginTop: 12 },
-  primaryBtn: { flex: 1, paddingVertical: 12, borderRadius: 14, backgroundColor: COLORS.greenBg, borderWidth: 1, borderColor: COLORS.green, alignItems: "center" },
-  primaryBtnText: { color: COLORS.green, fontWeight: "900" },
-  secondaryBtn: { flex: 1, paddingVertical: 12, borderRadius: 14, backgroundColor: COLORS.bgDeep, borderWidth: 1, borderColor: COLORS.border, alignItems: "center" },
-  secondaryBtnText: { color: COLORS.white, fontWeight: "900" },
-
-  diagramPlaceholder: { marginTop: 12, height: 120, borderRadius: 14, borderWidth: 1, borderColor: COLORS.borderSubtle, backgroundColor: COLORS.bgDeepest, alignItems: "center", justifyContent: "center" },
-  diagramPlaceholderText: { color: COLORS.muted, fontWeight: "800" },
-  diagramPlaceholderSub: { color: COLORS.mutedDarker, marginTop: 6, fontSize: 12, fontWeight: "700" },
-
   alertBtn: {
     marginTop: 10,
     paddingVertical: 12,
@@ -451,6 +621,154 @@ const s = StyleSheet.create({
   alertBtnActive: { borderColor: COLORS.green, backgroundColor: COLORS.greenBg },
   alertBtnText: { color: COLORS.muted, fontWeight: "900", fontSize: 13 },
   alertBtnTextActive: { color: COLORS.green },
+
+  // ---- Decoy Spread Advisor ----
+  pickerSection: { marginTop: 12 },
+  pickerLabel: { color: COLORS.muted, fontSize: 12, fontWeight: "900", marginBottom: 8 },
+
+  recBox: { marginTop: 16 },
+  recLabel: { color: COLORS.green, fontSize: 13, fontWeight: "900", marginBottom: 10 },
+
+  recCard: {
+    flexDirection: "row",
+    alignItems: "center",
+    padding: 10,
+    borderRadius: 14,
+    backgroundColor: COLORS.bgDeep,
+    borderWidth: 1,
+    borderColor: COLORS.green,
+  },
+  recThumb: {
+    width: 70,
+    height: 70,
+    borderRadius: 10,
+    backgroundColor: COLORS.bgDeepest,
+  },
+  recInfo: { flex: 1, marginLeft: 12 },
+  recName: { color: COLORS.white, fontSize: 16, fontWeight: "900" },
+  recType: { color: COLORS.green, fontSize: 12, fontWeight: "700", marginTop: 2 },
+  recDetail: { color: COLORS.muted, fontSize: 12, fontWeight: "700", marginTop: 4, lineHeight: 16 },
+  recMetaRow: { flexDirection: "row", gap: 12, marginTop: 6 },
+  recMeta: { color: COLORS.mutedDark, fontSize: 11, fontWeight: "800" },
+  recChevron: { color: COLORS.mutedDark, fontSize: 24, fontWeight: "700", marginLeft: 4 },
+
+  runnersSection: { marginTop: 12 },
+  runnersTitle: { color: COLORS.muted, fontSize: 12, fontWeight: "900", marginBottom: 8 },
+  runnerRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    paddingVertical: 10,
+    paddingHorizontal: 12,
+    borderRadius: 12,
+    backgroundColor: COLORS.bgDeep,
+    borderWidth: 1,
+    borderColor: COLORS.borderSubtle,
+    marginBottom: 6,
+  },
+  runnerName: { color: COLORS.white, fontSize: 14, fontWeight: "800" },
+  runnerType: { color: COLORS.mutedDark, fontSize: 11, fontWeight: "700", marginTop: 2 },
+  runnerScore: { color: COLORS.muted, fontSize: 13, fontWeight: "900", marginRight: 4 },
+
+  addonTip: {
+    flexDirection: "row",
+    alignItems: "center",
+    marginTop: 10,
+    padding: 12,
+    borderRadius: 14,
+    backgroundColor: COLORS.bgDeep,
+    borderWidth: 1,
+    borderColor: COLORS.borderSubtle,
+    borderStyle: "dashed",
+  },
+  addonIcon: { color: COLORS.green, fontSize: 22, fontWeight: "900", marginRight: 10 },
+  addonTitle: { color: COLORS.white, fontSize: 13, fontWeight: "800" },
+  addonText: { color: COLORS.mutedDark, fontSize: 12, fontWeight: "700", marginTop: 2 },
+
+  // ---- Spread image modal ----
+  modalOverlay: {
+    flex: 1,
+    backgroundColor: "rgba(0,0,0,0.92)",
+    justifyContent: "center",
+    alignItems: "center",
+    padding: 20,
+  },
+  modalContent: {
+    width: "100%",
+    maxWidth: 400,
+    backgroundColor: COLORS.bg,
+    borderRadius: 20,
+    borderWidth: 1,
+    borderColor: COLORS.border,
+    padding: 18,
+    alignItems: "center",
+  },
+  modalTitle: { color: COLORS.white, fontSize: 22, fontWeight: "900" },
+  modalSubtitle: { color: COLORS.green, fontSize: 13, fontWeight: "700", marginTop: 4 },
+  modalImage: {
+    width: SCREEN_WIDTH - 80,
+    height: SCREEN_WIDTH - 80,
+    maxWidth: 360,
+    maxHeight: 360,
+    borderRadius: 14,
+    marginTop: 16,
+    backgroundColor: COLORS.bgDeep,
+  },
+  modalImagePlaceholder: {
+    width: SCREEN_WIDTH - 80,
+    height: 200,
+    borderRadius: 14,
+    marginTop: 16,
+    backgroundColor: COLORS.bgDeep,
+    alignItems: "center",
+    justifyContent: "center",
+    borderWidth: 1,
+    borderColor: COLORS.borderSubtle,
+  },
+  modalImagePlaceholderText: { color: COLORS.mutedDark, fontWeight: "800" },
+
+  modalInfoRow: { flexDirection: "row", gap: 8, marginTop: 14, width: "100%" },
+  modalInfoPill: {
+    flex: 1,
+    padding: 10,
+    borderRadius: 12,
+    backgroundColor: COLORS.bgDeep,
+    borderWidth: 1,
+    borderColor: COLORS.borderSubtle,
+    alignItems: "center",
+  },
+  modalInfoLabel: { color: COLORS.mutedDark, fontSize: 10, fontWeight: "700" },
+  modalInfoValue: { color: COLORS.white, fontSize: 14, fontWeight: "900", marginTop: 4 },
+
+  modalNotes: {
+    color: COLORS.muted,
+    fontSize: 13,
+    fontWeight: "700",
+    lineHeight: 18,
+    marginTop: 14,
+    textAlign: "center",
+  },
+  modalMistakeBox: {
+    marginTop: 12,
+    width: "100%",
+    padding: 10,
+    borderRadius: 12,
+    backgroundColor: "rgba(217, 76, 76, 0.08)",
+    borderWidth: 1,
+    borderColor: "rgba(217, 76, 76, 0.3)",
+  },
+  modalMistakeLabel: { color: COLORS.red, fontSize: 11, fontWeight: "900" },
+  modalMistakeText: { color: COLORS.muted, fontSize: 12, fontWeight: "700", marginTop: 4 },
+
+  modalCloseBtn: {
+    marginTop: 16,
+    paddingVertical: 12,
+    paddingHorizontal: 40,
+    borderRadius: 14,
+    backgroundColor: COLORS.greenBg,
+    borderWidth: 1,
+    borderColor: COLORS.green,
+  },
+  modalCloseBtnText: { color: COLORS.green, fontWeight: "900", fontSize: 15 },
 
   disclaimer: { marginTop: 18, color: COLORS.mutedDarker, fontSize: 11, lineHeight: 17, fontWeight: "700", textAlign: "center", paddingHorizontal: 8 },
 });

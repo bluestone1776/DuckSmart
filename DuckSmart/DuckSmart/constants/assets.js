@@ -10,6 +10,16 @@ export const ASSETS = {
     "V-Spread": require("../assets/spread_v_spread.png"),
     "Timber Pocket": require("../assets/spread_timber_pocket.png"),
   },
+  decoys: {
+    j_hook: require("../assets/decoy_j_hook.png"),
+    u_shape: require("../assets/decoy_u_shape.png"),
+    v_spread: require("../assets/decoy_v_spread.png"),
+    line_spread: require("../assets/decoy_line_spread.png"),
+    open_water_raft: require("../assets/decoy_open_water_raft.png"),
+    shoreline_pocket: require("../assets/decoy_shoreline_pocket.png"),
+    feeding_spread: require("../assets/decoy_feeding_spread.png"),
+    confidence_spread: require("../assets/decoy_confidence_spread.png"),
+  },
   ducks: {
     Mallard: require("../assets/duck_mallard.png"),
     "Wood Duck": require("../assets/duck_wood_duck.png"),
