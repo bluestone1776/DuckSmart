@@ -1,6 +1,6 @@
 // DuckSmart — Auth Screen
 //
-// Login / Sign Up screen with email + password.
+// Login / Sign Up screen with email + password, Google, and Apple sign-in.
 // Dark theme matching the rest of the app.
 
 import React, { useState } from "react";
@@ -21,8 +21,36 @@ import { COLORS } from "../constants/theme";
 import { ASSETS } from "../constants/assets";
 import { useAuth } from "../context/AuthContext";
 
+// ---------------------------------------------------------------------------
+// SVG-like icon components for Google & Apple (pure RN, no extra dep)
+// ---------------------------------------------------------------------------
+
+function GoogleIcon() {
+  return (
+    <Text style={{ fontSize: 20, fontWeight: "800" }}>
+      <Text style={{ color: "#4285F4" }}>G</Text>
+    </Text>
+  );
+}
+
+function AppleIcon() {
+  return (
+    <Text style={{ fontSize: 22, fontWeight: "800", color: COLORS.white }}>
+      {"\uF8FF"}
+    </Text>
+  );
+}
+
 export default function AuthScreen() {
-  const { login, signup, loading, error, clearError } = useAuth();
+  const {
+    login,
+    signup,
+    loading,
+    error,
+    clearError,
+    loginWithGoogle,
+    loginWithApple,
+  } = useAuth();
 
   const [mode, setMode] = useState("login"); // "login" | "signup"
   const [email, setEmail] = useState("");
@@ -41,6 +69,9 @@ export default function AuthScreen() {
       await signup(email.trim(), password);
     }
   }
+
+  // Always show Google; show Apple only on iOS
+  const showApple = Platform.OS === "ios";
 
   return (
     <SafeAreaView style={s.safe}>
@@ -68,6 +99,36 @@ export default function AuthScreen() {
               <Text style={s.errorText}>{error}</Text>
             </View>
           ) : null}
+
+          {/* ---- Social Sign-In Buttons (always visible) ---- */}
+          <Pressable
+            style={[s.socialBtn, s.googleBtn, loading && s.submitBtnDisabled]}
+            onPress={loginWithGoogle}
+            disabled={loading}
+          >
+            <GoogleIcon />
+            <Text style={s.socialBtnText}>Continue with Google</Text>
+          </Pressable>
+
+          {showApple && (
+            <Pressable
+              style={[s.socialBtn, s.appleBtn, loading && s.submitBtnDisabled]}
+              onPress={loginWithApple}
+              disabled={loading}
+            >
+              <AppleIcon />
+              <Text style={[s.socialBtnText, { color: COLORS.white }]}>
+                Continue with Apple
+              </Text>
+            </Pressable>
+          )}
+
+          {/* Divider */}
+          <View style={s.dividerRow}>
+            <View style={s.dividerLine} />
+            <Text style={s.dividerText}>or</Text>
+            <View style={s.dividerLine} />
+          </View>
 
           {/* Email field */}
           <Text style={s.label}>Email</Text>
@@ -150,6 +211,50 @@ const s = StyleSheet.create({
     marginBottom: 16,
   },
   errorText: { color: COLORS.red, fontWeight: "800", fontSize: 13 },
+
+  // ---- Social Buttons ----
+  socialBtn: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 10,
+    paddingVertical: 14,
+    borderRadius: 14,
+    borderWidth: 1,
+    marginBottom: 10,
+  },
+  googleBtn: {
+    backgroundColor: COLORS.bgDeep,
+    borderColor: COLORS.border,
+  },
+  appleBtn: {
+    backgroundColor: "#000000",
+    borderColor: COLORS.border,
+  },
+  socialBtnText: {
+    fontWeight: "900",
+    fontSize: 15,
+    color: COLORS.white,
+  },
+
+  // ---- Divider ----
+  dividerRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    marginTop: 6,
+    marginBottom: 10,
+  },
+  dividerLine: {
+    flex: 1,
+    height: 1,
+    backgroundColor: COLORS.border,
+  },
+  dividerText: {
+    color: COLORS.mutedDark,
+    fontWeight: "800",
+    fontSize: 12,
+    marginHorizontal: 12,
+  },
 
   label: { color: COLORS.muted, fontSize: 12, fontWeight: "900", marginBottom: 8, marginTop: 12 },
   input: {

@@ -16,6 +16,7 @@
       "supportsTablet": true,
       "bundleIdentifier": "com.ducksmart.app",
       "buildNumber": "1",
+      "usesAppleSignIn": true,
       "infoPlist": {
         "ITSAppUsesNonExemptEncryption": false
       }
@@ -42,7 +43,8 @@
         "storageBucket": "ducksmart-9c80e.firebasestorage.app",
         "messagingSenderId": "747578003996",
         "androidAppId": "1:747578003996:android:fa1b978454b9f99fca85d9",
-        "iosAppId": "1:747578003996:ios:7bef85dda10811b4ca85d9"
+        "iosAppId": "1:747578003996:ios:7bef85dda10811b4ca85d9",
+        "googleWebClientId": "747578003996-1vuqq0capvfg22n607dj9l6icrpfor1f.apps.googleusercontent.com"
       },
       "eas": {
         "projectId": "1e281451-6f41-4ee8-a71e-363eff7ee6ee"
@@ -55,7 +57,9 @@
         {
           "sounds": []
         }
-      ]
+      ],
+      "expo-apple-authentication",
+      "@react-native-google-signin/google-signin"
     ]
   }
 }
