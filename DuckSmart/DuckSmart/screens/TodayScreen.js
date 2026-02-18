@@ -9,6 +9,7 @@ import {
   StatusBar,
   RefreshControl,
   ActivityIndicator,
+  Alert,
 } from "react-native";
 import Svg, { Path, Circle, Text as SvgText } from "react-native-svg";
 import { COLORS } from "../constants/theme";
@@ -17,6 +18,8 @@ import { formatWind } from "../utils/helpers";
 import { scoreHuntToday } from "../utils/scoring";
 import { spreadRecommendation } from "../utils/spreads";
 import { useWeather } from "../context/WeatherContext";
+import { scheduleHuntAlerts, cancelHuntAlerts } from "../services/notifications";
+import AdBanner from "../components/AdBanner";
 
 // --- Today-specific sub-components ---
 
@@ -110,6 +113,7 @@ function TodayHalfGauge({ value, size = 220 }) {
 export default function TodayScreen({ onLogout }) {
   const { weather, loading, refresh } = useWeather();
   const [refreshing, setRefreshing] = useState(false);
+  const [alertsOn, setAlertsOn] = useState(false);
 
   const environments = ["Marsh", "Timber", "Field", "Open Water", "River"];
   const [environment, setEnvironment] = useState("Marsh");
@@ -125,6 +129,22 @@ export default function TodayScreen({ onLogout }) {
     await refresh();
     setRefreshing(false);
   }, [refresh]);
+
+  const toggleHuntAlerts = useCallback(async () => {
+    if (alertsOn) {
+      await cancelHuntAlerts();
+      setAlertsOn(false);
+      Alert.alert("Alerts Off", "Sunrise and sunset alerts have been cancelled.");
+    } else {
+      const success = await scheduleHuntAlerts(weather.sunrise, weather.sunset);
+      if (success) {
+        setAlertsOn(true);
+        Alert.alert("Alerts Set!", "You'll be notified 30 min before sunrise and at sunset.");
+      } else {
+        Alert.alert("Permission Needed", "Enable notifications in your device settings to use hunt alerts.");
+      }
+    }
+  }, [alertsOn, weather.sunrise, weather.sunset]);
 
   if (loading && !weather.tempF) {
     return (
@@ -237,6 +257,12 @@ export default function TodayScreen({ onLogout }) {
               <Text style={s.sunValue}>{weather.sunset}</Text>
             </View>
           </View>
+
+          <Pressable style={[s.alertBtn, alertsOn ? s.alertBtnActive : null]} onPress={toggleHuntAlerts}>
+            <Text style={[s.alertBtnText, alertsOn ? s.alertBtnTextActive : null]}>
+              {alertsOn ? "🔔  Alerts On" : "🔕  Set Shoot-Time Alerts"}
+            </Text>
+          </Pressable>
         </TodayCard>
 
         {/* Hourly quick look */}
@@ -296,6 +322,16 @@ export default function TodayScreen({ onLogout }) {
             </Text>
           </View>
         </TodayCard>
+
+        {/* Ad Banner — free version only */}
+        <AdBanner />
+
+        {/* Disclaimer */}
+        <Text style={s.disclaimer}>
+          The prediction score is an estimate based on weather, environmental data, and historical patterns.
+          It is not a guarantee of hunt success — actual results may vary due to animal behavior,
+          local conditions, and other factors beyond prediction.
+        </Text>
 
         <View style={{ height: 22 }} />
       </ScrollView>
@@ -403,4 +439,18 @@ const s = StyleSheet.create({
   diagramPlaceholderText: { color: COLORS.muted, fontWeight: "800" },
   diagramPlaceholderSub: { color: COLORS.mutedDarker, marginTop: 6, fontSize: 12, fontWeight: "700" },
 
+  alertBtn: {
+    marginTop: 10,
+    paddingVertical: 12,
+    borderRadius: 14,
+    backgroundColor: COLORS.bgDeep,
+    borderWidth: 1,
+    borderColor: COLORS.border,
+    alignItems: "center",
+  },
+  alertBtnActive: { borderColor: COLORS.green, backgroundColor: COLORS.greenBg },
+  alertBtnText: { color: COLORS.muted, fontWeight: "900", fontSize: 13 },
+  alertBtnTextActive: { color: COLORS.green },
+
+  disclaimer: { marginTop: 18, color: COLORS.mutedDarker, fontSize: 11, lineHeight: 17, fontWeight: "700", textAlign: "center", paddingHorizontal: 8 },
 });

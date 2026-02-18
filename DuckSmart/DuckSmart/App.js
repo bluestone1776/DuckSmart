@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useCallback } from "react";
-import { View, ActivityIndicator, Alert } from "react-native";
+import { View, ActivityIndicator } from "react-native";
 import { NavigationContainer } from "@react-navigation/native";
 import { createBottomTabNavigator } from "@react-navigation/bottom-tabs";
 import { Ionicons } from "@expo/vector-icons";
@@ -15,6 +15,7 @@ import LogScreen from "./screens/LogScreen";
 import HistoryScreen from "./screens/HistoryScreen";
 import IdentifyStackScreen from "./screens/IdentifyScreen";
 import AuthScreen from "./screens/AuthScreen";
+import SettingsModal from "./components/SettingsModal";
 
 const Tab = createBottomTabNavigator();
 
@@ -65,15 +66,13 @@ function MainApp() {
     if (ready) savePins(pins);
   }, [pins, ready]);
 
+  const [settingsVisible, setSettingsVisible] = useState(false);
+
   const addLog = useCallback((entry) => setLogs((prev) => [entry, ...prev]), []);
   const deleteLog = useCallback((id) => setLogs((prev) => prev.filter((l) => l.id !== id)), []);
 
-  const handleLogout = useCallback(() => {
-    Alert.alert("Log Out", "Are you sure you want to log out?", [
-      { text: "Cancel", style: "cancel" },
-      { text: "Log Out", style: "destructive", onPress: () => logout() },
-    ]);
-  }, [logout]);
+  const openSettings = useCallback(() => setSettingsVisible(true), []);
+  const closeSettings = useCallback(() => setSettingsVisible(false), []);
 
   return (
     <WeatherProvider>
@@ -99,12 +98,14 @@ function MainApp() {
           },
         })}
       >
-        <Tab.Screen name="Today">{() => <TodayScreen onLogout={handleLogout} />}</Tab.Screen>
+        <Tab.Screen name="Today">{() => <TodayScreen onLogout={openSettings} />}</Tab.Screen>
         <Tab.Screen name="Map">{() => <MapScreen pins={pins} setPins={setPins} />}</Tab.Screen>
-        <Tab.Screen name="Log">{() => <LogScreen addLog={addLog} onLogout={handleLogout} />}</Tab.Screen>
-        <Tab.Screen name="History">{() => <HistoryScreen logs={logs} deleteLog={deleteLog} onLogout={handleLogout} />}</Tab.Screen>
+        <Tab.Screen name="Log">{() => <LogScreen addLog={addLog} onLogout={openSettings} />}</Tab.Screen>
+        <Tab.Screen name="History">{() => <HistoryScreen logs={logs} deleteLog={deleteLog} onLogout={openSettings} />}</Tab.Screen>
         <Tab.Screen name="Identify" component={IdentifyStackScreen} />
       </Tab.Navigator>
+
+      <SettingsModal visible={settingsVisible} onClose={closeSettings} onLogout={logout} />
     </NavigationContainer>
     </WeatherProvider>
   );

@@ -11,6 +11,7 @@ import {
   Platform,
   KeyboardAvoidingView,
   Image,
+  Share,
 } from "react-native";
 import MapView, { Marker } from "react-native-maps";
 
@@ -34,6 +35,26 @@ export default function HistoryScreen({ logs, deleteLog, onLogout }) {
       })
       .sort((a, b) => b.createdAt - a.createdAt);
   }, [logs, query]);
+
+  async function shareLog(log) {
+    const date = new Date(log.dateTime).toLocaleDateString();
+    const ducks = log.ducksHarvested != null ? `\nDucks Harvested: ${log.ducksHarvested}` : "";
+    const message = [
+      `DuckSmart Hunt Log — ${date}`,
+      `Environment: ${log.environment}`,
+      `Spread: ${log.spread}`,
+      `Hunt Score: ${log.huntScore}/100`,
+      ducks,
+      log.notes ? `\nNotes: ${log.notes}` : "",
+      `\nLogged with DuckSmart`,
+    ].filter(Boolean).join("\n");
+
+    try {
+      await Share.share({ message });
+    } catch {
+      // User cancelled or share failed — no action needed
+    }
+  }
 
   function confirmDelete(id) {
     const log = logs.find((l) => l.id === id);
@@ -84,7 +105,7 @@ export default function HistoryScreen({ logs, deleteLog, onLogout }) {
                     <View style={{ flex: 1 }}>
                       <Text style={styles.historyTitle}>{new Date(l.dateTime).toLocaleString()}</Text>
                       <Text style={styles.historySub}>
-                        {l.environment} • {l.spread} • Score {l.huntScore}
+                        {l.environment} • {l.spread} • Score {l.huntScore}{l.ducksHarvested != null ? ` • ${l.ducksHarvested} ducks` : ""}
                       </Text>
                       <Image source={ASSETS.spreads[l.spread]} style={styles.spreadThumbSmall} resizeMode="cover" />
                       {l.notes ? (
@@ -109,6 +130,11 @@ export default function HistoryScreen({ logs, deleteLog, onLogout }) {
                 <Text style={styles.detailLabel}>GPS:</Text>{" "}
                 {selected.location.latitude.toFixed(5)}, {selected.location.longitude.toFixed(5)}
               </Text>
+              {selected.ducksHarvested != null ? (
+                <Text style={styles.detailLine}>
+                  <Text style={styles.detailLabel}>Ducks Harvested:</Text> {selected.ducksHarvested}
+                </Text>
+              ) : null}
 
               <View style={styles.detailMapWrap}>
                 <MapView
@@ -145,6 +171,12 @@ export default function HistoryScreen({ logs, deleteLog, onLogout }) {
                   </ScrollView>
                 </>
               ) : null}
+
+              <View style={styles.sheetBtnRow}>
+                <Pressable style={styles.primaryBtn} onPress={() => shareLog(selected)}>
+                  <Text style={styles.primaryBtnText}>Share Hunt</Text>
+                </Pressable>
+              </View>
             </Card>
           ) : null}
 

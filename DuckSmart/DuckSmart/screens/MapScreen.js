@@ -11,6 +11,7 @@ import {
   Platform,
   KeyboardAvoidingView,
   Image,
+  Linking,
 } from "react-native";
 import MapView, { Marker } from "react-native-maps";
 import * as Location from "expo-location";
@@ -123,6 +124,29 @@ export default function MapScreen({ pins, setPins }) {
     const r = { ...userLoc, latitudeDelta: 0.02, longitudeDelta: 0.02 };
     setRegion(r);
     mapRef.current?.animateToRegion(r, 500);
+  }
+
+  function navigateToPin() {
+    if (!selectedPin) return;
+    const { latitude, longitude } = selectedPin.coordinate;
+    const label = encodeURIComponent(selectedPin.title);
+
+    // Try Google Maps first, fall back to Apple Maps
+    const googleMapsUrl = `https://www.google.com/maps/dir/?api=1&destination=${latitude},${longitude}&travelmode=driving`;
+    const appleMapsUrl = `maps://app?daddr=${latitude},${longitude}&dirflg=d&t=h`;
+
+    const url = Platform.OS === "ios" ? appleMapsUrl : googleMapsUrl;
+
+    Linking.canOpenURL(url)
+      .then((supported) => {
+        if (supported) {
+          Linking.openURL(url);
+        } else {
+          // Fallback to Google Maps web URL
+          Linking.openURL(googleMapsUrl);
+        }
+      })
+      .catch(() => Linking.openURL(googleMapsUrl));
   }
 
   const mapInitial = region || {
@@ -265,10 +289,13 @@ export default function MapScreen({ pins, setPins }) {
                     <Text style={styles.secondaryBtnText}>Close</Text>
                   </Pressable>
                   <Pressable
-                    style={styles.primaryBtn}
+                    style={styles.secondaryBtn}
                     onPress={() => mapRef.current?.animateToRegion({ ...selectedPin.coordinate, latitudeDelta: 0.015, longitudeDelta: 0.015 }, 450)}
                   >
-                    <Text style={styles.primaryBtnText}>Center</Text>
+                    <Text style={styles.secondaryBtnText}>Center</Text>
+                  </Pressable>
+                  <Pressable style={styles.primaryBtn} onPress={navigateToPin}>
+                    <Text style={styles.primaryBtnText}>Navigate</Text>
                   </Pressable>
                 </View>
               </>

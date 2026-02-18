@@ -31,6 +31,7 @@ export default function LogScreen({ addLog, onLogout }) {
   const [environment, setEnvironment] = useState("Marsh");
   const [spread, setSpread] = useState("J-Hook");
   const [huntScore, setHuntScore] = useState(72);
+  const [ducksHarvested, setDucksHarvested] = useState(0);
   const [notes, setNotes] = useState("");
   const [photos, setPhotos] = useState([]);
 
@@ -80,6 +81,7 @@ export default function LogScreen({ addLog, onLogout }) {
     setEnvironment("Marsh");
     setSpread("J-Hook");
     setHuntScore(72);
+    setDucksHarvested(0);
     setNotes("");
     setPhotos([]);
   }
@@ -96,6 +98,7 @@ export default function LogScreen({ addLog, onLogout }) {
       environment,
       spread,
       huntScore,
+      ducksHarvested,
       notes: notes.trim(),
       location,
       photos,
@@ -191,6 +194,26 @@ export default function LogScreen({ addLog, onLogout }) {
                 <View style={[styles.sliderFill, { width: `${huntScore}%` }]} />
               </View>
               <Pressable onPress={() => setHuntScore((prev) => clamp(prev + 1, 0, 100))} style={styles.stepBtn}>
+                <Text style={styles.stepBtnText}>+</Text>
+              </Pressable>
+            </View>
+          </Card>
+
+          <Card title="Ducks Harvested">
+            <View style={{ alignItems: "center" }}>
+              <Text style={{ color: "#FFFFFF", fontSize: 44, fontWeight: "900" }}>{ducksHarvested}</Text>
+              <Text style={{ color: "#BDBDBD", fontWeight: "900", marginTop: 6 }}>
+                {ducksHarvested === 0 ? "Skunked" : ducksHarvested >= 6 ? "Limit!" : ducksHarvested >= 3 ? "Solid bag" : "A few"}
+              </Text>
+            </View>
+            <View style={styles.sliderRow}>
+              <Pressable onPress={() => setDucksHarvested((prev) => clamp(prev - 1, 0, 50))} style={styles.stepBtn}>
+                <Text style={styles.stepBtnText}>–</Text>
+              </Pressable>
+              <View style={styles.sliderTrack}>
+                <View style={[styles.sliderFill, { width: `${clamp((ducksHarvested / 12) * 100, 0, 100)}%` }]} />
+              </View>
+              <Pressable onPress={() => setDucksHarvested((prev) => clamp(prev + 1, 0, 50))} style={styles.stepBtn}>
                 <Text style={styles.stepBtnText}>+</Text>
               </Pressable>
             </View>
