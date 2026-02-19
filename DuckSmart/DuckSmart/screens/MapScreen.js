@@ -34,6 +34,7 @@ export default function MapScreen({ pins, setPins }) {
   const [draftTitle, setDraftTitle] = useState("");
   const [draftNotes, setDraftNotes] = useState("");
 
+  const [mapType, setMapType] = useState("hybrid"); // "standard" | "satellite" | "hybrid"
   const [selectedPinId, setSelectedPinId] = useState(null);
   const selectedPin = useMemo(() => pins.find((p) => p.id === selectedPinId) || null, [pins, selectedPinId]);
 
@@ -175,6 +176,12 @@ export default function MapScreen({ pins, setPins }) {
           </View>
 
           <View style={{ flexDirection: "row", gap: 10 }}>
+            <Pressable
+              style={styles.iconBtn}
+              onPress={() => setMapType((prev) => prev === "standard" ? "satellite" : prev === "satellite" ? "hybrid" : "standard")}
+            >
+              <Text style={styles.iconBtnText}>{mapType === "standard" ? "🗺" : mapType === "satellite" ? "🛰" : "🛰"}</Text>
+            </Pressable>
             <Pressable style={styles.iconBtn} onPress={goToUser} disabled={!userLoc}>
               <Text style={styles.iconBtnText}>◎</Text>
             </Pressable>
@@ -190,6 +197,7 @@ export default function MapScreen({ pins, setPins }) {
         <MapView
           ref={mapRef}
           style={styles.map}
+          mapType={mapType}
           initialRegion={mapInitial}
           onPress={onMapPress}
           showsUserLocation={permissionState === "granted"}

@@ -16,10 +16,9 @@ import { COLORS } from "../constants/theme";
 import { ASSETS } from "../constants/assets";
 import {
   IDENTIFY_SPECIES,
-  IDENTIFY_REGIONS,
+  IDENTIFY_GROUPS,
   IDENTIFY_HABITATS,
   IDENTIFY_SIZE,
-  IDENTIFY_FLIGHT,
   computeIdentifyMatches,
 } from "../data/species";
 
@@ -48,11 +47,11 @@ function IdentifyChip({ label, selected, onPress }) {
   );
 }
 
-function IdentifyPill({ label, value }) {
+function IdentifyPill({ label, value, color }) {
   return (
     <View style={s.pill}>
       <Text style={s.pillLabel}>{label}</Text>
-      <Text style={s.pillValue}>{value}</Text>
+      <Text style={[s.pillValue, color ? { color } : null]}>{value}</Text>
     </View>
   );
 }
@@ -61,23 +60,30 @@ function IdentifySectionLabel({ children }) {
   return <Text style={s.sectionLabel}>{children}</Text>;
 }
 
+// Habitat rating color helper
+function ratingColor(rating) {
+  if (rating === "High") return COLORS.green;
+  if (rating === "Medium") return COLORS.yellow;
+  return COLORS.mutedDark;
+}
+
 // --- Home screen ---
 
 function IdentifyHome({ navigation }) {
-  const [region, setRegion] = useState("Southeast");
-  const [habitat, setHabitat] = useState("Marsh");
-  const [size, setSize] = useState("Medium");
-  const [flightTags, setFlightTags] = useState([]);
+  const [group, setGroup] = useState(null);
+  const [habitat, setHabitat] = useState(null);
+  const [size, setSize] = useState(null);
   const [query, setQuery] = useState("");
 
   const matches = useMemo(
-    () => computeIdentifyMatches({ region, habitat, size, flightTags, queryText: query }),
-    [region, habitat, size, flightTags, query]
+    () => computeIdentifyMatches({ group, habitat, size, queryText: query }),
+    [group, habitat, size, query]
   );
 
-  function toggleFlight(tag) {
-    setFlightTags((prev) => (prev.includes(tag) ? prev.filter((t) => t !== tag) : [...prev, tag]));
-  }
+  // Toggle selection — tap again to deselect
+  function toggleGroup(g) { setGroup((prev) => (prev === g ? null : g)); }
+  function toggleHabitat(h) { setHabitat((prev) => (prev === h ? null : h)); }
+  function toggleSize(sz) { setSize((prev) => (prev === sz ? null : sz)); }
 
   return (
     <SafeAreaView style={s.safe}>
@@ -96,13 +102,6 @@ function IdentifyHome({ navigation }) {
           </Pressable>
         </View>
 
-        <View style={{ marginTop: 14, padding: 14, borderRadius: 16, backgroundColor: "#0E1A12", borderWidth: 1, borderColor: "#2ECC71" }}>
-          <Text style={{ color: "#2ECC71", fontWeight: "900", fontSize: 13 }}>Free Version</Text>
-          <Text style={{ color: "#BDBDBD", fontWeight: "800", fontSize: 13, marginTop: 6, lineHeight: 18 }}>
-            Upgrade to the paid version for more species, detailed images, range maps, and AI-powered identification.
-          </Text>
-        </View>
-
         <IdentifyCard title="Quick Search">
           <TextInput
             value={query}
@@ -112,16 +111,16 @@ function IdentifyHome({ navigation }) {
             style={s.input}
           />
           <Text style={s.helpText}>
-            Use this if you already noticed a key feature (color patch, size, or species name).
+            Search by species name, color, marking, or group.
           </Text>
         </IdentifyCard>
 
-        <IdentifyCard title="Guided Filters">
-          <IdentifySectionLabel>Region</IdentifySectionLabel>
+        <IdentifyCard title="Filters">
+          <IdentifySectionLabel>Group</IdentifySectionLabel>
           <ScrollView horizontal showsHorizontalScrollIndicator={false}>
             <View style={s.chipRow}>
-              {IDENTIFY_REGIONS.map((r) => (
-                <IdentifyChip key={r} label={r} selected={region === r} onPress={() => setRegion(r)} />
+              {IDENTIFY_GROUPS.map((g) => (
+                <IdentifyChip key={g} label={g} selected={group === g} onPress={() => toggleGroup(g)} />
               ))}
             </View>
           </ScrollView>
@@ -130,7 +129,7 @@ function IdentifyHome({ navigation }) {
           <ScrollView horizontal showsHorizontalScrollIndicator={false}>
             <View style={s.chipRow}>
               {IDENTIFY_HABITATS.map((h) => (
-                <IdentifyChip key={h} label={h} selected={habitat === h} onPress={() => setHabitat(h)} />
+                <IdentifyChip key={h} label={h} selected={habitat === h} onPress={() => toggleHabitat(h)} />
               ))}
             </View>
           </ScrollView>
@@ -139,23 +138,14 @@ function IdentifyHome({ navigation }) {
           <ScrollView horizontal showsHorizontalScrollIndicator={false}>
             <View style={s.chipRow}>
               {IDENTIFY_SIZE.map((sz) => (
-                <IdentifyChip key={sz} label={sz} selected={size === sz} onPress={() => setSize(sz)} />
-              ))}
-            </View>
-          </ScrollView>
-
-          <IdentifySectionLabel>Flight Style (pick any)</IdentifySectionLabel>
-          <ScrollView horizontal showsHorizontalScrollIndicator={false}>
-            <View style={s.chipRow}>
-              {IDENTIFY_FLIGHT.map((f) => (
-                <IdentifyChip key={f} label={f} selected={flightTags.includes(f)} onPress={() => toggleFlight(f)} />
+                <IdentifyChip key={sz} label={sz} selected={size === sz} onPress={() => toggleSize(sz)} />
               ))}
             </View>
           </ScrollView>
         </IdentifyCard>
 
         <IdentifyCard
-          title="Likely Matches"
+          title="Matches"
           right={
             <View style={s.sheetPill}>
               <Text style={s.sheetPillText}>{matches.length} shown</Text>
@@ -165,7 +155,7 @@ function IdentifyHome({ navigation }) {
           {matches.length === 0 ? (
             <View style={s.noteBox}>
               <Text style={s.noteTextMuted}>
-                No matches found. Try changing habitat/size or clear the search.
+                No matches found. Try changing filters or clear the search.
               </Text>
             </View>
           ) : (
@@ -177,11 +167,15 @@ function IdentifyHome({ navigation }) {
               >
                 {ASSETS.ducks[species.name] ? (
                   <Image source={ASSETS.ducks[species.name]} style={s.matchThumb} resizeMode="cover" />
-                ) : null}
+                ) : (
+                  <View style={[s.matchThumb, { alignItems: "center", justifyContent: "center" }]}>
+                    <Text style={{ color: COLORS.mutedDark, fontSize: 20 }}>🦆</Text>
+                  </View>
+                )}
                 <View style={{ flex: 1 }}>
                   <Text style={s.matchTitle}>{species.name}</Text>
                   <Text style={s.matchSub}>
-                    {species.group} • {species.size} • {species.habitats.join(", ")}
+                    {species.group} • {species.size}
                   </Text>
                   <Text style={s.matchHint} numberOfLines={2}>
                     {species.keyMarks[0]}
@@ -194,10 +188,6 @@ function IdentifyHome({ navigation }) {
               </Pressable>
             ))
           )}
-
-          <Text style={s.disclaimer}>
-            Legal note: this MVP uses built-in info only. We'll add state/zone regulations later from an authoritative source.
-          </Text>
         </IdentifyCard>
 
         <View style={{ height: 22 }} />
@@ -206,7 +196,7 @@ function IdentifyHome({ navigation }) {
   );
 }
 
-// --- Detail screen ---
+// --- Detail screen (bio page) ---
 
 function SpeciesDetail({ route, navigation }) {
   const { id } = route.params;
@@ -249,19 +239,40 @@ function SpeciesDetail({ route, navigation }) {
           </View>
         ) : null}
 
+        {/* At-a-glance */}
         <IdentifyCard title="At-a-glance">
           <View style={s.pillRow}>
-            <IdentifyPill label="Group" value={sp.group.split(" ")[0]} />
+            <IdentifyPill label="Group" value={sp.group} />
             <IdentifyPill label="Size" value={sp.size} />
-            <IdentifyPill label="Habitat" value={sp.habitats[0]} />
+          </View>
+          {sp.flightInfo ? (
+            <View style={[s.pillRow, { marginTop: 0 }]}>
+              <IdentifyPill label="Flight" value={sp.flightInfo} />
+            </View>
+          ) : null}
+        </IdentifyCard>
+
+        {/* Habitat & Behavior */}
+        <IdentifyCard title="Habitat & Behavior">
+          {sp.primaryHabitats ? (
+            <Text style={s.longText}>{sp.primaryHabitats}</Text>
+          ) : null}
+          {sp.habitatBehavior ? (
+            <Text style={[s.longText, { marginTop: 8 }]}>{sp.habitatBehavior}</Text>
+          ) : null}
+          <View style={[s.pillRow, { marginTop: 12 }]}>
+            {Object.entries(sp.habitats).slice(0, 3).map(([hab, rating]) => (
+              <IdentifyPill key={hab} label={hab} value={rating} color={ratingColor(rating)} />
+            ))}
           </View>
           <View style={s.pillRow}>
-            <IdentifyPill label="Flight" value={sp.flightStyle[0]} />
-            <IdentifyPill label="Region" value={sp.regions[0]} />
-            <IdentifyPill label="Lookalike" value={sp.lookalikes?.[0] || "-"} />
+            {Object.entries(sp.habitats).slice(3).map(([hab, rating]) => (
+              <IdentifyPill key={hab} label={hab} value={rating} color={ratingColor(rating)} />
+            ))}
           </View>
         </IdentifyCard>
 
+        {/* Key field marks */}
         <IdentifyCard title="Key Field Marks">
           {sp.keyMarks.map((m, idx) => (
             <View key={idx} style={s.bulletRow}>
@@ -271,6 +282,7 @@ function SpeciesDetail({ route, navigation }) {
           ))}
         </IdentifyCard>
 
+        {/* Commonly Mistaken For */}
         <IdentifyCard title="Commonly Mistaken For">
           {sp.lookalikes?.length ? (
             sp.lookalikes.map((m, idx) => (
@@ -284,23 +296,21 @@ function SpeciesDetail({ route, navigation }) {
           )}
         </IdentifyCard>
 
-        <IdentifyCard title="Habitat & Behavior">
-          <Text style={s.longText}>
-            Habitats: {sp.habitats.join(", ")}
-            {"\n"}Flight: {sp.flightStyle.join(", ")}
-            {"\n"}Regions: {sp.regions.join(", ")}
-          </Text>
-          <View style={s.noteBox}>
-            <Text style={s.noteTextMuted}>
-              {sp.tips.join("\n\n")}
-            </Text>
-          </View>
+        {/* Tips */}
+        <IdentifyCard title="Hunting Tips">
+          {sp.tips?.map((tip, idx) => (
+            <View key={idx} style={s.bulletRow}>
+              <Text style={s.bullet}>•</Text>
+              <Text style={s.bulletText}>{tip}</Text>
+            </View>
+          ))}
         </IdentifyCard>
 
-        <IdentifyCard title="Legality (MVP)">
+        {/* Legal note */}
+        <IdentifyCard title="Regulations">
           <Text style={s.longText}>{sp.legalNote}</Text>
           <Text style={s.disclaimer}>
-            We'll add real regulations by state/zone + season dates in a later phase.
+            Always verify current season dates, bag limits, and species restrictions with your state wildlife agency.
           </Text>
         </IdentifyCard>
 

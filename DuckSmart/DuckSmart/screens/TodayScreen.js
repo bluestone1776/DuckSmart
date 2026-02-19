@@ -152,12 +152,21 @@ function SpreadImageModal({ visible, onClose, spread }) {
   const img = ASSETS.decoys[spread.key];
 
   return (
-    <Modal visible={visible} transparent animationType="fade" onRequestClose={onClose}>
-      <Pressable style={s.modalOverlay} onPress={onClose}>
-        <View style={s.modalContent}>
-          <Text style={s.modalTitle}>{spread.name}</Text>
-          <Text style={s.modalSubtitle}>{spread.type}</Text>
+    <Modal visible={visible} transparent={false} animationType="slide" onRequestClose={onClose}>
+      <SafeAreaView style={s.modalSafe}>
+        <ScrollView contentContainerStyle={s.modalScroll}>
+          {/* Close bar */}
+          <View style={s.modalTopBar}>
+            <View style={{ flex: 1 }}>
+              <Text style={s.modalTitle}>{spread.name}</Text>
+              <Text style={s.modalSubtitle}>{spread.type}</Text>
+            </View>
+            <Pressable style={s.modalXBtn} onPress={onClose}>
+              <Text style={s.modalXBtnText}>✕</Text>
+            </Pressable>
+          </View>
 
+          {/* Full-width image */}
           {img ? (
             <Image
               source={img}
@@ -195,8 +204,10 @@ function SpreadImageModal({ visible, onClose, spread }) {
           <Pressable style={s.modalCloseBtn} onPress={onClose}>
             <Text style={s.modalCloseBtnText}>Close</Text>
           </Pressable>
-        </View>
-      </Pressable>
+
+          <View style={{ height: 30 }} />
+        </ScrollView>
+      </SafeAreaView>
     </Modal>
   );
 }
@@ -684,40 +695,37 @@ const s = StyleSheet.create({
   addonTitle: { color: COLORS.white, fontSize: 13, fontWeight: "800" },
   addonText: { color: COLORS.mutedDark, fontSize: 12, fontWeight: "700", marginTop: 2 },
 
-  // ---- Spread image modal ----
-  modalOverlay: {
-    flex: 1,
-    backgroundColor: "rgba(0,0,0,0.92)",
-    justifyContent: "center",
+  // ---- Spread image modal (full-screen) ----
+  modalSafe: { flex: 1, backgroundColor: COLORS.black },
+  modalScroll: { padding: 16, paddingBottom: 40 },
+  modalTopBar: {
+    flexDirection: "row",
     alignItems: "center",
-    padding: 20,
+    marginBottom: 12,
   },
-  modalContent: {
-    width: "100%",
-    maxWidth: 400,
-    backgroundColor: COLORS.bg,
-    borderRadius: 20,
+  modalXBtn: {
+    width: 42,
+    height: 42,
+    borderRadius: 12,
     borderWidth: 1,
     borderColor: COLORS.border,
-    padding: 18,
+    backgroundColor: COLORS.bg,
     alignItems: "center",
+    justifyContent: "center",
   },
+  modalXBtnText: { color: COLORS.white, fontSize: 18, fontWeight: "700" },
   modalTitle: { color: COLORS.white, fontSize: 22, fontWeight: "900" },
   modalSubtitle: { color: COLORS.green, fontSize: 13, fontWeight: "700", marginTop: 4 },
   modalImage: {
-    width: SCREEN_WIDTH - 80,
-    height: SCREEN_WIDTH - 80,
-    maxWidth: 360,
-    maxHeight: 360,
+    width: SCREEN_WIDTH - 32,
+    height: SCREEN_WIDTH - 32,
     borderRadius: 14,
-    marginTop: 16,
     backgroundColor: COLORS.bgDeep,
   },
   modalImagePlaceholder: {
-    width: SCREEN_WIDTH - 80,
-    height: 200,
+    width: SCREEN_WIDTH - 32,
+    height: 250,
     borderRadius: 14,
-    marginTop: 16,
     backgroundColor: COLORS.bgDeep,
     alignItems: "center",
     justifyContent: "center",
@@ -726,7 +734,7 @@ const s = StyleSheet.create({
   },
   modalImagePlaceholderText: { color: COLORS.mutedDark, fontWeight: "800" },
 
-  modalInfoRow: { flexDirection: "row", gap: 8, marginTop: 14, width: "100%" },
+  modalInfoRow: { flexDirection: "row", gap: 8, marginTop: 14 },
   modalInfoPill: {
     flex: 1,
     padding: 10,
@@ -741,32 +749,30 @@ const s = StyleSheet.create({
 
   modalNotes: {
     color: COLORS.muted,
-    fontSize: 13,
+    fontSize: 14,
     fontWeight: "700",
-    lineHeight: 18,
+    lineHeight: 20,
     marginTop: 14,
-    textAlign: "center",
   },
   modalMistakeBox: {
     marginTop: 12,
-    width: "100%",
-    padding: 10,
+    padding: 12,
     borderRadius: 12,
     backgroundColor: "rgba(217, 76, 76, 0.08)",
     borderWidth: 1,
     borderColor: "rgba(217, 76, 76, 0.3)",
   },
   modalMistakeLabel: { color: COLORS.red, fontSize: 11, fontWeight: "900" },
-  modalMistakeText: { color: COLORS.muted, fontSize: 12, fontWeight: "700", marginTop: 4 },
+  modalMistakeText: { color: COLORS.muted, fontSize: 13, fontWeight: "700", marginTop: 4 },
 
   modalCloseBtn: {
-    marginTop: 16,
-    paddingVertical: 12,
-    paddingHorizontal: 40,
+    marginTop: 18,
+    paddingVertical: 14,
     borderRadius: 14,
     backgroundColor: COLORS.greenBg,
     borderWidth: 1,
     borderColor: COLORS.green,
+    alignItems: "center",
   },
   modalCloseBtnText: { color: COLORS.green, fontWeight: "900", fontSize: 15 },
 
