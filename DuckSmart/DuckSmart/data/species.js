@@ -474,6 +474,20 @@ export const IDENTIFY_SPECIES = [
   },
 ];
 
+// ── Free-tier species (available without Pro upgrade) ──
+export const FREE_SPECIES_IDS = [
+  "mallard",
+  "blue_winged_teal",
+  "green_winged_teal",
+  "wood_duck",
+  "northern_pintail",
+  "american_wigeon",
+  "american_black_duck",
+  "surf_scoter",
+  "white_winged_scoter",
+  "red_breasted_merganser",
+];
+
 // ── Habitat rating values for scoring ──
 const HABITAT_SCORES = { High: 4, Medium: 2, Low: 1, Rare: 0 };
 

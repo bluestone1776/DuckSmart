@@ -1,4 +1,4 @@
-import React, { useMemo, useState } from "react";
+import React, { useMemo, useState, useCallback } from "react";
 import {
   SafeAreaView,
   View,
@@ -9,6 +9,7 @@ import {
   StatusBar,
   TextInput,
   Image,
+  Alert,
 } from "react-native";
 import { createNativeStackNavigator } from "@react-navigation/native-stack";
 
@@ -19,6 +20,7 @@ import {
   IDENTIFY_GROUPS,
   IDENTIFY_HABITATS,
   IDENTIFY_SIZE,
+  FREE_SPECIES_IDS,
   computeIdentifyMatches,
 } from "../data/species";
 
@@ -159,34 +161,54 @@ function IdentifyHome({ navigation }) {
               </Text>
             </View>
           ) : (
-            matches.map(({ species, score }) => (
-              <Pressable
-                key={species.id}
-                onPress={() => navigation.navigate("SpeciesDetail", { id: species.id })}
-                style={s.matchRow}
-              >
-                {ASSETS.ducks[species.name] ? (
-                  <Image source={ASSETS.ducks[species.name]} style={s.matchThumb} resizeMode="cover" />
-                ) : (
-                  <View style={[s.matchThumb, { alignItems: "center", justifyContent: "center" }]}>
-                    <Text style={{ color: COLORS.mutedDark, fontSize: 20 }}>🦆</Text>
+            matches.map(({ species, score }) => {
+              const isFree = FREE_SPECIES_IDS.includes(species.id);
+              return (
+                <Pressable
+                  key={species.id}
+                  onPress={() => {
+                    if (isFree) {
+                      navigation.navigate("SpeciesDetail", { id: species.id });
+                    } else {
+                      Alert.alert(
+                        "Pro Feature",
+                        `${species.name} details are available with DuckSmart Pro. Upgrade to unlock all 30+ species.`,
+                        [{ text: "OK" }]
+                      );
+                    }
+                  }}
+                  style={[s.matchRow, !isFree && { opacity: 0.55 }]}
+                >
+                  {ASSETS.ducks[species.name] ? (
+                    <Image source={ASSETS.ducks[species.name].male || ASSETS.ducks[species.name]} style={s.matchThumb} resizeMode="cover" />
+                  ) : (
+                    <View style={[s.matchThumb, { alignItems: "center", justifyContent: "center" }]}>
+                      <Text style={{ color: COLORS.mutedDark, fontSize: 20 }}>🦆</Text>
+                    </View>
+                  )}
+                  <View style={{ flex: 1 }}>
+                    <Text style={s.matchTitle}>{species.name}</Text>
+                    <Text style={s.matchSub}>
+                      {species.group} • {species.size}
+                    </Text>
+                    <Text style={s.matchHint} numberOfLines={2}>
+                      {species.keyMarks[0]}
+                    </Text>
                   </View>
-                )}
-                <View style={{ flex: 1 }}>
-                  <Text style={s.matchTitle}>{species.name}</Text>
-                  <Text style={s.matchSub}>
-                    {species.group} • {species.size}
-                  </Text>
-                  <Text style={s.matchHint} numberOfLines={2}>
-                    {species.keyMarks[0]}
-                  </Text>
-                </View>
 
-                <View style={s.scoreBubble}>
-                  <Text style={s.scoreBubbleText}>{score}</Text>
-                </View>
-              </Pressable>
-            ))
+                  {isFree ? (
+                    <View style={s.scoreBubble}>
+                      <Text style={s.scoreBubbleText}>{score}</Text>
+                    </View>
+                  ) : (
+                    <View style={s.lockBubble}>
+                      <Text style={s.lockIcon}>🔒</Text>
+                      <Text style={s.lockLabel}>PRO</Text>
+                    </View>
+                  )}
+                </Pressable>
+              );
+            })
           )}
         </IdentifyCard>
 
@@ -201,6 +223,7 @@ function IdentifyHome({ navigation }) {
 function SpeciesDetail({ route, navigation }) {
   const { id } = route.params;
   const sp = IDENTIFY_SPECIES.find((x) => x.id === id);
+  const [showFemale, setShowFemale] = useState(false);
 
   if (!sp) {
     return (
@@ -215,6 +238,12 @@ function SpeciesDetail({ route, navigation }) {
       </SafeAreaView>
     );
   }
+
+  const duckAsset = ASSETS.ducks[sp.name];
+  const hasMaleFemale = duckAsset && duckAsset.male;
+  const heroSource = hasMaleFemale
+    ? (showFemale ? duckAsset.female : duckAsset.male)
+    : duckAsset || null;
 
   return (
     <SafeAreaView style={s.safe}>
@@ -233,9 +262,25 @@ function SpeciesDetail({ route, navigation }) {
           </View>
         </View>
 
-        {ASSETS.ducks[sp.name] ? (
+        {heroSource ? (
           <View style={s.heroWrap}>
-            <Image source={ASSETS.ducks[sp.name]} style={s.heroImage} resizeMode="cover" />
+            <Image source={heroSource} style={s.heroImage} resizeMode="cover" />
+            {hasMaleFemale ? (
+              <View style={s.sexToggleRow}>
+                <Pressable
+                  style={[s.sexToggleBtn, !showFemale ? s.sexToggleBtnActive : null]}
+                  onPress={() => setShowFemale(false)}
+                >
+                  <Text style={[s.sexToggleText, !showFemale ? s.sexToggleTextActive : null]}>Drake</Text>
+                </Pressable>
+                <Pressable
+                  style={[s.sexToggleBtn, showFemale ? s.sexToggleBtnActive : null]}
+                  onPress={() => setShowFemale(true)}
+                >
+                  <Text style={[s.sexToggleText, showFemale ? s.sexToggleTextActive : null]}>Hen</Text>
+                </Pressable>
+              </View>
+            ) : null}
           </View>
         ) : null}
 
@@ -411,6 +456,19 @@ const s = StyleSheet.create({
   },
   scoreBubbleText: { color: COLORS.green, fontWeight: "900" },
 
+  lockBubble: {
+    width: 44,
+    height: 44,
+    borderRadius: 14,
+    borderWidth: 1,
+    borderColor: COLORS.yellow,
+    backgroundColor: COLORS.bgDeep,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  lockIcon: { fontSize: 14 },
+  lockLabel: { color: COLORS.yellow, fontWeight: "900", fontSize: 9, marginTop: 1 },
+
   disclaimer: { marginTop: 12, color: COLORS.mutedDarker, fontSize: 12, lineHeight: 18, fontWeight: "700" },
 
   noteBox: { padding: 12, borderRadius: 14, backgroundColor: COLORS.bgDeep, borderWidth: 1, borderColor: COLORS.borderSubtle, marginTop: 10 },
@@ -418,7 +476,13 @@ const s = StyleSheet.create({
 
   // Detail
   heroWrap: { marginTop: 14, borderRadius: 18, overflow: "hidden", borderWidth: 1, borderColor: COLORS.borderSubtle, backgroundColor: COLORS.bgDeepest },
-  heroImage: { width: "100%", height: 200 },
+  heroImage: { width: "100%", height: 240 },
+
+  sexToggleRow: { flexDirection: "row", gap: 0, backgroundColor: COLORS.bgDeep },
+  sexToggleBtn: { flex: 1, paddingVertical: 10, alignItems: "center", justifyContent: "center" },
+  sexToggleBtnActive: { backgroundColor: COLORS.greenBg },
+  sexToggleText: { color: COLORS.mutedDark, fontWeight: "900", fontSize: 13 },
+  sexToggleTextActive: { color: COLORS.green },
 
   detailHeader: { flexDirection: "row", alignItems: "center", gap: 12, marginTop: 6 },
   backBtn: { width: 42, height: 42, borderRadius: 12, borderWidth: 1, borderColor: COLORS.border, backgroundColor: COLORS.bg, alignItems: "center", justifyContent: "center" },

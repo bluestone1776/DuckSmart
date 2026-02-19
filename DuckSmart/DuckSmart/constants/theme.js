@@ -2,12 +2,12 @@
 
 export const COLORS = {
   black: "#000000",
-  bg: "#0B0B0B",
-  bgDeep: "#070707",
-  bgDeepest: "#050505",
-  surface: "#0B0B0B",
-  border: "#2A2A2A",
-  borderSubtle: "#1F1F1F",
+  bg: "#141414",
+  bgDeep: "#0E0E0E",
+  bgDeepest: "#0A0A0A",
+  surface: "#141414",
+  border: "#3A3A3A",
+  borderSubtle: "#2C2C2C",
   white: "#FFFFFF",
   muted: "#BDBDBD",
   mutedDark: "#8E8E8E",
