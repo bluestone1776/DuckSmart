@@ -15,7 +15,9 @@ import {
   Dimensions,
 } from "react-native";
 import Svg, { Path, Circle, Text as SvgText } from "react-native-svg";
+import MapView, { UrlTile } from "react-native-maps";
 import { COLORS } from "../constants/theme";
+import { OWM_API_KEY } from "../config";
 import { ASSETS } from "../constants/assets";
 import { clamp } from "../utils/helpers";
 import { formatWind } from "../utils/helpers";
@@ -211,7 +213,7 @@ function SpreadImageModal({ visible, onClose, spread }) {
 // --- Main screen ---
 
 export default function TodayScreen({ onLogout }) {
-  const { weather, loading, refresh } = useWeather();
+  const { weather, loading, refresh, coords } = useWeather();
   const [refreshing, setRefreshing] = useState(false);
   const [alertsOn, setAlertsOn] = useState(false);
 
@@ -383,6 +385,32 @@ export default function TodayScreen({ onLogout }) {
             </Text>
           </Pressable>
         </TodayCard>
+
+        {/* Weather Radar */}
+        {coords && (
+          <TodayCard title="Weather Radar">
+            <View style={s.radarWrap}>
+              <MapView
+                style={s.radarMap}
+                initialRegion={{
+                  latitude: coords.latitude,
+                  longitude: coords.longitude,
+                  latitudeDelta: 1.5,
+                  longitudeDelta: 1.5,
+                }}
+                mapType="standard"
+                pointerEvents="none"
+              >
+                <UrlTile
+                  urlTemplate={`https://tile.openweathermap.org/map/precipitation_new/{z}/{x}/{y}.png?appid=${OWM_API_KEY}`}
+                  zIndex={1}
+                  opacity={0.6}
+                />
+              </MapView>
+            </View>
+            <Text style={s.radarCaption}>Precipitation radar • Your area</Text>
+          </TodayCard>
+        )}
 
         {/* Hourly quick look */}
         <TodayCard title="Hourly Snapshot">
@@ -741,6 +769,10 @@ const s = StyleSheet.create({
     alignItems: "center",
   },
   modalCloseBtnText: { color: COLORS.green, fontWeight: "900", fontSize: 15 },
+
+  radarWrap: { borderRadius: 14, overflow: "hidden", borderWidth: 1, borderColor: COLORS.borderSubtle },
+  radarMap: { width: "100%", height: 200 },
+  radarCaption: { color: COLORS.mutedDark, fontSize: 11, fontWeight: "700", marginTop: 8, textAlign: "center" },
 
   disclaimer: { marginTop: 18, color: COLORS.mutedDarker, fontSize: 11, lineHeight: 17, fontWeight: "700", textAlign: "center", paddingHorizontal: 8 },
 });

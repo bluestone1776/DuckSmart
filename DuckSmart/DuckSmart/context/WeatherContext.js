@@ -17,6 +17,7 @@ export function WeatherProvider({ children }) {
   const [weather, setWeather] = useState(MOCK_WEATHER);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
+  const [coords, setCoords] = useState(null);
   const coordsRef = useRef(null);
   const intervalRef = useRef(null);
 
@@ -91,6 +92,7 @@ export function WeatherProvider({ children }) {
           longitude: loc.coords.longitude,
         };
         coordsRef.current = coords;
+        setCoords(coords);
 
         if (mounted) {
           await loadWeather(coords);
@@ -117,7 +119,7 @@ export function WeatherProvider({ children }) {
   }, [loadWeather]);
 
   return (
-    <WeatherContext.Provider value={{ weather, loading, error, refresh }}>
+    <WeatherContext.Provider value={{ weather, loading, error, refresh, coords }}>
       {children}
     </WeatherContext.Provider>
   );
