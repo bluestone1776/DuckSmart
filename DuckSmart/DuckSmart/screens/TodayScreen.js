@@ -113,10 +113,6 @@ function TodayHalfGauge({ value, size = 220 }) {
         </SvgText>
       </Svg>
 
-      <View style={s.gaugeLegendRow}>
-        <Text style={s.legendText}>Low</Text>
-        <Text style={s.legendText}>High</Text>
-      </View>
     </View>
   );
 }
@@ -336,17 +332,6 @@ export default function TodayScreen({ onLogout }) {
         >
           <TodayHalfGauge value={hunt.score} />
 
-          <View style={s.engineRow}>
-            <View style={s.enginePill}>
-              <Text style={s.engineLabel}>Push</Text>
-              <Text style={s.engineValue}>{hunt.push ?? "–"}</Text>
-            </View>
-            <View style={s.enginePill}>
-              <Text style={s.engineLabel}>Go</Text>
-              <Text style={s.engineValue}>{hunt.go ?? "–"}</Text>
-            </View>
-          </View>
-
           <View style={s.whyBox}>
             <Text style={s.whyTitle}>Why this score</Text>
             {hunt.why.length === 0 ? (
@@ -416,23 +401,6 @@ export default function TodayScreen({ onLogout }) {
           </ScrollView>
         </TodayCard>
 
-        {/* Environment selector (for hunt probability) */}
-        <View style={{ marginTop: 14 }}>
-          <Text style={s.sectionLabel}>Environment</Text>
-          <ScrollView horizontal showsHorizontalScrollIndicator={false}>
-            <View style={s.chipRow}>
-              {environments.map((env) => (
-                <TodayChip
-                  key={env}
-                  label={env}
-                  selected={env === environment}
-                  onPress={() => setEnvironment(env)}
-                />
-              ))}
-            </View>
-          </ScrollView>
-        </View>
-
         {/* ================================================================
             DECOY SPREAD ADVISOR — Selection → Recommendation → Image Popup
             ================================================================ */}
@@ -442,8 +410,6 @@ export default function TodayScreen({ onLogout }) {
           <PickerRow label="Water Type" options={WATER_TYPES} value={dWater} onChange={setDWater} />
           <PickerRow label="Weather" options={WEATHER_OPTIONS} value={dWeather} onChange={setDWeather} />
           <PickerRow label="Season" options={SEASON_OPTIONS} value={dSeason} onChange={setDSeason} />
-          <PickerRow label="Hunting Pressure" options={PRESSURE_OPTIONS} value={dPressure} onChange={setDPressure} />
-          <PickerRow label="Target Species" options={SPECIES_OPTIONS} value={dSpecies} onChange={setDSpecies} />
 
           {/* Recommendation result */}
           {primary && (
