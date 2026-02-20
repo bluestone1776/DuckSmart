@@ -22,6 +22,7 @@ import { ENVIRONMENTS } from "../constants/theme";
 import { ASSETS } from "../constants/assets";
 import { SPREADS } from "../data/decoySpreadData";
 import { clamp } from "../utils/helpers";
+import { scoreHuntToday } from "../utils/scoring";
 import Card from "../components/Card";
 import Chip from "../components/Chip";
 import Header from "../components/Header";
@@ -29,9 +30,10 @@ import { useWeather } from "../context/WeatherContext";
 
 export default function LogScreen({ addLog, onLogout }) {
   const { weather: liveWeather } = useWeather();
+  const hunt = scoreHuntToday(liveWeather);
+  const huntScore = hunt.score;
   const [environment, setEnvironment] = useState("Marsh");
   const [spread, setSpread] = useState("j_hook");
-  const [huntScore, setHuntScore] = useState(72);
   const [ducksHarvested, setDucksHarvested] = useState(0);
   const [notes, setNotes] = useState("");
   const [photos, setPhotos] = useState([]);
@@ -80,7 +82,6 @@ export default function LogScreen({ addLog, onLogout }) {
   function resetForm() {
     setEnvironment("Marsh");
     setSpread("j_hook");
-    setHuntScore(72);
     setDucksHarvested(0);
     setNotes("");
     setPhotos([]);
@@ -91,12 +92,23 @@ export default function LogScreen({ addLog, onLogout }) {
       Alert.alert("Missing GPS", "Wait for GPS (or enable location) before saving this hunt.");
       return;
     }
+    const selectedSpread = SPREADS.find((sp) => sp.key === spread);
     const entry = {
       id: `hunt-${Date.now()}`,
       createdAt: Date.now(),
       dateTime: new Date().toISOString(),
       environment,
       spread,
+      spreadDetails: selectedSpread
+        ? {
+            name: selectedSpread.name,
+            type: selectedSpread.type,
+            decoyCount: selectedSpread.decoyCount,
+            calling: selectedSpread.calling,
+            bestTime: selectedSpread.bestTime,
+            notes: selectedSpread.notes,
+          }
+        : null,
       huntScore,
       ducksHarvested,
       notes: notes.trim(),
@@ -188,7 +200,7 @@ export default function LogScreen({ addLog, onLogout }) {
             </ScrollView>
           </Card>
 
-          <Card title="Hunt Score (0–100)">
+          <Card title="Hunt Score">
             {(() => {
               const size = 220;
               const stroke = 14;
@@ -216,27 +228,15 @@ export default function LogScreen({ addLog, onLogout }) {
                       {Math.round(huntScore)}
                     </SvgText>
                     <SvgText x={cx} y={cy + 18} fill="#BDBDBD" fontSize="12" textAnchor="middle">
-                      {huntScore >= 70 ? "Great day" : huntScore >= 45 ? "Decent" : "Grind"}
+                      Hunt Probability
                     </SvgText>
                   </Svg>
                 </View>
               );
             })()}
-
-            <View style={{ flexDirection: "row", justifyContent: "center", gap: 16, marginTop: 10 }}>
-              <Pressable onPress={() => setHuntScore((prev) => clamp(prev - 5, 0, 100))} style={styles.stepBtn}>
-                <Text style={styles.stepBtnText}>–5</Text>
-              </Pressable>
-              <Pressable onPress={() => setHuntScore((prev) => clamp(prev - 1, 0, 100))} style={styles.stepBtn}>
-                <Text style={styles.stepBtnText}>–</Text>
-              </Pressable>
-              <Pressable onPress={() => setHuntScore((prev) => clamp(prev + 1, 0, 100))} style={styles.stepBtn}>
-                <Text style={styles.stepBtnText}>+</Text>
-              </Pressable>
-              <Pressable onPress={() => setHuntScore((prev) => clamp(prev + 5, 0, 100))} style={styles.stepBtn}>
-                <Text style={styles.stepBtnText}>+5</Text>
-              </Pressable>
-            </View>
+            <Text style={{ color: "#8E8E8E", fontSize: 11, fontWeight: "700", textAlign: "center", marginTop: 4 }}>
+              Auto-calculated from current weather conditions
+            </Text>
           </Card>
 
           <Card title="Ducks Harvested">

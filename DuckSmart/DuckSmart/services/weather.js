@@ -33,18 +33,25 @@ function hpaToInHg(hpa) {
   return hpa / 33.8639;
 }
 
-function unixToTimeString(unix) {
-  const d = new Date(unix * 1000);
-  let hours = d.getHours();
-  const mins = d.getMinutes().toString().padStart(2, "0");
+function unixToTimeString(unix, tzOffsetSec) {
+  const utcMs = unix * 1000;
+  const localMs = utcMs + (tzOffsetSec || 0) * 1000;
+  const d = new Date(localMs);
+  let hours = d.getUTCHours();
+  const mins = d.getUTCMinutes().toString().padStart(2, "0");
   const ampm = hours >= 12 ? "PM" : "AM";
   hours = hours % 12 || 12;
   return `${hours}:${mins} ${ampm}`;
 }
 
-function formatHourLabel(unix) {
-  const d = new Date(unix * 1000);
-  let hours = d.getHours();
+function formatHourLabel(unix, tzOffsetSec) {
+  // Use the location's timezone offset from OWM (seconds from UTC)
+  // instead of the device's local timezone
+  const utcMs = unix * 1000;
+  const localMs = utcMs + tzOffsetSec * 1000;
+  const d = new Date(localMs);
+  // getUTCHours gives us the "local" hour at the weather location
+  let hours = d.getUTCHours();
   if (hours === 0) return "12a";
   if (hours < 12) return `${hours}a`;
   if (hours === 12) return "12p";
@@ -66,13 +73,14 @@ function buildWeatherObject(current, forecast) {
   const pressureInHg = Math.round(hpaToInHg(pressureHpa) * 100) / 100;
   const cloudPct = current.clouds.all;
   const locationName = current.name || "Your Area";
+  const tzOffset = current.timezone || 0; // seconds from UTC for this location
 
   // precipChance: use the first forecast entry's pop (probability of precipitation)
   const precipChance = list.length > 0 ? Math.round((list[0].pop || 0) * 100) : 0;
 
-  // sunrise / sunset
-  const sunrise = current.sys.sunrise ? unixToTimeString(current.sys.sunrise) : "–";
-  const sunset = current.sys.sunset ? unixToTimeString(current.sys.sunset) : "–";
+  // sunrise / sunset — use the location's timezone
+  const sunrise = current.sys.sunrise ? unixToTimeString(current.sys.sunrise, tzOffset) : "–";
+  const sunset = current.sys.sunset ? unixToTimeString(current.sys.sunset, tzOffset) : "–";
 
   // --- delta calculations ---
 
@@ -101,7 +109,7 @@ function buildWeatherObject(current, forecast) {
 
   // --- hourly array (next 5 forecast entries) ---
   const hourly = list.slice(0, 5).map((entry, idx) => ({
-    t: idx === 0 ? "Now" : formatHourLabel(entry.dt),
+    t: idx === 0 ? "Now" : formatHourLabel(entry.dt, tzOffset),
     temp: Math.round(entry.main.temp),
     precip: Math.round((entry.pop || 0) * 100),
     wind: Math.round(entry.wind.speed),
