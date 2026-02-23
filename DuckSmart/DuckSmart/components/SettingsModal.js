@@ -18,10 +18,12 @@ import {
 } from "react-native";
 import { COLORS } from "../constants/theme";
 import { submitFeedback } from "../services/feedback";
+import { useAuth } from "../context/AuthContext";
 
 const CATEGORIES = ["Bug", "Feature Request", "Question", "Other"];
 
 export default function SettingsModal({ visible, onClose, onLogout }) {
+  const { deleteAccount } = useAuth();
   const [feedbackMsg, setFeedbackMsg] = useState("");
   const [category, setCategory] = useState("Bug");
   const [submitting, setSubmitting] = useState(false);
@@ -58,6 +60,41 @@ export default function SettingsModal({ visible, onClose, onLogout }) {
         },
       },
     ]);
+  }
+
+  function handleDeleteAccount() {
+    Alert.alert(
+      "Delete Account",
+      "This will permanently delete your account and all associated data (hunt logs, map pins, etc.). This action cannot be undone.",
+      [
+        { text: "Cancel", style: "cancel" },
+        {
+          text: "Delete Account",
+          style: "destructive",
+          onPress: () => {
+            Alert.alert(
+              "Are you sure?",
+              "This is your last chance. Your account and all data will be permanently removed.",
+              [
+                { text: "Keep Account", style: "cancel" },
+                {
+                  text: "Delete Forever",
+                  style: "destructive",
+                  onPress: async () => {
+                    try {
+                      await deleteAccount();
+                      onClose();
+                    } catch {
+                      // Error is set in AuthContext and shown to the user
+                    }
+                  },
+                },
+              ]
+            );
+          },
+        },
+      ]
+    );
   }
 
   return (
@@ -127,6 +164,11 @@ export default function SettingsModal({ visible, onClose, onLogout }) {
             <Text style={ms.logoutBtnText}>Log Out</Text>
           </Pressable>
 
+          {/* Delete Account */}
+          <Pressable style={ms.deleteBtn} onPress={handleDeleteAccount}>
+            <Text style={ms.deleteBtnText}>Delete Account</Text>
+          </Pressable>
+
           <View style={{ height: 40 }} />
         </ScrollView>
       </KeyboardAvoidingView>
@@ -183,4 +225,10 @@ const ms = StyleSheet.create({
     backgroundColor: COLORS.bgDeep, borderWidth: 1, borderColor: COLORS.red, alignItems: "center",
   },
   logoutBtnText: { color: COLORS.red, fontWeight: "900", fontSize: 15 },
+
+  deleteBtn: {
+    marginTop: 10, paddingVertical: 14, borderRadius: 14,
+    backgroundColor: COLORS.bgDeep, borderWidth: 1, borderColor: COLORS.border, alignItems: "center",
+  },
+  deleteBtnText: { color: COLORS.mutedDark, fontWeight: "900", fontSize: 13 },
 });

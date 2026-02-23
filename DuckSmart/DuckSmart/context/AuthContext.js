@@ -11,11 +11,13 @@ import {
   signInWithEmailAndPassword,
   createUserWithEmailAndPassword,
   signOut,
+  deleteUser,
   GoogleAuthProvider,
   OAuthProvider,
   signInWithCredential,
 } from "firebase/auth";
 import { auth } from "../services/firebase";
+import { clearAllData } from "../services/storage";
 import Constants from "expo-constants";
 
 // ---------------------------------------------------------------------------
@@ -212,6 +214,34 @@ export function AuthProvider({ children }) {
     }
   }, []);
 
+  // --------------- Delete Account ---------------
+
+  const deleteAccount = useCallback(async () => {
+    setError(null);
+    try {
+      // Sign out of Google if it was used
+      if (isGoogleAvailable && GoogleSignin) {
+        try {
+          await GoogleSignin.signOut();
+        } catch (_) {
+          /* ignore */
+        }
+      }
+      // Clear local data (logs, pins, weather cache)
+      await clearAllData();
+      // Delete the Firebase user (permanently removes the account)
+      await deleteUser(auth.currentUser);
+    } catch (err) {
+      // Firebase requires recent authentication for account deletion
+      if (err.code === "auth/requires-recent-login") {
+        setError("For security, please log out and log back in before deleting your account.");
+      } else {
+        setError(err.message);
+      }
+      throw err;
+    }
+  }, []);
+
   const clearError = useCallback(() => setError(null), []);
 
   return (
@@ -223,6 +253,7 @@ export function AuthProvider({ children }) {
         login,
         signup,
         logout,
+        deleteAccount,
         clearError,
         loginWithGoogle,
         loginWithApple,

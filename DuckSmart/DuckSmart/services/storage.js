@@ -11,6 +11,16 @@ const KEYS = {
   WEATHER_CACHE: "@ducksmart_weather_cache",
 };
 
+// ── Clear all user data ─────────────────────────────────────
+
+export async function clearAllData() {
+  try {
+    await AsyncStorage.multiRemove(Object.values(KEYS));
+  } catch (err) {
+    console.error("DuckSmart: failed to clear data", err.message);
+  }
+}
+
 // ── Logs ─────────────────────────────────────────────────────
 
 export async function saveLogs(logs) {
