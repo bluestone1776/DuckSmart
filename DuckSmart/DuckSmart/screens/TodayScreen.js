@@ -1,4 +1,4 @@
-import React, { useMemo, useState, useCallback } from "react";
+import React, { useMemo, useState, useCallback, useEffect } from "react";
 import {
   SafeAreaView,
   View,
@@ -17,7 +17,7 @@ import {
 import Svg, { Path, Circle, Text as SvgText } from "react-native-svg";
 import MapView, { UrlTile } from "react-native-maps";
 import { COLORS } from "../constants/theme";
-import { OWM_API_KEY } from "../config";
+import { getRadarTileUrl, formatRadarAge } from "../services/radar";
 import { ASSETS } from "../constants/assets";
 import { clamp } from "../utils/helpers";
 import { formatWind } from "../utils/helpers";
@@ -233,6 +233,24 @@ export default function TodayScreen({ onLogout }) {
   const [dSpecies, setDSpecies] = useState(SPECIES_OPTIONS[0]);
   const [spreadModal, setSpreadModal] = useState(null); // spread object or null
 
+  // ---------------------------------------------------------------------------
+  // Weather Radar — RainViewer live radar tiles
+  // ---------------------------------------------------------------------------
+  const [radarTileUrl, setRadarTileUrl] = useState(null);
+  const [radarTimestamp, setRadarTimestamp] = useState(null);
+
+  const loadRadar = useCallback(async () => {
+    const result = await getRadarTileUrl();
+    if (result) {
+      setRadarTileUrl(result.tileUrl);
+      setRadarTimestamp(result.timestamp);
+    }
+  }, []);
+
+  useEffect(() => {
+    loadRadar();
+  }, [loadRadar]);
+
   const recommendation = useMemo(
     () =>
       recommendSpread({
@@ -247,9 +265,9 @@ export default function TodayScreen({ onLogout }) {
 
   const onRefresh = useCallback(async () => {
     setRefreshing(true);
-    await refresh();
+    await Promise.all([refresh(), loadRadar()]);
     setRefreshing(false);
-  }, [refresh]);
+  }, [refresh, loadRadar]);
 
   const toggleHuntAlerts = useCallback(async () => {
     if (alertsOn) {
@@ -386,9 +404,16 @@ export default function TodayScreen({ onLogout }) {
           </Pressable>
         </TodayCard>
 
-        {/* Weather Radar */}
-        {coords && (
-          <TodayCard title="Weather Radar">
+        {/* Weather Radar — RainViewer live radar */}
+        {coords && radarTileUrl && (
+          <TodayCard
+            title="Weather Radar"
+            right={
+              <Pressable style={s.radarRefreshBtn} onPress={loadRadar}>
+                <Text style={s.radarRefreshText}>↻</Text>
+              </Pressable>
+            }
+          >
             <View style={s.radarWrap}>
               <MapView
                 style={s.radarMap}
@@ -402,13 +427,15 @@ export default function TodayScreen({ onLogout }) {
                 pointerEvents="none"
               >
                 <UrlTile
-                  urlTemplate={`https://tile.openweathermap.org/map/precipitation_new/{z}/{x}/{y}.png?appid=${OWM_API_KEY}`}
+                  urlTemplate={radarTileUrl}
                   zIndex={1}
-                  opacity={0.6}
+                  opacity={0.7}
                 />
               </MapView>
             </View>
-            <Text style={s.radarCaption}>Precipitation radar • Your area</Text>
+            <Text style={s.radarCaption}>
+              Live radar • {formatRadarAge(radarTimestamp)}
+            </Text>
           </TodayCard>
         )}
 
@@ -773,6 +800,12 @@ const s = StyleSheet.create({
   radarWrap: { borderRadius: 14, overflow: "hidden", borderWidth: 1, borderColor: COLORS.borderSubtle },
   radarMap: { width: "100%", height: 200 },
   radarCaption: { color: COLORS.mutedDark, fontSize: 11, fontWeight: "700", marginTop: 8, textAlign: "center" },
+  radarRefreshBtn: {
+    width: 32, height: 32, borderRadius: 10,
+    backgroundColor: COLORS.bgDeep, borderWidth: 1, borderColor: COLORS.border,
+    alignItems: "center", justifyContent: "center",
+  },
+  radarRefreshText: { color: COLORS.muted, fontSize: 16, fontWeight: "900" },
 
   disclaimer: { marginTop: 18, color: COLORS.mutedDarker, fontSize: 11, lineHeight: 17, fontWeight: "700", textAlign: "center", paddingHorizontal: 8 },
 });
