@@ -116,6 +116,15 @@ function buildWeatherObject(current, forecast) {
     gust: Math.round(entry.wind.gust || entry.wind.speed),
   }));
 
+  // --- 48-hour trend data (up to 16 forecast entries = 48hrs at 3hr intervals) ---
+  const trends48h = list.slice(0, 16).map((entry) => ({
+    t: formatHourLabel(entry.dt, tzOffset),
+    temp: Math.round(entry.main.temp),
+    pressureInHg: Math.round(hpaToInHg(entry.main.pressure) * 100) / 100,
+    wind: Math.round(entry.wind.speed),
+    windDeg: entry.wind.deg || 0,
+  }));
+
   return {
     locationName,
     tempF,
@@ -130,6 +139,7 @@ function buildWeatherObject(current, forecast) {
     sunrise,
     sunset,
     hourly,
+    trends48h,
   };
 }
 
@@ -179,5 +189,23 @@ export const MOCK_WEATHER = {
     { t: "2p", temp: 34, precip: 35, wind: 14, gust: 22 },
     { t: "3p", temp: 34, precip: 40, wind: 13, gust: 21 },
     { t: "4p", temp: 32, precip: 30, wind: 11, gust: 17 },
+  ],
+  trends48h: [
+    { t: "12p", temp: 31, pressureInHg: 30.08, wind: 12, windDeg: 315 },
+    { t: "3p",  temp: 33, pressureInHg: 30.05, wind: 13, windDeg: 310 },
+    { t: "6p",  temp: 30, pressureInHg: 30.02, wind: 14, windDeg: 305 },
+    { t: "9p",  temp: 27, pressureInHg: 29.98, wind: 11, windDeg: 300 },
+    { t: "12a", temp: 24, pressureInHg: 29.95, wind: 10, windDeg: 295 },
+    { t: "3a",  temp: 22, pressureInHg: 29.92, wind: 9,  windDeg: 290 },
+    { t: "6a",  temp: 21, pressureInHg: 29.90, wind: 8,  windDeg: 285 },
+    { t: "9a",  temp: 25, pressureInHg: 29.88, wind: 10, windDeg: 280 },
+    { t: "12p", temp: 29, pressureInHg: 29.92, wind: 12, windDeg: 275 },
+    { t: "3p",  temp: 31, pressureInHg: 29.95, wind: 14, windDeg: 270 },
+    { t: "6p",  temp: 28, pressureInHg: 29.98, wind: 12, windDeg: 265 },
+    { t: "9p",  temp: 25, pressureInHg: 30.00, wind: 10, windDeg: 260 },
+    { t: "12a", temp: 22, pressureInHg: 30.02, wind: 8,  windDeg: 255 },
+    { t: "3a",  temp: 20, pressureInHg: 30.04, wind: 7,  windDeg: 250 },
+    { t: "6a",  temp: 19, pressureInHg: 30.06, wind: 6,  windDeg: 250 },
+    { t: "9a",  temp: 23, pressureInHg: 30.08, wind: 9,  windDeg: 255 },
   ],
 };

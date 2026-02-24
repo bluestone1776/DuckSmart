@@ -14,7 +14,7 @@ import {
   Image,
   Dimensions,
 } from "react-native";
-import Svg, { Path, Circle, Text as SvgText } from "react-native-svg";
+import Svg, { Path, Circle, Line, Polygon, Text as SvgText } from "react-native-svg";
 import MapView, { UrlTile } from "react-native-maps";
 import { COLORS } from "../constants/theme";
 import { getRadarTileUrl, formatRadarAge } from "../services/radar";
@@ -117,6 +117,127 @@ function TodayHalfGauge({ value, size = 220 }) {
         </SvgText>
       </Svg>
 
+    </View>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// 48-Hour Trend Sparkline — mini SVG line chart
+// ---------------------------------------------------------------------------
+function TrendSparkline({ data, color, width = 280, height = 60, suffix = "" }) {
+  if (!data || data.length < 2) return null;
+
+  const pad = 4;
+  const minV = Math.min(...data);
+  const maxV = Math.max(...data);
+  const range = maxV - minV || 1;
+
+  // Calculate x,y for each data point
+  const pts = data.map((v, i) => ({
+    x: pad + (i / (data.length - 1)) * (width - pad * 2),
+    y: pad + (1 - (v - minV) / range) * (height - pad * 2),
+  }));
+
+  // Build SVG path
+  const linePath = pts.map((p, i) => `${i === 0 ? "M" : "L"} ${p.x} ${p.y}`).join(" ");
+  const areaPath = `${linePath} L ${pts[pts.length - 1].x} ${height} L ${pts[0].x} ${height} Z`;
+
+  const first = data[0];
+  const last = data[data.length - 1];
+  const trendArrow = last > first ? "▲" : last < first ? "▼" : "—";
+  const trendColor = last > first ? COLORS.red : last < first ? "#3498DB" : COLORS.muted;
+
+  return (
+    <View>
+      <Svg width={width} height={height}>
+        <Path d={areaPath} fill={color} opacity={0.1} />
+        <Path d={linePath} stroke={color} strokeWidth={2} fill="none" />
+        <Circle cx={pts[0].x} cy={pts[0].y} r={3} fill={color} />
+        <Circle cx={pts[pts.length - 1].x} cy={pts[pts.length - 1].y} r={3} fill={color} />
+      </Svg>
+      <View style={s.trendMeta}>
+        <Text style={[s.trendArrow, { color: trendColor }]}>{trendArrow}</Text>
+        <Text style={s.trendRange}>
+          {minV}{suffix} – {maxV}{suffix}
+        </Text>
+      </View>
+    </View>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Wind Compass — SVG compass showing wind direction
+// ---------------------------------------------------------------------------
+function WindCompass({ deg, speed, size = 80 }) {
+  const cx = size / 2;
+  const cy = size / 2;
+  const r = size / 2 - 8;
+  const arrowLen = r - 6;
+
+  // Wind degrees indicate where wind is coming FROM
+  // Arrow points in the direction wind blows TO (add 180°)
+  const toRad = (d) => (d * Math.PI) / 180;
+  const blowTo = deg + 180;
+  const tipX = cx + arrowLen * Math.sin(toRad(blowTo));
+  const tipY = cy - arrowLen * Math.cos(toRad(blowTo));
+  const tailX = cx - (arrowLen * 0.35) * Math.sin(toRad(blowTo));
+  const tailY = cy + (arrowLen * 0.35) * Math.cos(toRad(blowTo));
+
+  // Arrow head wings
+  const wingSpread = 8;
+  const wingBack = 12;
+  const wing1X = tipX - wingSpread * Math.cos(toRad(blowTo)) - wingBack * Math.sin(toRad(blowTo));
+  const wing1Y = tipY - wingSpread * Math.sin(toRad(blowTo)) + wingBack * Math.cos(toRad(blowTo));
+  const wing2X = tipX + wingSpread * Math.cos(toRad(blowTo)) - wingBack * Math.sin(toRad(blowTo));
+  const wing2Y = tipY + wingSpread * Math.sin(toRad(blowTo)) + wingBack * Math.cos(toRad(blowTo));
+
+  const cardinals = [
+    { label: "N", angle: 0 },
+    { label: "E", angle: 90 },
+    { label: "S", angle: 180 },
+    { label: "W", angle: 270 },
+  ];
+
+  return (
+    <View style={{ alignItems: "center" }}>
+      <Svg width={size} height={size}>
+        {/* Outer ring */}
+        <Circle cx={cx} cy={cy} r={r} stroke={COLORS.border} strokeWidth={1.5} fill={COLORS.bgDeep} />
+
+        {/* Cardinal tick marks and labels */}
+        {cardinals.map((c) => {
+          const lx = cx + (r - 2) * Math.sin(toRad(c.angle));
+          const ly = cy - (r - 2) * Math.cos(toRad(c.angle));
+          return (
+            <SvgText
+              key={c.label}
+              x={lx}
+              y={ly + 4}
+              fill={c.label === "N" ? COLORS.green : COLORS.mutedDark}
+              fontSize={9}
+              fontWeight="900"
+              textAnchor="middle"
+            >
+              {c.label}
+            </SvgText>
+          );
+        })}
+
+        {/* Arrow shaft */}
+        <Line x1={tailX} y1={tailY} x2={tipX} y2={tipY} stroke={COLORS.green} strokeWidth={2.5} />
+
+        {/* Arrow head */}
+        <Polygon
+          points={`${tipX},${tipY} ${wing1X},${wing1Y} ${wing2X},${wing2Y}`}
+          fill={COLORS.green}
+        />
+
+        {/* Center dot */}
+        <Circle cx={cx} cy={cy} r={4} fill={COLORS.bgDeep} stroke={COLORS.border} strokeWidth={1} />
+      </Svg>
+      {speed !== undefined && (
+        <Text style={s.compassSpeed}>{speed} mph</Text>
+      )}
     </View>
   );
 }
@@ -383,26 +504,35 @@ export default function TodayScreen({ onLogout }) {
           <View style={s.metricRow}>
             <TodayMetricPill label="Temp" value={`${weather.tempF}°F`} />
             <TodayMetricPill label="Feels" value={`${weather.feelsLikeF}°F`} />
+            <TodayMetricPill label="Precip" value={`${weather.precipChance}%`} />
+          </View>
+
+          <View style={s.metricRow}>
+            <TodayMetricPill label="Pressure" value={`${weather.pressureInHg}`} />
+            <TodayMetricPill label="Clouds" value={`${weather.cloudPct}%`} />
             <TodayMetricPill
               label="Wind"
               value={`${weather.windMph} mph ${formatWind(weather.windDeg)}`}
             />
           </View>
 
-          <View style={s.metricRow}>
-            <TodayMetricPill label="Pressure" value={`${weather.pressureInHg}`} />
-            <TodayMetricPill label="Precip" value={`${weather.precipChance}%`} />
-            <TodayMetricPill label="Clouds" value={`${weather.cloudPct}%`} />
-          </View>
-
-          <View style={s.sunRow}>
-            <View style={s.sunPill}>
-              <Text style={s.sunLabel}>Sunrise</Text>
-              <Text style={s.sunValue}>{weather.sunrise}</Text>
-            </View>
-            <View style={s.sunPill}>
-              <Text style={s.sunLabel}>Sunset</Text>
-              <Text style={s.sunValue}>{weather.sunset}</Text>
+          {/* Wind compass + Sun times */}
+          <View style={s.windCompassRow}>
+            <WindCompass deg={weather.windDeg} speed={weather.windMph} size={80} />
+            <View style={{ flex: 1, marginLeft: 12 }}>
+              <Text style={s.windFromLabel}>
+                Wind from <Text style={{ color: COLORS.green }}>{formatWind(weather.windDeg)}</Text>
+              </Text>
+              <View style={s.sunRow}>
+                <View style={s.sunPill}>
+                  <Text style={s.sunLabel}>Sunrise</Text>
+                  <Text style={s.sunValue}>{weather.sunrise}</Text>
+                </View>
+                <View style={s.sunPill}>
+                  <Text style={s.sunLabel}>Sunset</Text>
+                  <Text style={s.sunValue}>{weather.sunset}</Text>
+                </View>
+              </View>
             </View>
           </View>
 
@@ -494,10 +624,67 @@ export default function TodayScreen({ onLogout }) {
           </ScrollView>
         </TodayCard>
 
+        {/* 48-Hour Trends — Pro feature */}
+        {weather.trends48h && weather.trends48h.length > 2 && (
+          isPro ? (
+            <TodayCard title="48-Hour Trends">
+              <View style={s.trendSection}>
+                <Text style={s.trendLabel}>Temperature (°F)</Text>
+                <TrendSparkline
+                  data={weather.trends48h.map((d) => d.temp)}
+                  color={COLORS.green}
+                  width={SCREEN_WIDTH - 64}
+                  height={55}
+                  suffix="°"
+                />
+              </View>
+              <View style={s.trendSection}>
+                <Text style={s.trendLabel}>Barometric Pressure (inHg)</Text>
+                <TrendSparkline
+                  data={weather.trends48h.map((d) => d.pressureInHg)}
+                  color={COLORS.yellow}
+                  width={SCREEN_WIDTH - 64}
+                  height={55}
+                  suffix=""
+                />
+              </View>
+              <View style={s.trendTimeRow}>
+                <Text style={s.trendTimeLabel}>Now</Text>
+                <Text style={s.trendTimeLabel}>24h</Text>
+                <Text style={s.trendTimeLabel}>48h</Text>
+              </View>
+            </TodayCard>
+          ) : (
+            <TodayCard
+              title="48-Hour Trends"
+              right={
+                <View style={s.proTagPill}>
+                  <Text style={s.proTagText}>PRO</Text>
+                </View>
+              }
+            >
+              <ProUpgradePrompt message="Unlock 48-hour temperature and pressure trend charts to spot cold fronts and pressure changes before they arrive." />
+            </TodayCard>
+          )
+        )}
+
         {/* ================================================================
             DECOY SPREAD ADVISOR — Selection → Recommendation → Image Popup
             ================================================================ */}
         <TodayCard title="Decoy Spread Advisor">
+
+          {/* Wind compass for spread orientation */}
+          <View style={s.decoyCompassRow}>
+            <WindCompass deg={weather.windDeg} size={64} />
+            <View style={{ flex: 1, marginLeft: 12 }}>
+              <Text style={s.decoyCompassTitle}>
+                Wind: {formatWind(weather.windDeg)} at {weather.windMph} mph
+              </Text>
+              <Text style={s.decoyCompassHint}>
+                Set your spread with the open end facing downwind
+              </Text>
+            </View>
+          </View>
 
           {/* Selection pickers */}
           <PickerRow label="Water Type" options={WATER_TYPES} value={dWater} onChange={setDWater} />
@@ -700,6 +887,42 @@ const s = StyleSheet.create({
 
   proTagPill: { paddingVertical: 4, paddingHorizontal: 10, borderRadius: 999, backgroundColor: COLORS.greenBg, borderWidth: 1, borderColor: COLORS.green },
   proTagText: { color: COLORS.green, fontSize: 10, fontWeight: "900" },
+
+  // ---- Wind Compass ----
+  windCompassRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    marginTop: 10,
+    padding: 10,
+    borderRadius: 14,
+    backgroundColor: COLORS.bgDeep,
+    borderWidth: 1,
+    borderColor: COLORS.borderSubtle,
+  },
+  windFromLabel: { color: COLORS.muted, fontSize: 13, fontWeight: "800", marginBottom: 8 },
+  compassSpeed: { color: COLORS.muted, fontSize: 11, fontWeight: "800", marginTop: 2 },
+
+  // ---- 48-Hour Trends ----
+  trendSection: { marginBottom: 14 },
+  trendLabel: { color: COLORS.muted, fontSize: 12, fontWeight: "900", marginBottom: 6 },
+  trendMeta: { flexDirection: "row", alignItems: "center", gap: 6, marginTop: 2 },
+  trendArrow: { fontSize: 12, fontWeight: "900" },
+  trendRange: { color: COLORS.mutedDark, fontSize: 11, fontWeight: "700" },
+  trendTimeRow: { flexDirection: "row", justifyContent: "space-between", paddingHorizontal: 4 },
+  trendTimeLabel: { color: COLORS.mutedDarker, fontSize: 10, fontWeight: "700" },
+
+  // ---- Decoy Compass ----
+  decoyCompassRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    padding: 10,
+    borderRadius: 14,
+    backgroundColor: COLORS.bgDeep,
+    borderWidth: 1,
+    borderColor: COLORS.borderSubtle,
+  },
+  decoyCompassTitle: { color: COLORS.white, fontSize: 14, fontWeight: "800" },
+  decoyCompassHint: { color: COLORS.mutedDark, fontSize: 12, fontWeight: "700", marginTop: 4, lineHeight: 16 },
 
   alertBtn: {
     marginTop: 10,
