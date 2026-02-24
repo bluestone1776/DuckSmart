@@ -6,6 +6,7 @@ import {
   Pressable,
   ScrollView,
   StatusBar,
+  StyleSheet,
   TextInput,
   Alert,
   Platform,
@@ -13,17 +14,28 @@ import {
   Image,
   Linking,
 } from "react-native";
-import MapView, { Marker } from "react-native-maps";
+import MapView, { Marker, UrlTile } from "react-native-maps";
 import * as Location from "expo-location";
+import * as FileSystem from "expo-file-system";
 
 import { sharedStyles as styles } from "../constants/styles";
 import { ASSETS } from "../constants/assets";
-import { PIN_TYPES } from "../constants/theme";
+import { COLORS, PIN_TYPES } from "../constants/theme";
 import Chip from "../components/Chip";
 import RowHeader from "../components/RowHeader";
 import { usePremium } from "../context/PremiumContext";
+import { REGRID_TOKEN } from "../config";
 
 const FREE_PIN_LIMIT = 5; // Free users: max 5 pins, Pro: unlimited
+
+// ---------------------------------------------------------------------------
+// Regrid property lines — tile URL + local cache dir
+// ---------------------------------------------------------------------------
+const REGRID_TILE_URL = REGRID_TOKEN
+  ? `https://tiles.regrid.com/api/v1/parcels/{z}/{x}/{y}.png?token=${REGRID_TOKEN}`
+  : null;
+
+const PARCEL_CACHE_DIR = `${FileSystem.cacheDirectory}regrid_tiles/`;
 
 export default function MapScreen({ pins, setPins }) {
   const { isPro, purchase } = usePremium();
@@ -39,6 +51,7 @@ export default function MapScreen({ pins, setPins }) {
   const [draftNotes, setDraftNotes] = useState("");
 
   const [mapType, setMapType] = useState("hybrid"); // "standard" | "satellite" | "hybrid"
+  const [showParcels, setShowParcels] = useState(false); // Property line overlay (Pro)
   const [selectedPinId, setSelectedPinId] = useState(null);
   const selectedPin = useMemo(() => pins.find((p) => p.id === selectedPinId) || null, [pins, selectedPinId]);
 
@@ -137,6 +150,25 @@ export default function MapScreen({ pins, setPins }) {
     ]);
   }
 
+  function toggleParcels() {
+    if (!isPro) {
+      Alert.alert(
+        "Pro Feature",
+        "Property line overlays require DuckSmart Pro. See parcel boundaries, owner info, and lot lines on the map.",
+        [
+          { text: "Not Now", style: "cancel" },
+          { text: "Upgrade to Pro", onPress: purchase },
+        ]
+      );
+      return;
+    }
+    if (!REGRID_TILE_URL) {
+      Alert.alert("Not Configured", "Property lines are not available yet. Check back soon!");
+      return;
+    }
+    setShowParcels((prev) => !prev);
+  }
+
   function goToUser() {
     if (!userLoc) return;
     const r = { ...userLoc, latitudeDelta: 0.02, longitudeDelta: 0.02 };
@@ -199,6 +231,12 @@ export default function MapScreen({ pins, setPins }) {
             >
               <Text style={styles.iconBtnText}>{mapType === "standard" ? "🗺" : mapType === "satellite" ? "🛰" : "🛰"}</Text>
             </Pressable>
+            <Pressable
+              style={[styles.iconBtn, showParcels ? styles.iconBtnActive : null]}
+              onPress={toggleParcels}
+            >
+              <Text style={styles.iconBtnText}>▦</Text>
+            </Pressable>
             <Pressable style={styles.iconBtn} onPress={goToUser} disabled={!userLoc}>
               <Text style={styles.iconBtnText}>◎</Text>
             </Pressable>
@@ -241,7 +279,30 @@ export default function MapScreen({ pins, setPins }) {
             );
           })}
           {isAddMode && draftCoord ? <Marker coordinate={draftCoord} pinColor="#2ECC71" title="New Pin" /> : null}
+
+          {/* Regrid property line tiles — Pro only */}
+          {showParcels && REGRID_TILE_URL && (
+            <UrlTile
+              urlTemplate={REGRID_TILE_URL}
+              zIndex={2}
+              opacity={0.65}
+              minimumZ={10}
+              maximumZ={21}
+              tileSize={256}
+              tileCachePath={PARCEL_CACHE_DIR}
+            />
+          )}
         </MapView>
+
+        {/* Property lines active indicator */}
+        {showParcels && (
+          <View style={localStyles.parcelBadge}>
+            <Text style={localStyles.parcelBadgeText}>▦ Property Lines</Text>
+            <Pressable onPress={() => setShowParcels(false)}>
+              <Text style={localStyles.parcelBadgeClose}>✕</Text>
+            </Pressable>
+          </View>
+        )}
 
         <KeyboardAvoidingView behavior={Platform.OS === "ios" ? "padding" : undefined}>
           <View style={styles.sheet}>
@@ -362,3 +423,34 @@ export default function MapScreen({ pins, setPins }) {
     </SafeAreaView>
   );
 }
+
+// ---------------------------------------------------------------------------
+// Local styles (MapScreen-specific, not shared)
+// ---------------------------------------------------------------------------
+const localStyles = StyleSheet.create({
+  parcelBadge: {
+    position: "absolute",
+    bottom: 180,
+    alignSelf: "center",
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 8,
+    paddingVertical: 8,
+    paddingHorizontal: 14,
+    borderRadius: 999,
+    backgroundColor: "rgba(14,26,18,0.92)",
+    borderWidth: 1,
+    borderColor: COLORS.green,
+  },
+  parcelBadgeText: {
+    color: COLORS.green,
+    fontSize: 12,
+    fontWeight: "900",
+  },
+  parcelBadgeClose: {
+    color: COLORS.muted,
+    fontSize: 14,
+    fontWeight: "700",
+    marginLeft: 4,
+  },
+});

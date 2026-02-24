@@ -37,6 +37,7 @@
     },
     "extra": {
       "openWeatherMapApiKey": "54a32367fdf9d9d889a75ab2779ec498",
+      "regridToken": "",
       "firebase": {
         "androidApiKey": "AIzaSyBnwwwpGQv_-UfdxPmDWbQM1tR7Z6obH74",
         "iosApiKey": "AIzaSyAYuVXKtrMbp1D8pAy0EAFArONDrp6W-iY",
