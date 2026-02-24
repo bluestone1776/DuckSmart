@@ -21,8 +21,12 @@ import { ASSETS } from "../constants/assets";
 import { PIN_TYPES } from "../constants/theme";
 import Chip from "../components/Chip";
 import RowHeader from "../components/RowHeader";
+import { usePremium } from "../context/PremiumContext";
+
+const FREE_PIN_LIMIT = 5; // Free users: max 5 pins, Pro: unlimited
 
 export default function MapScreen({ pins, setPins }) {
+  const { isPro, purchase } = usePremium();
   const mapRef = useRef(null);
   const [permissionState, setPermissionState] = useState("unknown");
   const [userLoc, setUserLoc] = useState(null);
@@ -61,6 +65,19 @@ export default function MapScreen({ pins, setPins }) {
   }, []);
 
   function startAddPin() {
+    // Free users limited to FREE_PIN_LIMIT pins
+    if (!isPro && pins.length >= FREE_PIN_LIMIT) {
+      Alert.alert(
+        "Pin Limit Reached",
+        `Free accounts can save up to ${FREE_PIN_LIMIT} pins. Upgrade to DuckSmart Pro for unlimited scouting pins.`,
+        [
+          { text: "Not Now", style: "cancel" },
+          { text: "Upgrade to Pro", onPress: purchase },
+        ]
+      );
+      return;
+    }
+
     setIsAddMode(true);
     setDraftCoord(null);
     setDraftTitle("");
@@ -309,7 +326,10 @@ export default function MapScreen({ pins, setPins }) {
               </>
             ) : (
               <>
-                <RowHeader title="Pins" pill={`${pins.length} saved`} />
+                <RowHeader
+                  title="Pins"
+                  pill={isPro ? `${pins.length} saved` : `${pins.length}/${FREE_PIN_LIMIT}`}
+                />
                 <ScrollView horizontal showsHorizontalScrollIndicator={false}>
                   <View style={styles.pinListRow}>
                     {pins.slice(0, 10).map((p) => (
@@ -330,7 +350,9 @@ export default function MapScreen({ pins, setPins }) {
                   </View>
                 </ScrollView>
                 <Text style={styles.sheetHint}>
-                  Tap <Text style={{ color: "#2ECC71", fontWeight: "900" }}>+</Text> to add a scouting pin, or tap a marker to view details.
+                  {!isPro && pins.length >= FREE_PIN_LIMIT
+                    ? "Pin limit reached — upgrade to Pro for unlimited pins."
+                    : <>Tap <Text style={{ color: "#2ECC71", fontWeight: "900" }}>+</Text> to add a scouting pin, or tap a marker to view details.</>}
                 </Text>
               </>
             )}

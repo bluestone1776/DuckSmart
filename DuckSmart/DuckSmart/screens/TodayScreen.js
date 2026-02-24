@@ -33,6 +33,8 @@ import {
   recommendSpread,
 } from "../data/decoySpreadData";
 import AdBanner from "../components/AdBanner";
+import ProUpgradePrompt from "../components/ProUpgradePrompt";
+import { usePremium } from "../context/PremiumContext";
 
 const SCREEN_WIDTH = Dimensions.get("window").width;
 
@@ -212,8 +214,15 @@ function SpreadImageModal({ visible, onClose, spread }) {
 
 // --- Main screen ---
 
+// ---------------------------------------------------------------------------
+// Freemium gating limits
+// ---------------------------------------------------------------------------
+const FREE_HOURLY_LIMIT = 3;   // Free users see 3 hours; Pro sees all 5
+const FREE_SPREAD_LIMIT = 2;   // Free users see 2 spreads; Pro sees all
+
 export default function TodayScreen({ onLogout }) {
   const { weather, loading, refresh, coords } = useWeather();
+  const { isPro } = usePremium();
   const [refreshing, setRefreshing] = useState(false);
   const [alertsOn, setAlertsOn] = useState(false);
 
@@ -404,14 +413,20 @@ export default function TodayScreen({ onLogout }) {
           </Pressable>
         </TodayCard>
 
-        {/* Weather Radar — RainViewer live radar */}
+        {/* Weather Radar — free: static snapshot, Pro: live + refresh */}
         {coords && radarTileUrl && (
           <TodayCard
             title="Weather Radar"
             right={
-              <Pressable style={s.radarRefreshBtn} onPress={loadRadar}>
-                <Text style={s.radarRefreshText}>↻</Text>
-              </Pressable>
+              isPro ? (
+                <Pressable style={s.radarRefreshBtn} onPress={loadRadar}>
+                  <Text style={s.radarRefreshText}>↻</Text>
+                </Pressable>
+              ) : (
+                <View style={s.proTagPill}>
+                  <Text style={s.proTagText}>Static</Text>
+                </View>
+              )
             }
           >
             <View style={s.radarWrap}>
@@ -434,24 +449,47 @@ export default function TodayScreen({ onLogout }) {
               </MapView>
             </View>
             <Text style={s.radarCaption}>
-              Live radar • {formatRadarAge(radarTimestamp)}
+              {isPro
+                ? `Live radar • ${formatRadarAge(radarTimestamp)}`
+                : "Static radar • Upgrade to Pro for live refresh"}
             </Text>
           </TodayCard>
         )}
 
-        {/* Hourly quick look */}
-        <TodayCard title="Hourly Snapshot">
+        {/* Hourly quick look — free: 3hrs, Pro: all */}
+        <TodayCard
+          title="Hourly Snapshot"
+          right={
+            !isPro ? (
+              <View style={s.proTagPill}>
+                <Text style={s.proTagText}>PRO unlocks all</Text>
+              </View>
+            ) : null
+          }
+        >
           <ScrollView horizontal showsHorizontalScrollIndicator={false}>
             <View style={s.hourlyRow}>
-              {weather.hourly.map((h) => (
-                <View key={h.t} style={s.hourlyCard}>
-                  <Text style={s.hourlyTime}>{h.t}</Text>
-                  <Text style={s.hourlyTemp}>{h.temp}°</Text>
-                  <Text style={s.hourlySmall}>Precip {h.precip}%</Text>
-                  <Text style={s.hourlySmall}>Wind {h.wind} mph</Text>
-                  <Text style={s.hourlySmall}>Gust {h.gust}</Text>
+              {weather.hourly
+                .slice(0, isPro ? weather.hourly.length : FREE_HOURLY_LIMIT)
+                .map((h) => (
+                  <View key={h.t} style={s.hourlyCard}>
+                    <Text style={s.hourlyTime}>{h.t}</Text>
+                    <Text style={s.hourlyTemp}>{h.temp}°</Text>
+                    <Text style={s.hourlySmall}>Precip {h.precip}%</Text>
+                    <Text style={s.hourlySmall}>Wind {h.wind} mph</Text>
+                    <Text style={s.hourlySmall}>Gust {h.gust}</Text>
+                  </View>
+                ))}
+
+              {/* Locked placeholder cards for free users */}
+              {!isPro && weather.hourly.length > FREE_HOURLY_LIMIT && (
+                <View style={[s.hourlyCard, s.hourlyCardLocked]}>
+                  <Text style={s.hourlyLockIcon}>🔒</Text>
+                  <Text style={s.hourlyLockText}>
+                    +{weather.hourly.length - FREE_HOURLY_LIMIT} more{"\n"}with Pro
+                  </Text>
                 </View>
-              ))}
+              )}
             </View>
           </ScrollView>
         </TodayCard>
@@ -496,29 +534,39 @@ export default function TodayScreen({ onLogout }) {
                 <Text style={s.recChevron}>›</Text>
               </Pressable>
 
-              {/* Runner up spreads */}
+              {/* Runner up spreads — free: 1 runner-up (2 total), Pro: all */}
               {recommendation.all.length > 1 && (
                 <View style={s.runnersSection}>
                   <Text style={s.runnersTitle}>Other Options</Text>
-                  {recommendation.all.slice(1, 4).map((sp) => (
-                    <Pressable
-                      key={sp.key}
-                      style={s.runnerRow}
-                      onPress={() => setSpreadModal(sp)}
-                    >
-                      <View style={{ flex: 1 }}>
-                        <Text style={s.runnerName}>{sp.name}</Text>
-                        <Text style={s.runnerType}>{sp.type} • {sp.decoyCount} decoys</Text>
-                      </View>
-                      <Text style={s.runnerScore}>{sp.score}%</Text>
-                      <Text style={s.recChevron}>›</Text>
-                    </Pressable>
-                  ))}
+                  {recommendation.all
+                    .slice(1, isPro ? 4 : FREE_SPREAD_LIMIT)
+                    .map((sp) => (
+                      <Pressable
+                        key={sp.key}
+                        style={s.runnerRow}
+                        onPress={() => setSpreadModal(sp)}
+                      >
+                        <View style={{ flex: 1 }}>
+                          <Text style={s.runnerName}>{sp.name}</Text>
+                          <Text style={s.runnerType}>{sp.type} • {sp.decoyCount} decoys</Text>
+                        </View>
+                        <Text style={s.runnerScore}>{sp.score}%</Text>
+                        <Text style={s.recChevron}>›</Text>
+                      </Pressable>
+                    ))}
+
+                  {/* Lock prompt for remaining spreads */}
+                  {!isPro && recommendation.all.length > FREE_SPREAD_LIMIT && (
+                    <ProUpgradePrompt
+                      compact
+                      message={`${recommendation.all.length - FREE_SPREAD_LIMIT} more spreads with Pro`}
+                    />
+                  )}
                 </View>
               )}
 
-              {/* Confidence Spread add-on tip */}
-              {addon && (
+              {/* Confidence Spread add-on tip — Pro only */}
+              {addon && isPro && (
                 <Pressable
                   style={s.addonTip}
                   onPress={() => setSpreadModal(addon)}
@@ -532,6 +580,12 @@ export default function TodayScreen({ onLogout }) {
                   </View>
                   <Text style={s.recChevron}>›</Text>
                 </Pressable>
+              )}
+              {addon && !isPro && (
+                <ProUpgradePrompt
+                  compact
+                  message="Confidence Spread tips with Pro"
+                />
               )}
             </View>
           )}
@@ -637,9 +691,15 @@ const s = StyleSheet.create({
 
   hourlyRow: { flexDirection: "row", gap: 10 },
   hourlyCard: { width: 110, padding: 12, borderRadius: 14, backgroundColor: COLORS.bgDeep, borderWidth: 1, borderColor: COLORS.borderSubtle },
+  hourlyCardLocked: { alignItems: "center", justifyContent: "center", borderStyle: "dashed", borderColor: COLORS.border },
+  hourlyLockIcon: { fontSize: 20, marginBottom: 4 },
+  hourlyLockText: { color: COLORS.muted, fontSize: 11, fontWeight: "700", textAlign: "center", lineHeight: 16 },
   hourlyTime: { color: COLORS.muted, fontWeight: "800", fontSize: 12 },
   hourlyTemp: { color: COLORS.white, fontWeight: "900", fontSize: 22, marginTop: 6, marginBottom: 6 },
   hourlySmall: { color: COLORS.mutedDark, fontSize: 11, fontWeight: "700" },
+
+  proTagPill: { paddingVertical: 4, paddingHorizontal: 10, borderRadius: 999, backgroundColor: COLORS.greenBg, borderWidth: 1, borderColor: COLORS.green },
+  proTagText: { color: COLORS.green, fontSize: 10, fontWeight: "900" },
 
   alertBtn: {
     marginTop: 10,
