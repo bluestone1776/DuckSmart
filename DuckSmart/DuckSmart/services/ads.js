@@ -46,8 +46,8 @@ if (!isExpoGo) {
 // ---------------------------------------------------------------------------
 const AD_UNIT_IDS = {
   interstitial: {
-    ios: TestIds?.INTERSTITIAL || "ca-app-pub-xxxxxxxxxxxxx/yyyyyyyyyy",
-    android: TestIds?.INTERSTITIAL || "ca-app-pub-xxxxxxxxxxxxx/yyyyyyyyyy",
+    ios: TestIds?.INTERSTITIAL || "ca-app-pub-1495369158025732/5998809708",
+    android: TestIds?.INTERSTITIAL || "ca-app-pub-1495369158025732/6294827756",
   },
 };
 

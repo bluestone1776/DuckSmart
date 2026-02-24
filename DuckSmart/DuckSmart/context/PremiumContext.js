@@ -39,8 +39,8 @@ if (!isExpoGo) {
 // RevenueCat API keys — replace with your real keys from the RC dashboard
 // ---------------------------------------------------------------------------
 const REVENUECAT_API_KEYS = {
-  ios: "appl_YOUR_REVENUECAT_IOS_KEY",
-  android: "goog_YOUR_REVENUECAT_ANDROID_KEY",
+  ios: "appl_mtRPtHyfBkCUdQpHPmncfwiVNOR",
+  android: "goog_jJcLFzpPdRQNEqRgQOvMkMAVVvb",
 };
 
 // The entitlement identifier you set up in RevenueCat dashboard
