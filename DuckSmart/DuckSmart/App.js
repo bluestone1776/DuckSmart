@@ -7,7 +7,9 @@ import { Ionicons } from "@expo/vector-icons";
 import { COLORS } from "./constants/theme";
 import { WeatherProvider } from "./context/WeatherContext";
 import { AuthProvider, useAuth } from "./context/AuthContext";
+import { PremiumProvider } from "./context/PremiumContext";
 import { saveLogs, loadLogs, savePins, loadPins } from "./services/storage";
+import { preloadInterstitialAd } from "./services/ads";
 
 import TodayScreen from "./screens/TodayScreen";
 import MapScreen from "./screens/MapScreen";
@@ -46,7 +48,7 @@ function MainApp() {
   const [pins, setPins] = useState(SEED_PINS);
   const [ready, setReady] = useState(false);
 
-  // Load persisted data on startup
+  // Load persisted data on startup + preload first ad
   useEffect(() => {
     (async () => {
       const [savedLogs, savedPins] = await Promise.all([loadLogs(), loadPins()]);
@@ -54,6 +56,7 @@ function MainApp() {
       if (savedPins) setPins(savedPins);
       setReady(true);
     })();
+    preloadInterstitialAd();
   }, []);
 
   // Persist logs whenever they change
@@ -75,6 +78,7 @@ function MainApp() {
   const closeSettings = useCallback(() => setSettingsVisible(false), []);
 
   return (
+    <PremiumProvider>
     <WeatherProvider>
     <NavigationContainer>
       <Tab.Navigator
@@ -108,6 +112,7 @@ function MainApp() {
       <SettingsModal visible={settingsVisible} onClose={closeSettings} onLogout={logout} />
     </NavigationContainer>
     </WeatherProvider>
+    </PremiumProvider>
   );
 }
 

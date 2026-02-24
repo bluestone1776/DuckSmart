@@ -19,11 +19,13 @@ import {
 import { COLORS } from "../constants/theme";
 import { submitFeedback } from "../services/feedback";
 import { useAuth } from "../context/AuthContext";
+import { usePremium } from "../context/PremiumContext";
 
 const CATEGORIES = ["Bug", "Feature Request", "Question", "Other"];
 
 export default function SettingsModal({ visible, onClose, onLogout }) {
   const { deleteAccount } = useAuth();
+  const { isPro, purchase, restore, getProPrice } = usePremium();
   const [feedbackMsg, setFeedbackMsg] = useState("");
   const [category, setCategory] = useState("Bug");
   const [submitting, setSubmitting] = useState(false);
@@ -148,6 +150,39 @@ export default function SettingsModal({ visible, onClose, onLogout }) {
             </Pressable>
           </View>
 
+          {/* Subscription */}
+          <View style={ms.section}>
+            <Text style={ms.sectionTitle}>Subscription</Text>
+            {isPro ? (
+              <>
+                <View style={ms.proBadgeRow}>
+                  <View style={ms.proBadge}>
+                    <Text style={ms.proBadgeText}>PRO</Text>
+                  </View>
+                  <Text style={ms.proStatusText}>DuckSmart Pro — Active</Text>
+                </View>
+                <Text style={ms.sectionSub}>
+                  You have access to all features. Happy hunting!
+                </Text>
+              </>
+            ) : (
+              <>
+                <Text style={ms.sectionSub}>
+                  Unlock animated radar, 48hr weather trends, extended forecasts,
+                  unlimited map pins, all duck species, and an ad-free experience.
+                </Text>
+                <Pressable style={ms.upgradeBtn} onPress={purchase}>
+                  <Text style={ms.upgradeBtnText}>
+                    {getProPrice() ? `Upgrade to Pro — ${getProPrice()}` : "Upgrade to Pro"}
+                  </Text>
+                </Pressable>
+                <Pressable style={ms.restoreBtn} onPress={restore}>
+                  <Text style={ms.restoreBtnText}>Restore Purchase</Text>
+                </Pressable>
+              </>
+            )}
+          </View>
+
           {/* App Info */}
           <View style={ms.section}>
             <Text style={ms.sectionTitle}>About DuckSmart</Text>
@@ -231,4 +266,23 @@ const ms = StyleSheet.create({
     backgroundColor: COLORS.bgDeep, borderWidth: 1, borderColor: COLORS.border, alignItems: "center",
   },
   deleteBtnText: { color: COLORS.mutedDark, fontWeight: "900", fontSize: 13 },
+
+  proBadgeRow: { flexDirection: "row", alignItems: "center", marginBottom: 8 },
+  proBadge: {
+    paddingVertical: 4, paddingHorizontal: 10, borderRadius: 999,
+    backgroundColor: COLORS.greenBg, borderWidth: 1, borderColor: COLORS.green, marginRight: 10,
+  },
+  proBadgeText: { color: COLORS.green, fontSize: 11, fontWeight: "900" },
+  proStatusText: { color: COLORS.white, fontSize: 14, fontWeight: "800" },
+
+  upgradeBtn: {
+    paddingVertical: 14, borderRadius: 14,
+    backgroundColor: COLORS.greenBg, borderWidth: 1, borderColor: COLORS.green, alignItems: "center",
+  },
+  upgradeBtnText: { color: COLORS.green, fontWeight: "900", fontSize: 15 },
+
+  restoreBtn: {
+    marginTop: 10, paddingVertical: 10, alignItems: "center",
+  },
+  restoreBtnText: { color: COLORS.mutedDark, fontWeight: "700", fontSize: 13 },
 });

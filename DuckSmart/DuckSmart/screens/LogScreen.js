@@ -27,9 +27,12 @@ import Card from "../components/Card";
 import Chip from "../components/Chip";
 import Header from "../components/Header";
 import { useWeather } from "../context/WeatherContext";
+import { usePremium } from "../context/PremiumContext";
+import { showInterstitialAd } from "../services/ads";
 
 export default function LogScreen({ addLog, onLogout }) {
   const { weather: liveWeather } = useWeather();
+  const { isPro } = usePremium();
   const hunt = scoreHuntToday(liveWeather);
   const huntScore = hunt.score;
   const [environment, setEnvironment] = useState("Marsh");
@@ -87,7 +90,7 @@ export default function LogScreen({ addLog, onLogout }) {
     setPhotos([]);
   }
 
-  function validateAndSave() {
+  async function validateAndSave() {
     if (!location) {
       Alert.alert("Missing GPS", "Wait for GPS (or enable location) before saving this hunt.");
       return;
@@ -118,6 +121,12 @@ export default function LogScreen({ addLog, onLogout }) {
     addLog(entry);
     Alert.alert("Saved", "Your hunt log was saved (in-app memory for now).");
     resetForm();
+
+    // Show interstitial ad for free-tier users after saving
+    if (!isPro) {
+      // Small delay so the save alert is seen first
+      setTimeout(() => showInterstitialAd(), 800);
+    }
   }
 
   return (
