@@ -25,7 +25,9 @@ const isExpoGo = Constants.appOwnership === "expo";
 let AdMobInterstitial = null;
 let AdEventType = null;
 let TestIds = null;
+let mobileAds = null;
 let isAdMobAvailable = false;
+let isAdMobInitialized = false;
 
 if (!isExpoGo) {
   try {
@@ -33,6 +35,7 @@ if (!isExpoGo) {
     AdMobInterstitial = adModule.InterstitialAd;
     AdEventType = adModule.AdEventType;
     TestIds = adModule.TestIds;
+    mobileAds = adModule.default; // mobileAds() initializer
     isAdMobAvailable = true;
   } catch (_) {
     /* react-native-google-mobile-ads not linked */
@@ -59,46 +62,74 @@ let isAdLoaded = false;
 let isAdLoading = false;
 
 /**
+ * Initialize the AdMob SDK. Must be called before creating any ad requests.
+ * Returns true if initialization succeeded.
+ */
+async function ensureAdMobInitialized() {
+  if (isAdMobInitialized) return true;
+  if (!isAdMobAvailable || !mobileAds) return false;
+
+  try {
+    await mobileAds().initialize();
+    isAdMobInitialized = true;
+    return true;
+  } catch (err) {
+    console.warn("DuckSmart: AdMob initialization failed:", err.message);
+    return false;
+  }
+}
+
+/**
  * Preload an interstitial ad so it's ready to show immediately.
  * Call this early (e.g., when the app starts or a screen mounts).
  * Safe to call multiple times — will only load if not already loaded/loading.
  */
-export function preloadInterstitialAd() {
+export async function preloadInterstitialAd() {
   if (!isAdMobAvailable || !AdMobInterstitial) return;
   if (isAdLoaded || isAdLoading) return;
 
-  isAdLoading = true;
+  // CRITICAL: Initialize AdMob SDK before any ad operations
+  const ready = await ensureAdMobInitialized();
+  if (!ready) return;
 
-  const adUnitId = Platform.OS === "ios"
-    ? AD_UNIT_IDS.interstitial.ios
-    : AD_UNIT_IDS.interstitial.android;
+  try {
+    isAdLoading = true;
 
-  interstitialAd = AdMobInterstitial.createForAdRequest(adUnitId, {
-    requestNonPersonalizedAdsOnly: true,
-  });
+    const adUnitId = Platform.OS === "ios"
+      ? AD_UNIT_IDS.interstitial.ios
+      : AD_UNIT_IDS.interstitial.android;
 
-  interstitialAd.addAdEventListener(AdEventType.LOADED, () => {
-    isAdLoaded = true;
-    isAdLoading = false;
-  });
+    interstitialAd = AdMobInterstitial.createForAdRequest(adUnitId, {
+      requestNonPersonalizedAdsOnly: true,
+    });
 
-  interstitialAd.addAdEventListener(AdEventType.CLOSED, () => {
-    // Ad was dismissed — preload the next one
-    isAdLoaded = false;
+    interstitialAd.addAdEventListener(AdEventType.LOADED, () => {
+      isAdLoaded = true;
+      isAdLoading = false;
+    });
+
+    interstitialAd.addAdEventListener(AdEventType.CLOSED, () => {
+      // Ad was dismissed — preload the next one
+      isAdLoaded = false;
+      isAdLoading = false;
+      interstitialAd = null;
+      // Slight delay before preloading next ad
+      setTimeout(preloadInterstitialAd, 2000);
+    });
+
+    interstitialAd.addAdEventListener(AdEventType.ERROR, (error) => {
+      console.warn("DuckSmart: Ad failed to load:", error.message);
+      isAdLoaded = false;
+      isAdLoading = false;
+      interstitialAd = null;
+    });
+
+    interstitialAd.load();
+  } catch (err) {
+    console.warn("DuckSmart: Failed to create interstitial ad:", err.message);
     isAdLoading = false;
     interstitialAd = null;
-    // Slight delay before preloading next ad
-    setTimeout(preloadInterstitialAd, 2000);
-  });
-
-  interstitialAd.addAdEventListener(AdEventType.ERROR, (error) => {
-    console.warn("DuckSmart: Ad failed to load:", error.message);
-    isAdLoaded = false;
-    isAdLoading = false;
-    interstitialAd = null;
-  });
-
-  interstitialAd.load();
+  }
 }
 
 /**

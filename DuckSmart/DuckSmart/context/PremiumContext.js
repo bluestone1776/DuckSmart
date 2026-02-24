@@ -69,16 +69,31 @@ export function PremiumProvider({ children }) {
           ? REVENUECAT_API_KEYS.ios
           : REVENUECAT_API_KEYS.android;
 
+        if (!apiKey) {
+          console.warn("DuckSmart: No RevenueCat API key for this platform.");
+          setLoading(false);
+          return;
+        }
+
         // Configure RevenueCat (only call once)
         await Purchases.configure({ apiKey });
 
-        // Check current entitlements
-        await checkSubscription();
+        // Check current entitlements — wrapped separately so a failure
+        // here doesn't prevent the rest of startup
+        try {
+          await checkSubscription();
+        } catch (subErr) {
+          console.warn("DuckSmart: Subscription check failed:", subErr.message);
+        }
 
         // Pre-fetch offerings for the paywall
-        const offers = await Purchases.getOfferings();
-        if (offers.current) {
-          setOfferings(offers.current);
+        try {
+          const offers = await Purchases.getOfferings();
+          if (offers.current) {
+            setOfferings(offers.current);
+          }
+        } catch (offerErr) {
+          console.warn("DuckSmart: Failed to fetch offerings:", offerErr.message);
         }
       } catch (err) {
         console.error("DuckSmart: RevenueCat init error:", err.message);

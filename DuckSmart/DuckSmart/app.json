@@ -37,7 +37,7 @@
     },
     "extra": {
       "openWeatherMapApiKey": "54a32367fdf9d9d889a75ab2779ec498",
-      "regridToken": "",
+      "regridToken": "eyJhbGciOiJIUzI1NiJ9.eyJpc3MiOiJyZWdyaWQuY29tIiwiaWF0IjoxNzcxOTUzNzAyLCJleHAiOjE3NzQ1NDU3MDIsInUiOjcwMDcyNCwiZyI6MjMxNTMsImNhcCI6InBhOnRzOnBzOmJmOm1hOnR5OmVvOnpvOnNiIn0.KSOsHUEcVtCS00NrB7N_kK2bQwSr6VIAMVy_HqqwRi8",
       "firebase": {
         "androidApiKey": "AIzaSyBnwwwpGQv_-UfdxPmDWbQM1tR7Z6obH74",
         "iosApiKey": "AIzaSyAYuVXKtrMbp1D8pAy0EAFArONDrp6W-iY",

@@ -56,7 +56,15 @@ function MainApp() {
       if (savedPins) setPins(savedPins);
       setReady(true);
     })();
-    preloadInterstitialAd();
+
+    // Preload interstitial ad — wrapped so a failure never blocks startup
+    try {
+      preloadInterstitialAd().catch((err) =>
+        console.warn("DuckSmart: Ad preload failed:", err.message)
+      );
+    } catch (err) {
+      console.warn("DuckSmart: Ad preload error:", err.message);
+    }
   }, []);
 
   // Persist logs whenever they change
