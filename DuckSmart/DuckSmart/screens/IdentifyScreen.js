@@ -1,4 +1,4 @@
-import React, { useMemo, useState, useCallback } from "react";
+import React, { useMemo, useState } from "react";
 import {
   SafeAreaView,
   View,
@@ -10,11 +10,17 @@ import {
   TextInput,
   Image,
   Alert,
+  ActivityIndicator,
+  Modal,
 } from "react-native";
 import { createNativeStackNavigator } from "@react-navigation/native-stack";
+import * as ImagePicker from "expo-image-picker";
 
 import { COLORS } from "../constants/theme";
 import { ASSETS } from "../constants/assets";
+import { identifyDuck, isAIAvailable } from "../services/ai";
+import { usePremium } from "../context/PremiumContext";
+import ProUpgradePrompt from "../components/ProUpgradePrompt";
 import {
   IDENTIFY_SPECIES,
   IDENTIFY_GROUPS,
@@ -73,10 +79,74 @@ function ratingColor(rating) {
 // --- Home screen ---
 
 function IdentifyHome({ navigation }) {
+  const { isPro, purchase } = usePremium();
   const [group, setGroup] = useState(null);
   const [habitat, setHabitat] = useState(null);
   const [size, setSize] = useState(null);
   const [query, setQuery] = useState("");
+
+  // AI Duck ID state
+  const [aiPhoto, setAiPhoto] = useState(null);
+  const [aiResult, setAiResult] = useState(null);
+  const [aiLoading, setAiLoading] = useState(false);
+  const [aiModalVisible, setAiModalVisible] = useState(false);
+
+  async function handleAIDuckID(useCamera) {
+    if (!isPro) {
+      Alert.alert("Pro Feature", "AI Duck ID requires DuckSmart Pro.", [
+        { text: "Not Now", style: "cancel" },
+        { text: "Upgrade to Pro", onPress: purchase },
+      ]);
+      return;
+    }
+    if (!isAIAvailable()) {
+      Alert.alert("Not Configured", "AI features require an OpenAI API key. Add it in app.json → extra → openaiApiKey.");
+      return;
+    }
+
+    try {
+      let result;
+      if (useCamera) {
+        const perm = await ImagePicker.requestCameraPermissionsAsync();
+        if (!perm.granted) {
+          Alert.alert("Permission Needed", "Camera access is required for AI Duck ID.");
+          return;
+        }
+        result = await ImagePicker.launchCameraAsync({ quality: 0.7, allowsEditing: true });
+      } else {
+        const perm = await ImagePicker.requestMediaLibraryPermissionsAsync();
+        if (!perm.granted) {
+          Alert.alert("Permission Needed", "Photo library access is required for AI Duck ID.");
+          return;
+        }
+        result = await ImagePicker.launchImageLibraryAsync({ quality: 0.7, allowsEditing: true });
+      }
+
+      if (result.canceled || !result.assets?.length) return;
+
+      const uri = result.assets[0].uri;
+      setAiPhoto(uri);
+      setAiResult(null);
+      setAiLoading(true);
+      setAiModalVisible(true);
+
+      const identification = await identifyDuck(uri);
+      setAiResult(identification);
+    } catch (err) {
+      Alert.alert("AI Error", err.message || "Could not identify the duck. Please try again.");
+      setAiModalVisible(false);
+    } finally {
+      setAiLoading(false);
+    }
+  }
+
+  function promptAIDuckID() {
+    Alert.alert("AI Duck ID", "Take a photo or choose one from your gallery.", [
+      { text: "Camera", onPress: () => handleAIDuckID(true) },
+      { text: "Gallery", onPress: () => handleAIDuckID(false) },
+      { text: "Cancel", style: "cancel" },
+    ]);
+  }
 
   const matches = useMemo(
     () => computeIdentifyMatches({ group, habitat, size, queryText: query }),
@@ -103,10 +173,106 @@ function IdentifyHome({ navigation }) {
               <Text style={s.subHeader}>Identify Duck</Text>
             </View>
           </View>
-          <Pressable style={s.gearButton} onPress={() => {}}>
-            <Text style={s.gearText}>⚙︎</Text>
+          <Pressable style={[s.gearButton, { backgroundColor: isPro ? COLORS.greenBg : COLORS.bg }]} onPress={promptAIDuckID}>
+            <Text style={[s.gearText, isPro && { color: COLORS.green }]}>📷</Text>
           </Pressable>
         </View>
+
+        {/* AI Duck ID Result Modal */}
+        <Modal visible={aiModalVisible} transparent={false} animationType="slide" onRequestClose={() => setAiModalVisible(false)}>
+          <SafeAreaView style={s.safe}>
+            <ScrollView contentContainerStyle={s.container}>
+              <View style={s.detailHeader}>
+                <Pressable style={s.backBtn} onPress={() => setAiModalVisible(false)}>
+                  <Text style={s.backBtnText}>‹</Text>
+                </Pressable>
+                <View style={{ flex: 1 }}>
+                  <Text style={s.detailTitle}>AI Duck ID</Text>
+                  <Text style={s.detailSub}>Powered by DuckSmart AI</Text>
+                </View>
+              </View>
+
+              {/* Photo */}
+              {aiPhoto && (
+                <Image source={{ uri: aiPhoto }} style={s.aiPhoto} resizeMode="cover" />
+              )}
+
+              {aiLoading && (
+                <View style={s.aiLoadingBox}>
+                  <ActivityIndicator size="large" color={COLORS.green} />
+                  <Text style={s.aiLoadingText}>Analyzing duck...</Text>
+                </View>
+              )}
+
+              {aiResult && (
+                <>
+                  {/* Species + Confidence */}
+                  <IdentifyCard title="Identification">
+                    <Text style={s.aiSpeciesName}>{aiResult.species}</Text>
+                    <View style={s.aiConfRow}>
+                      <View style={s.aiConfBarBg}>
+                        <View style={[s.aiConfBarFill, {
+                          width: `${aiResult.confidence}%`,
+                          backgroundColor: aiResult.confidence >= 70 ? COLORS.green : aiResult.confidence >= 40 ? COLORS.yellow : COLORS.red,
+                        }]} />
+                      </View>
+                      <Text style={s.aiConfText}>{aiResult.confidence}%</Text>
+                    </View>
+                    {aiResult.sex && aiResult.sex !== "Unknown" && (
+                      <Text style={s.aiSex}>Sex: {aiResult.sex}</Text>
+                    )}
+                  </IdentifyCard>
+
+                  {/* Field Marks */}
+                  {aiResult.fieldMarks?.length > 0 && (
+                    <IdentifyCard title="Field Marks Detected">
+                      {aiResult.fieldMarks.map((mark, i) => (
+                        <View key={i} style={s.aiMarkRow}>
+                          <Text style={s.aiMarkBullet}>•</Text>
+                          <Text style={s.aiMarkText}>{mark}</Text>
+                        </View>
+                      ))}
+                    </IdentifyCard>
+                  )}
+
+                  {/* Similar Species */}
+                  {aiResult.similarSpecies?.length > 0 && (
+                    <IdentifyCard title="Similar Species">
+                      {aiResult.similarSpecies.map((sim, i) => (
+                        <View key={i} style={s.aiSimRow}>
+                          <Text style={s.aiSimName}>{sim.name}</Text>
+                          <Text style={s.aiSimDist}>{sim.distinction}</Text>
+                        </View>
+                      ))}
+                    </IdentifyCard>
+                  )}
+
+                  {/* Notes */}
+                  {aiResult.notes && (
+                    <IdentifyCard title="AI Notes">
+                      <Text style={s.aiNotes}>{aiResult.notes}</Text>
+                    </IdentifyCard>
+                  )}
+
+                  <Pressable style={s.primaryBtn} onPress={() => setAiModalVisible(false)}>
+                    <Text style={s.primaryBtnText}>Done</Text>
+                  </Pressable>
+                </>
+              )}
+              <View style={{ height: 30 }} />
+            </ScrollView>
+          </SafeAreaView>
+        </Modal>
+
+        {/* AI Duck ID promo card — shown for free users */}
+        {!isPro && (
+          <IdentifyCard
+            title="AI Duck ID"
+            right={<View style={s.aiProTag}><Text style={s.aiProTagText}>PRO</Text></View>}
+          >
+            <ProUpgradePrompt message="Snap a photo and let AI instantly identify the species, confidence level, and key field marks." />
+          </IdentifyCard>
+        )}
 
         <IdentifyCard title="Quick Search">
           <TextInput
@@ -587,5 +753,116 @@ const s = StyleSheet.create({
     fontWeight: "700",
     fontStyle: "italic",
     marginTop: -8,
+  },
+
+  // AI Duck ID
+  aiProTag: {
+    paddingVertical: 4,
+    paddingHorizontal: 10,
+    borderRadius: 999,
+    backgroundColor: COLORS.greenBg,
+    borderWidth: 1,
+    borderColor: COLORS.green,
+  },
+  aiProTagText: { color: COLORS.green, fontSize: 10, fontWeight: "900" },
+
+  aiPhoto: {
+    width: "100%",
+    height: 260,
+    borderRadius: 18,
+    backgroundColor: COLORS.bgDeep,
+    marginBottom: 4,
+  },
+  aiLoadingBox: {
+    alignItems: "center",
+    justifyContent: "center",
+    paddingVertical: 40,
+  },
+  aiLoadingText: {
+    color: COLORS.muted,
+    fontWeight: "800",
+    fontSize: 14,
+    marginTop: 14,
+  },
+  aiSpeciesName: {
+    color: COLORS.white,
+    fontSize: 24,
+    fontWeight: "900",
+    marginBottom: 8,
+  },
+  aiConfRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 10,
+  },
+  aiConfBarBg: {
+    flex: 1,
+    height: 10,
+    borderRadius: 5,
+    backgroundColor: COLORS.bgDeep,
+    overflow: "hidden",
+  },
+  aiConfBarFill: {
+    height: 10,
+    borderRadius: 5,
+  },
+  aiConfText: {
+    color: COLORS.white,
+    fontWeight: "900",
+    fontSize: 16,
+    width: 46,
+    textAlign: "right",
+  },
+  aiSex: {
+    color: COLORS.muted,
+    fontWeight: "800",
+    fontSize: 13,
+    marginTop: 8,
+  },
+  aiMarkRow: {
+    flexDirection: "row",
+    alignItems: "flex-start",
+    gap: 8,
+    marginBottom: 6,
+  },
+  aiMarkBullet: {
+    color: COLORS.green,
+    fontWeight: "900",
+    fontSize: 14,
+    marginTop: 1,
+  },
+  aiMarkText: {
+    color: COLORS.muted,
+    fontWeight: "700",
+    fontSize: 13,
+    flex: 1,
+    lineHeight: 18,
+  },
+  aiSimRow: {
+    padding: 10,
+    borderRadius: 12,
+    backgroundColor: COLORS.bgDeep,
+    borderWidth: 1,
+    borderColor: COLORS.borderSubtle,
+    marginBottom: 6,
+  },
+  aiSimName: {
+    color: COLORS.white,
+    fontWeight: "900",
+    fontSize: 14,
+  },
+  aiSimDist: {
+    color: COLORS.mutedDark,
+    fontWeight: "700",
+    fontSize: 12,
+    marginTop: 4,
+    lineHeight: 16,
+  },
+  aiNotes: {
+    color: COLORS.muted,
+    fontWeight: "700",
+    fontSize: 13,
+    lineHeight: 18,
+    fontStyle: "italic",
   },
 });

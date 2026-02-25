@@ -1,0 +1,90 @@
+// DuckSmart — Dynamic Expo Config
+//
+// Loads API keys from .env so secrets stay out of version control.
+// Falls back to empty strings if .env is missing (e.g. fresh clone).
+
+require("dotenv").config();
+
+const IS_DEV = process.env.APP_VARIANT === "development";
+
+module.exports = {
+  expo: {
+    name: IS_DEV ? "DuckSmart (Dev)" : "DuckSmart",
+    slug: "ducksmart",
+    version: "1.0.0",
+    orientation: "portrait",
+    icon: "./assets/icon.png",
+    userInterfaceStyle: "dark",
+    newArchEnabled: true,
+    splash: {
+      image: "./assets/splash-icon.png",
+      resizeMode: "contain",
+      backgroundColor: "#000000",
+    },
+    ios: {
+      supportsTablet: false,
+      bundleIdentifier: "com.ducksmart.app",
+      buildNumber: "1",
+      usesAppleSignIn: true,
+      infoPlist: {
+        ITSAppUsesNonExemptEncryption: false,
+        NSLocationWhenInUseUsageDescription:
+          "DuckSmart uses your location to provide accurate local weather forecasts and to mark your hunting spots on the map. For example, we'll show you wind speed and temperature at your current location to help plan your hunt.",
+      },
+    },
+    android: {
+      supportsTablet: false,
+      adaptiveIcon: {
+        foregroundImage: "./assets/adaptive-icon.png",
+        backgroundColor: "#000000",
+      },
+      edgeToEdgeEnabled: true,
+      package: "com.ducksmart.app",
+      versionCode: 1,
+    },
+    web: {
+      favicon: "./assets/favicon.png",
+    },
+    extra: {
+      // Secrets — loaded from .env (gitignored)
+      openWeatherMapApiKey: process.env.OWM_API_KEY || "",
+      regridToken: process.env.REGRID_TOKEN || "",
+      openaiApiKey: process.env.OPENAI_API_KEY || "",
+
+      // Firebase — client-side keys (safe to commit)
+      firebase: {
+        androidApiKey: "AIzaSyBnwwwpGQv_-UfdxPmDWbQM1tR7Z6obH74",
+        iosApiKey: "AIzaSyAYuVXKtrMbp1D8pAy0EAFArONDrp6W-iY",
+        authDomain: "ducksmart-9c80e.firebaseapp.com",
+        projectId: "ducksmart-9c80e",
+        storageBucket: "ducksmart-9c80e.firebasestorage.app",
+        messagingSenderId: "747578003996",
+        androidAppId: "1:747578003996:android:fa1b978454b9f99fca85d9",
+        iosAppId: "1:747578003996:ios:7bef85dda10811b4ca85d9",
+        googleWebClientId:
+          "747578003996-1vuqq0capvfg22n607dj9l6icrpfor1f.apps.googleusercontent.com",
+      },
+      eas: {
+        projectId: "1e281451-6f41-4ee8-a71e-363eff7ee6ee",
+      },
+    },
+    plugins: [
+      "expo-font",
+      [
+        "expo-notifications",
+        {
+          sounds: [],
+        },
+      ],
+      "expo-apple-authentication",
+      "@react-native-google-signin/google-signin",
+      [
+        "react-native-google-mobile-ads",
+        {
+          androidAppId: "ca-app-pub-1495369158025732~8701499241",
+          iosAppId: "ca-app-pub-1495369158025732~9981452594",
+        },
+      ],
+    ],
+  },
+};

@@ -19,8 +19,7 @@ import MapView, { UrlTile } from "react-native-maps";
 import { COLORS } from "../constants/theme";
 import { getRadarTileUrl, formatRadarAge } from "../services/radar";
 import { ASSETS } from "../constants/assets";
-import { clamp } from "../utils/helpers";
-import { formatWind } from "../utils/helpers";
+import { clamp, formatWind } from "../utils/helpers";
 import { scoreHuntToday } from "../utils/scoring";
 import { useWeather } from "../context/WeatherContext";
 import { scheduleHuntAlerts, cancelHuntAlerts } from "../services/notifications";
@@ -32,9 +31,11 @@ import {
   SPECIES_OPTIONS,
   recommendSpread,
 } from "../data/decoySpreadData";
+import * as ImagePicker from "expo-image-picker";
 import AdBanner from "../components/AdBanner";
 import ProUpgradePrompt from "../components/ProUpgradePrompt";
 import { usePremium } from "../context/PremiumContext";
+import { analyzeSpread as aiAnalyzeSpread, isAIAvailable } from "../services/ai";
 
 const SCREEN_WIDTH = Dimensions.get("window").width;
 
@@ -349,10 +350,6 @@ export default function TodayScreen({ onLogout }) {
   const [alertsOn, setAlertsOn] = useState(false);
   const [refreshCount, setRefreshCount] = useState(0);
 
-  // Hunt probability environment selector
-  const environments = ["Marsh", "Timber", "Field", "Open Water", "River"];
-  const [environment, setEnvironment] = useState("Marsh");
-
   const hunt = useMemo(() => scoreHuntToday(weather), [weather]);
 
   // ---------------------------------------------------------------------------
@@ -364,6 +361,12 @@ export default function TodayScreen({ onLogout }) {
   const [dPressure, setDPressure] = useState(PRESSURE_OPTIONS[0]);
   const [dSpecies, setDSpecies] = useState(SPECIES_OPTIONS[0]);
   const [spreadModal, setSpreadModal] = useState(null); // spread object or null
+
+  // AI Spread Analyzer state
+  const [aiSpreadPhoto, setAiSpreadPhoto] = useState(null);
+  const [aiSpreadResult, setAiSpreadResult] = useState(null);
+  const [aiSpreadLoading, setAiSpreadLoading] = useState(false);
+  const [aiSpreadModalVisible, setAiSpreadModalVisible] = useState(false);
 
   // ---------------------------------------------------------------------------
   // Weather Radar — RainViewer live radar tiles
@@ -394,6 +397,66 @@ export default function TodayScreen({ onLogout }) {
       }),
     [dWater, dWeather, dSeason, dPressure, dSpecies]
   );
+
+  // ---------------------------------------------------------------------------
+  // AI Spread Analyzer
+  // ---------------------------------------------------------------------------
+  async function handleAISpreadAnalyzer(useCamera) {
+    if (!isPro) {
+      Alert.alert("Pro Feature", "AI Spread Analyzer requires DuckSmart Pro.", [
+        { text: "Not Now", style: "cancel" },
+        { text: "Upgrade to Pro", onPress: () => {} },
+      ]);
+      return;
+    }
+    if (!isAIAvailable()) {
+      Alert.alert("Not Configured", "AI features require an OpenAI API key. Add it in app.json → extra → openaiApiKey.");
+      return;
+    }
+
+    try {
+      let result;
+      if (useCamera) {
+        const perm = await ImagePicker.requestCameraPermissionsAsync();
+        if (!perm.granted) { Alert.alert("Permission Needed", "Camera access is required."); return; }
+        result = await ImagePicker.launchCameraAsync({ quality: 0.7, allowsEditing: true });
+      } else {
+        const perm = await ImagePicker.requestMediaLibraryPermissionsAsync();
+        if (!perm.granted) { Alert.alert("Permission Needed", "Photo library access is required."); return; }
+        result = await ImagePicker.launchImageLibraryAsync({ quality: 0.7, allowsEditing: true });
+      }
+      if (result.canceled || !result.assets?.length) return;
+
+      const uri = result.assets[0].uri;
+      setAiSpreadPhoto(uri);
+      setAiSpreadResult(null);
+      setAiSpreadLoading(true);
+      setAiSpreadModalVisible(true);
+
+      const weatherCtx = weather ? {
+        windDir: formatWind(weather.windDeg),
+        windMph: weather.windMph,
+        tempF: weather.tempF,
+        condition: `${weather.cloudPct}% clouds, ${weather.precipChance}% precip chance`,
+      } : null;
+
+      const analysis = await aiAnalyzeSpread(uri, weatherCtx);
+      setAiSpreadResult(analysis);
+    } catch (err) {
+      Alert.alert("AI Error", err.message || "Could not analyze the spread. Please try again.");
+      setAiSpreadModalVisible(false);
+    } finally {
+      setAiSpreadLoading(false);
+    }
+  }
+
+  function promptAISpreadAnalyzer() {
+    Alert.alert("AI Spread Analyzer", "Take a photo of your decoy spread or choose from gallery.", [
+      { text: "Camera", onPress: () => handleAISpreadAnalyzer(true) },
+      { text: "Gallery", onPress: () => handleAISpreadAnalyzer(false) },
+      { text: "Cancel", style: "cancel" },
+    ]);
+  }
 
   const onRefresh = useCallback(async () => {
     setRefreshing(true);
@@ -443,6 +506,95 @@ export default function TodayScreen({ onLogout }) {
         onClose={() => setSpreadModal(null)}
         spread={spreadModal}
       />
+
+      {/* AI Spread Analyzer result modal */}
+      <Modal visible={aiSpreadModalVisible} transparent={false} animationType="slide" onRequestClose={() => setAiSpreadModalVisible(false)}>
+        <SafeAreaView style={s.safe}>
+          <ScrollView contentContainerStyle={s.container}>
+            <View style={{ flexDirection: "row", alignItems: "center", marginBottom: 12 }}>
+              <Pressable style={s.gearButton} onPress={() => setAiSpreadModalVisible(false)}>
+                <Text style={s.gearText}>‹</Text>
+              </Pressable>
+              <View style={{ flex: 1, marginLeft: 12 }}>
+                <Text style={{ color: COLORS.white, fontSize: 22, fontWeight: "900" }}>AI Spread Analyzer</Text>
+                <Text style={{ color: COLORS.muted, fontSize: 12, fontWeight: "700", marginTop: 2 }}>Powered by DuckSmart AI</Text>
+              </View>
+            </View>
+
+            {aiSpreadPhoto && (
+              <Image source={{ uri: aiSpreadPhoto }} style={s.aiSpreadPhoto} resizeMode="cover" />
+            )}
+
+            {aiSpreadLoading && (
+              <View style={s.aiSpreadLoadingBox}>
+                <ActivityIndicator size="large" color={COLORS.green} />
+                <Text style={s.aiSpreadLoadingText}>Analyzing your spread...</Text>
+              </View>
+            )}
+
+            {aiSpreadResult && (
+              <>
+                {/* Overall Score */}
+                <TodayCard title="Overall Score">
+                  <View style={{ alignItems: "center" }}>
+                    <TodayHalfGauge value={aiSpreadResult.overallScore} />
+                  </View>
+                  {aiSpreadResult.spreadType && (
+                    <Text style={s.aiSpreadType}>Detected: {aiSpreadResult.spreadType}</Text>
+                  )}
+                  {aiSpreadResult.summary && (
+                    <Text style={s.aiSpreadSummary}>{aiSpreadResult.summary}</Text>
+                  )}
+                </TodayCard>
+
+                {/* Category Scores */}
+                <TodayCard title="Breakdown">
+                  {[
+                    { key: "windAlignment", label: "Wind Alignment", icon: "💨" },
+                    { key: "spacing", label: "Spacing", icon: "↔️" },
+                    { key: "realism", label: "Realism", icon: "🦆" },
+                    { key: "landingZone", label: "Landing Zone", icon: "🎯" },
+                  ].map((cat) => {
+                    const data = aiSpreadResult.scores?.[cat.key];
+                    if (!data) return null;
+                    const barColor = data.score >= 70 ? COLORS.green : data.score >= 40 ? COLORS.yellow : COLORS.red;
+                    return (
+                      <View key={cat.key} style={s.aiScoreCatRow}>
+                        <View style={s.aiScoreCatHeader}>
+                          <Text style={s.aiScoreCatIcon}>{cat.icon}</Text>
+                          <Text style={s.aiScoreCatLabel}>{cat.label}</Text>
+                          <Text style={[s.aiScoreCatValue, { color: barColor }]}>{data.score}</Text>
+                        </View>
+                        <View style={s.aiScoreBarBg}>
+                          <View style={[s.aiScoreBarFill, { width: `${data.score}%`, backgroundColor: barColor }]} />
+                        </View>
+                        {data.note ? <Text style={s.aiScoreCatNote}>{data.note}</Text> : null}
+                      </View>
+                    );
+                  })}
+                </TodayCard>
+
+                {/* Improvements */}
+                {aiSpreadResult.improvements?.length > 0 && (
+                  <TodayCard title="Improvements">
+                    {aiSpreadResult.improvements.map((tip, i) => (
+                      <View key={i} style={s.aiImprovRow}>
+                        <Text style={s.aiImprovBullet}>{i + 1}</Text>
+                        <Text style={s.aiImprovText}>{tip}</Text>
+                      </View>
+                    ))}
+                  </TodayCard>
+                )}
+
+                <Pressable style={s.aiSpreadDoneBtn} onPress={() => setAiSpreadModalVisible(false)}>
+                  <Text style={s.aiSpreadDoneBtnText}>Done</Text>
+                </Pressable>
+              </>
+            )}
+            <View style={{ height: 30 }} />
+          </ScrollView>
+        </SafeAreaView>
+      </Modal>
 
       <ScrollView
         contentContainerStyle={s.container}
@@ -682,7 +834,17 @@ export default function TodayScreen({ onLogout }) {
         {/* ================================================================
             DECOY SPREAD ADVISOR — Selection → Recommendation → Image Popup
             ================================================================ */}
-        <TodayCard title="Decoy Spread Advisor">
+        <TodayCard
+          title="Decoy Spread Advisor"
+          right={
+            <Pressable
+              style={[s.radarRefreshBtn, isPro && { borderColor: COLORS.green, backgroundColor: COLORS.greenBg }]}
+              onPress={promptAISpreadAnalyzer}
+            >
+              <Text style={[s.radarRefreshText, isPro && { color: COLORS.green }]}>📷</Text>
+            </Pressable>
+          }
+        >
 
           {/* Wind compass for spread orientation */}
           <View style={s.decoyCompassRow}>
@@ -828,7 +990,6 @@ const s = StyleSheet.create({
   },
   gearText: { color: COLORS.white, fontSize: 18 },
 
-  sectionLabel: { color: COLORS.muted, fontSize: 12, marginBottom: 8 },
   chipRow: { flexDirection: "row", gap: 10, paddingBottom: 4 },
   chip: { paddingVertical: 9, paddingHorizontal: 14, borderRadius: 999, borderWidth: 1 },
   chipSelected: { backgroundColor: COLORS.greenBg, borderColor: COLORS.green },
@@ -856,14 +1017,6 @@ const s = StyleSheet.create({
     borderColor: COLORS.border,
   },
   scorePillText: { color: COLORS.white, fontSize: 12, fontWeight: "800" },
-
-  gaugeLegendRow: { width: 220, flexDirection: "row", justifyContent: "space-between", marginTop: -6 },
-  legendText: { color: COLORS.mutedDarker, fontSize: 12, fontWeight: "700" },
-
-  engineRow: { flexDirection: "row", gap: 10, marginTop: 12, marginBottom: 4 },
-  enginePill: { flex: 1, padding: 12, borderRadius: 14, backgroundColor: COLORS.bgDeep, borderWidth: 1, borderColor: COLORS.borderSubtle, alignItems: "center" },
-  engineLabel: { color: COLORS.mutedDark, fontSize: 11, fontWeight: "700" },
-  engineValue: { marginTop: 4, color: COLORS.green, fontSize: 20, fontWeight: "900" },
 
   whyBox: {
     marginTop: 12,
@@ -1113,5 +1266,114 @@ const s = StyleSheet.create({
     textAlign: "center",
     marginTop: 8,
     opacity: 0.6,
+  },
+
+  // AI Spread Analyzer
+  aiSpreadPhoto: {
+    width: "100%",
+    height: 240,
+    borderRadius: 18,
+    backgroundColor: COLORS.bgDeep,
+    marginBottom: 4,
+  },
+  aiSpreadLoadingBox: {
+    alignItems: "center",
+    justifyContent: "center",
+    paddingVertical: 40,
+  },
+  aiSpreadLoadingText: {
+    color: COLORS.muted,
+    fontWeight: "800",
+    fontSize: 14,
+    marginTop: 14,
+  },
+  aiSpreadType: {
+    color: COLORS.green,
+    fontWeight: "800",
+    fontSize: 13,
+    textAlign: "center",
+    marginTop: 4,
+  },
+  aiSpreadSummary: {
+    color: COLORS.muted,
+    fontWeight: "700",
+    fontSize: 13,
+    textAlign: "center",
+    marginTop: 6,
+    lineHeight: 18,
+    fontStyle: "italic",
+  },
+  aiScoreCatRow: {
+    marginBottom: 14,
+  },
+  aiScoreCatHeader: {
+    flexDirection: "row",
+    alignItems: "center",
+    marginBottom: 6,
+  },
+  aiScoreCatIcon: {
+    fontSize: 16,
+    marginRight: 8,
+  },
+  aiScoreCatLabel: {
+    color: COLORS.white,
+    fontWeight: "800",
+    fontSize: 14,
+    flex: 1,
+  },
+  aiScoreCatValue: {
+    fontWeight: "900",
+    fontSize: 16,
+  },
+  aiScoreBarBg: {
+    height: 8,
+    borderRadius: 4,
+    backgroundColor: COLORS.bgDeep,
+    overflow: "hidden",
+  },
+  aiScoreBarFill: {
+    height: 8,
+    borderRadius: 4,
+  },
+  aiScoreCatNote: {
+    color: COLORS.mutedDark,
+    fontWeight: "700",
+    fontSize: 12,
+    marginTop: 4,
+    lineHeight: 16,
+  },
+  aiImprovRow: {
+    flexDirection: "row",
+    alignItems: "flex-start",
+    gap: 10,
+    marginBottom: 8,
+  },
+  aiImprovBullet: {
+    color: COLORS.green,
+    fontWeight: "900",
+    fontSize: 14,
+    width: 18,
+    textAlign: "center",
+  },
+  aiImprovText: {
+    color: COLORS.muted,
+    fontWeight: "700",
+    fontSize: 13,
+    flex: 1,
+    lineHeight: 18,
+  },
+  aiSpreadDoneBtn: {
+    paddingVertical: 14,
+    borderRadius: 14,
+    backgroundColor: COLORS.greenBg,
+    borderWidth: 1,
+    borderColor: COLORS.green,
+    alignItems: "center",
+    marginTop: 6,
+  },
+  aiSpreadDoneBtnText: {
+    color: COLORS.green,
+    fontWeight: "900",
+    fontSize: 15,
   },
 });

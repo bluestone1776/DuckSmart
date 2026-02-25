@@ -10,3 +10,8 @@ export const OWM_API_KEY =
 // Sign up at https://regrid.com → API section → copy your token
 export const REGRID_TOKEN =
   Constants.expoConfig?.extra?.regridToken || "";
+
+// OpenAI API — powers AI Duck ID and AI Spread Analyzer (Pro features)
+// Get a key at https://platform.openai.com/api-keys
+export const OPENAI_API_KEY =
+  Constants.expoConfig?.extra?.openaiApiKey || "";
