@@ -500,15 +500,22 @@ export function computeIdentifyMatches({ group, habitat, size, queryText }) {
   const scored = IDENTIFY_SPECIES.map((sp) => {
     let score = 0;
 
-    // Group filter
+    // --- Hard filters: exclude species that don't match selected group/size ---
+    if (group && sp.group !== group) return { species: sp, score: 0 };
+    if (size && sp.size !== size) return { species: sp, score: 0 };
+
+    // Group match bonus
     if (group && sp.group === group) score += 4;
 
     // Habitat filter — use rating from the habitat map
     if (habitat && sp.habitats[habitat]) {
       score += HABITAT_SCORES[sp.habitats[habitat]] || 0;
+    } else if (habitat) {
+      // Habitat selected but species has no presence there — exclude
+      return { species: sp, score: 0 };
     }
 
-    // Size filter
+    // Size match bonus
     if (size && sp.size === size) score += 3;
 
     // Text search
@@ -527,6 +534,7 @@ export function computeIdentifyMatches({ group, habitat, size, queryText }) {
         .join(" | ")
         .toLowerCase();
       if (hay.includes(q)) score += 4;
+      else return { species: sp, score: 0 }; // text typed but no match — exclude
     }
 
     // If no filters at all, show everything

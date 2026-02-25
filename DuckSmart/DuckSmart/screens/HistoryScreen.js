@@ -82,9 +82,9 @@ export default function HistoryScreen({ logs, deleteLog, onLogout }) {
           </Card>
 
           <View style={{ marginTop: 14, padding: 14, borderRadius: 16, backgroundColor: "#0E1A12", borderWidth: 1, borderColor: "#2ECC71" }}>
-            <Text style={{ color: "#2ECC71", fontWeight: "900", fontSize: 13 }}>Free Version</Text>
+            <Text style={{ color: "#2ECC71", fontWeight: "900", fontSize: 13 }}>Upgrade to Pro</Text>
             <Text style={{ color: "#BDBDBD", fontWeight: "800", fontSize: 13, marginTop: 6, lineHeight: 18 }}>
-              You can save up to 5 hunt logs for free. Upgrade to the paid version for unlimited logs, cloud backup, and more.
+              You can save up to 5 hunt logs for free. Upgrade to DuckSmart Pro for unlimited logs, cloud backup, and more.
             </Text>
           </View>
 

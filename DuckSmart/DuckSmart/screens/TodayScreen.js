@@ -455,14 +455,17 @@ export default function TodayScreen({ onLogout }) {
       >
         {/* Header */}
         <View style={s.headerRow}>
-          <View>
-            <Text style={s.brand}>
-              <Text style={s.brandDuck}>Duck</Text>
-              <Text style={s.brandSmart}>Smart</Text>
-            </Text>
-            <Text style={s.subHeader}>
-              Today • {weather.locationName}
-            </Text>
+          <View style={{ flexDirection: "row", alignItems: "center", gap: 12 }}>
+            <Image source={ASSETS.logo} style={s.logoSmall} resizeMode="contain" />
+            <View>
+              <Text style={s.brand}>
+                <Text style={s.brandDuck}>Duck</Text>
+                <Text style={s.brandSmart}>Smart</Text>
+              </Text>
+              <Text style={s.subHeader}>
+                Today • {weather.locationName}
+              </Text>
+            </View>
           </View>
 
           <Pressable style={s.gearButton} onPress={onLogout || (() => {})}>
@@ -800,6 +803,7 @@ const s = StyleSheet.create({
   container: { padding: 16, paddingBottom: 28, backgroundColor: COLORS.black },
 
   headerRow: { flexDirection: "row", alignItems: "center", justifyContent: "space-between" },
+  logoSmall: { width: 42, height: 42, borderRadius: 12 },
   brand: { fontSize: 28, fontWeight: "800", letterSpacing: 0.2 },
   brandDuck: { color: COLORS.white },
   brandSmart: { color: COLORS.green },
