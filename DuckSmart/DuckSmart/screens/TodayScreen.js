@@ -347,6 +347,7 @@ export default function TodayScreen({ onLogout }) {
   const { isPro } = usePremium();
   const [refreshing, setRefreshing] = useState(false);
   const [alertsOn, setAlertsOn] = useState(false);
+  const [refreshCount, setRefreshCount] = useState(0);
 
   // Hunt probability environment selector
   const environments = ["Marsh", "Timber", "Field", "Open Water", "River"];
@@ -398,6 +399,7 @@ export default function TodayScreen({ onLogout }) {
     setRefreshing(true);
     await Promise.all([refresh(), loadRadar()]);
     setRefreshing(false);
+    setRefreshCount((c) => c + 1);
   }, [refresh, loadRadar]);
 
   const toggleHuntAlerts = useCallback(async () => {
@@ -472,6 +474,11 @@ export default function TodayScreen({ onLogout }) {
             <Text style={s.gearText}>⚙︎</Text>
           </Pressable>
         </View>
+
+        {/* Easter egg — appears on every 4th pull-to-refresh */}
+        {refreshCount > 0 && refreshCount % 4 === 0 && (
+          <Text style={s.easterEggLine}>Same weather. Different hopes.</Text>
+        )}
 
         {/* Hunt probability */}
         <TodayCard
@@ -1096,4 +1103,15 @@ const s = StyleSheet.create({
   radarRefreshText: { color: COLORS.muted, fontSize: 16, fontWeight: "900" },
 
   disclaimer: { marginTop: 18, color: COLORS.mutedDarker, fontSize: 11, lineHeight: 17, fontWeight: "700", textAlign: "center", paddingHorizontal: 8 },
+
+  // Easter Egg
+  easterEggLine: {
+    color: COLORS.mutedDarker,
+    fontSize: 11,
+    fontWeight: "700",
+    fontStyle: "italic",
+    textAlign: "center",
+    marginTop: 8,
+    opacity: 0.6,
+  },
 });

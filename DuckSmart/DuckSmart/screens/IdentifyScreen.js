@@ -21,6 +21,7 @@ import {
   IDENTIFY_HABITATS,
   IDENTIFY_SIZE,
   FREE_SPECIES_IDS,
+  EASTER_EGG_DUCK,
   computeIdentifyMatches,
 } from "../data/species";
 
@@ -213,6 +214,28 @@ function IdentifyHome({ navigation }) {
               );
             })
           )}
+
+          {/* ── Easter Egg Duck — always at the very bottom ── */}
+          {!group && !habitat && !size && !query && (
+            <Pressable
+              style={[s.matchRow, { opacity: 0.7 }]}
+              onPress={() => navigation.navigate("SpeciesDetail", { id: EASTER_EGG_DUCK.id })}
+            >
+              <View style={[s.matchThumb, s.eggThumb]}>
+                <Text style={s.eggThumbText}>?</Text>
+              </View>
+              <View style={{ flex: 1 }}>
+                <Text style={[s.matchTitle, { fontStyle: "italic" }]}>Probably a Duck</Text>
+                <Text style={s.matchSub}>??? • Size: Yes</Text>
+                <Text style={s.matchHint} numberOfLines={2}>
+                  May or may not have feathers — reports vary
+                </Text>
+              </View>
+              <View style={s.eggScoreBubble}>
+                <Text style={s.eggScoreText}>?</Text>
+              </View>
+            </Pressable>
+          )}
         </IdentifyCard>
 
         <View style={{ height: 22 }} />
@@ -225,7 +248,7 @@ function IdentifyHome({ navigation }) {
 
 function SpeciesDetail({ route, navigation }) {
   const { id } = route.params;
-  const sp = IDENTIFY_SPECIES.find((x) => x.id === id);
+  const sp = IDENTIFY_SPECIES.find((x) => x.id === id) || (id === EASTER_EGG_DUCK.id ? EASTER_EGG_DUCK : null);
   const [showFemale, setShowFemale] = useState(false);
 
   if (!sp) {
@@ -242,6 +265,7 @@ function SpeciesDetail({ route, navigation }) {
     );
   }
 
+  const isEasterEgg = sp.id === EASTER_EGG_DUCK.id;
   const duckAsset = ASSETS.ducks[sp.name];
   const hasMaleFemale = duckAsset && duckAsset.male;
   const heroSource = hasMaleFemale
@@ -258,14 +282,22 @@ function SpeciesDetail({ route, navigation }) {
           </Pressable>
 
           <View style={{ flex: 1 }}>
-            <Text style={s.detailTitle}>{sp.name}</Text>
+            <Text style={[s.detailTitle, isEasterEgg && { fontStyle: "italic" }]}>{sp.name}</Text>
             <Text style={s.detailSub}>
-              {sp.group} • {sp.size}
+              {sp.group} • {isEasterEgg ? "Size: Yes" : sp.size}
             </Text>
           </View>
         </View>
 
-        {heroSource ? (
+        {/* Easter Egg hero — mystery blurred placeholder */}
+        {isEasterEgg ? (
+          <View style={s.heroWrap}>
+            <View style={[s.heroImage, s.eggHero]}>
+              <Text style={s.eggHeroQuestion}>?</Text>
+              <Text style={s.eggHeroCaption}>Artist's rendering unavailable</Text>
+            </View>
+          </View>
+        ) : heroSource ? (
           <View style={s.heroWrap}>
             <Image source={heroSource} style={s.heroImage} resizeMode="cover" />
             {hasMaleFemale ? (
@@ -508,4 +540,52 @@ const s = StyleSheet.create({
 
   primaryBtn: { paddingVertical: 12, paddingHorizontal: 14, borderRadius: 14, backgroundColor: COLORS.greenBg, borderWidth: 1, borderColor: COLORS.green, alignItems: "center" },
   primaryBtnText: { color: COLORS.green, fontWeight: "900" },
+
+  // Easter Egg Duck
+  eggThumb: {
+    alignItems: "center",
+    justifyContent: "center",
+    backgroundColor: "#1A1A1A",
+    borderColor: COLORS.yellow,
+    borderStyle: "dashed",
+  },
+  eggThumbText: {
+    color: COLORS.yellow,
+    fontSize: 24,
+    fontWeight: "900",
+  },
+  eggScoreBubble: {
+    width: 44,
+    height: 44,
+    borderRadius: 14,
+    borderWidth: 1,
+    borderColor: COLORS.yellow,
+    borderStyle: "dashed",
+    backgroundColor: COLORS.bgDeep,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  eggScoreText: {
+    color: COLORS.yellow,
+    fontWeight: "900",
+    fontSize: 18,
+  },
+  eggHero: {
+    backgroundColor: "#111111",
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  eggHeroQuestion: {
+    fontSize: 72,
+    fontWeight: "900",
+    color: COLORS.yellow,
+    opacity: 0.35,
+  },
+  eggHeroCaption: {
+    color: COLORS.mutedDarker,
+    fontSize: 12,
+    fontWeight: "700",
+    fontStyle: "italic",
+    marginTop: -8,
+  },
 });

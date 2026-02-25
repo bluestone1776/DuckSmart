@@ -8,6 +8,7 @@ import { COLORS } from "./constants/theme";
 import { WeatherProvider } from "./context/WeatherContext";
 import { AuthProvider, useAuth } from "./context/AuthContext";
 import { PremiumProvider } from "./context/PremiumContext";
+import { ThemeProvider, useTheme } from "./context/ThemeContext";
 import { saveLogs, loadLogs, savePins, loadPins } from "./services/storage";
 import { preloadInterstitialAd } from "./services/ads";
 
@@ -44,6 +45,7 @@ const SEED_PINS = [
 
 function MainApp() {
   const { logout } = useAuth();
+  const { accentColor } = useTheme();
   const [logs, setLogs] = useState([]);
   const [pins, setPins] = useState(SEED_PINS);
   const [ready, setReady] = useState(false);
@@ -100,7 +102,7 @@ function MainApp() {
             paddingBottom: 10,
             paddingTop: 8,
           },
-          tabBarActiveTintColor: COLORS.green,
+          tabBarActiveTintColor: accentColor,
           tabBarInactiveTintColor: COLORS.muted,
           tabBarLabelStyle: { fontWeight: "800" },
           tabBarIcon: ({ focused, color, size }) => {
@@ -144,8 +146,10 @@ function AuthGate() {
 
 export default function App() {
   return (
-    <AuthProvider>
-      <AuthGate />
-    </AuthProvider>
+    <ThemeProvider>
+      <AuthProvider>
+        <AuthGate />
+      </AuthProvider>
+    </ThemeProvider>
   );
 }

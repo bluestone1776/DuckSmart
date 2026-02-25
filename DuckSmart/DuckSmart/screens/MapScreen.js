@@ -370,6 +370,11 @@ export default function MapScreen({ pins, setPins }) {
                   </Text>
                 </View>
 
+                {/* Easter egg — appears on "Spot" type pins */}
+                {selectedPin.type === "Spot" && (
+                  <Text style={localStyles.eggHint}>At least 12 people know about this.</Text>
+                )}
+
                 <View style={styles.sheetBtnRow}>
                   <Pressable style={styles.secondaryBtn} onPress={() => setSelectedPinId(null)}>
                     <Text style={styles.secondaryBtnText}>Close</Text>
@@ -452,5 +457,14 @@ const localStyles = StyleSheet.create({
     fontSize: 14,
     fontWeight: "700",
     marginLeft: 4,
+  },
+  eggHint: {
+    color: COLORS.mutedDarker,
+    fontSize: 11,
+    fontWeight: "700",
+    fontStyle: "italic",
+    textAlign: "center",
+    marginTop: 6,
+    opacity: 0.5,
   },
 });

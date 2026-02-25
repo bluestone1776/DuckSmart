@@ -474,6 +474,36 @@ export const IDENTIFY_SPECIES = [
   },
 ];
 
+// ── Easter Egg Duck — always appears at bottom of Identify list ──
+export const EASTER_EGG_DUCK = {
+  id: "probably_a_duck",
+  name: "Probably a Duck",
+  group: "???",
+  size: "Yes",
+  habitats: { Timber: "Maybe", Marsh: "Probably", Fields: "Who Knows", "Open Water": "Debatable", Coastline: "Ask Again Later" },
+  primaryHabitats: "Wherever you aren't looking. Seen near gas stations, tailgates, and once in a Walmart parking lot.",
+  habitatBehavior: "Experts remain divided. Some say it flies. Others say it simply appears. All agree: it's probably a duck. Approach with mild confusion.",
+  keyMarks: [
+    "May or may not have feathers — reports vary",
+    "Bill shaped like... something. Definitely bill-adjacent.",
+    "Eyes that have seen things you wouldn't believe",
+    "Tail? Probably. Don't quote us.",
+    "Makes a sound best described as 'duck-ish'",
+    "Waddles with an unearned level of confidence",
+  ],
+  lookalikes: ["Everything", "Nothing", "Your hunting buddy at 4 AM", "A decoy you forgot to pick up"],
+  flightInfo: "Flies when it feels like it • Speed: depends on who's watching",
+  tips: [
+    "If you see it, you'll know. Or you won't. Hard to say.",
+    "Decoy spread recommendation: just put them all out and hope for the best.",
+    "Best calling technique: make a noise. Any noise. It doesn't matter.",
+    "Has been spotted in every state and no states simultaneously.",
+    "If your dog retrieves this one, you both deserve a nap.",
+    "Pairs well with cold coffee and questionable life choices.",
+  ],
+  legalNote: "Check with your state wildlife agency. They won't know what you're talking about either, but it's polite to ask.",
+};
+
 // ── Free-tier species (available without Pro upgrade) ──
 export const FREE_SPECIES_IDS = [
   "mallard",

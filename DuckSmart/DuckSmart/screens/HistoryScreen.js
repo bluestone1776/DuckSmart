@@ -157,6 +157,13 @@ export default function HistoryScreen({ logs, deleteLog, onLogout }) {
                 </Text>
               </View>
 
+              {/* Easter egg — long journal entries */}
+              {selected.notes && selected.notes.length > 150 && (
+                <Text style={{ color: "#3A3A3A", fontSize: 11, fontWeight: "700", fontStyle: "italic", textAlign: "center", marginTop: 6, opacity: 0.5 }}>
+                  You'll read this again. Probably.
+                </Text>
+              )}
+
               {selected.photos?.length ? (
                 <>
                   <Text style={[styles.inputLabel, { marginTop: 12 }]}>Photos</Text>

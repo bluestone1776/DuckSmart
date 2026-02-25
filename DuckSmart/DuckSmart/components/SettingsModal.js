@@ -3,7 +3,7 @@
 // Full-screen modal with: Feedback form, App info, and Logout.
 // Triggered by the gear button on any screen.
 
-import React, { useState } from "react";
+import React, { useState, useEffect } from "react";
 import {
   View,
   Text,
@@ -15,20 +15,117 @@ import {
   StyleSheet,
   KeyboardAvoidingView,
   Platform,
+  Image,
+  ActivityIndicator,
 } from "react-native";
+import * as ImagePicker from "expo-image-picker";
+import * as FileSystem from "expo-file-system";
 import { COLORS } from "../constants/theme";
 import { submitFeedback } from "../services/feedback";
 import { useAuth } from "../context/AuthContext";
 import { usePremium } from "../context/PremiumContext";
+import { useTheme } from "../context/ThemeContext";
+
+// ---------------------------------------------------------------------------
+// Hunting License — stored locally in the document directory
+// ---------------------------------------------------------------------------
+const LICENSE_PATH = `${FileSystem.documentDirectory}hunting_license.jpg`;
 
 const CATEGORIES = ["Bug", "Feature Request", "Question", "Other"];
 
 export default function SettingsModal({ visible, onClose, onLogout }) {
   const { deleteAccount } = useAuth();
   const { isPro, purchase, restore, getProPrice } = usePremium();
+  const { accent, presets, setAccent } = useTheme();
   const [feedbackMsg, setFeedbackMsg] = useState("");
   const [category, setCategory] = useState("Bug");
   const [submitting, setSubmitting] = useState(false);
+
+  // Hunting License state
+  const [licenseUri, setLicenseUri] = useState(null);
+  const [licenseLoading, setLicenseLoading] = useState(true);
+  const [licenseViewer, setLicenseViewer] = useState(false);
+
+  // Load saved license on mount
+  useEffect(() => {
+    if (!visible) return;
+    (async () => {
+      try {
+        const info = await FileSystem.getInfoAsync(LICENSE_PATH);
+        if (info.exists) {
+          setLicenseUri(LICENSE_PATH + "?t=" + info.modificationTime);
+        } else {
+          setLicenseUri(null);
+        }
+      } catch {
+        setLicenseUri(null);
+      } finally {
+        setLicenseLoading(false);
+      }
+    })();
+  }, [visible]);
+
+  async function pickLicensePhoto(useCamera) {
+    try {
+      let result;
+      if (useCamera) {
+        const perm = await ImagePicker.requestCameraPermissionsAsync();
+        if (!perm.granted) {
+          Alert.alert("Permission Needed", "Camera access is required to take a photo of your license.");
+          return;
+        }
+        result = await ImagePicker.launchCameraAsync({
+          quality: 0.8,
+          allowsEditing: true,
+        });
+      } else {
+        const perm = await ImagePicker.requestMediaLibraryPermissionsAsync();
+        if (!perm.granted) {
+          Alert.alert("Permission Needed", "Photo library access is required to select your license image.");
+          return;
+        }
+        result = await ImagePicker.launchImageLibraryAsync({
+          quality: 0.8,
+          allowsEditing: true,
+        });
+      }
+
+      if (result.canceled || !result.assets?.length) return;
+
+      const sourceUri = result.assets[0].uri;
+      await FileSystem.copyAsync({ from: sourceUri, to: LICENSE_PATH });
+      const info = await FileSystem.getInfoAsync(LICENSE_PATH);
+      setLicenseUri(LICENSE_PATH + "?t=" + info.modificationTime);
+    } catch {
+      Alert.alert("Error", "Could not save the license photo. Please try again.");
+    }
+  }
+
+  function handleAddLicense() {
+    Alert.alert("Add Hunting License", "Take a photo or choose from your gallery.", [
+      { text: "Camera", onPress: () => pickLicensePhoto(true) },
+      { text: "Gallery", onPress: () => pickLicensePhoto(false) },
+      { text: "Cancel", style: "cancel" },
+    ]);
+  }
+
+  function handleRemoveLicense() {
+    Alert.alert("Remove License Photo?", "This will delete the saved image from this device.", [
+      { text: "Cancel", style: "cancel" },
+      {
+        text: "Remove",
+        style: "destructive",
+        onPress: async () => {
+          try {
+            await FileSystem.deleteAsync(LICENSE_PATH, { idempotent: true });
+            setLicenseUri(null);
+          } catch {
+            Alert.alert("Error", "Could not remove the license photo.");
+          }
+        },
+      },
+    ]);
+  }
 
   async function handleSubmitFeedback() {
     const msg = feedbackMsg.trim();
@@ -183,6 +280,74 @@ export default function SettingsModal({ visible, onClose, onLogout }) {
             )}
           </View>
 
+          {/* Hunting License */}
+          <View style={ms.section}>
+            <Text style={ms.sectionTitle}>Hunting License</Text>
+            <Text style={ms.sectionSub}>
+              Store a photo of your hunting license for quick offline access in the field.
+            </Text>
+
+            {licenseLoading ? (
+              <ActivityIndicator color={COLORS.green} style={{ marginVertical: 20 }} />
+            ) : licenseUri ? (
+              <>
+                <Pressable onPress={() => setLicenseViewer(true)}>
+                  <Image source={{ uri: licenseUri }} style={ms.licenseThumb} resizeMode="cover" />
+                  <Text style={ms.licenseTapHint}>Tap to view full size</Text>
+                </Pressable>
+                <View style={{ flexDirection: "row", gap: 10, marginTop: 10 }}>
+                  <Pressable style={[ms.upgradeBtn, { flex: 1 }]} onPress={handleAddLicense}>
+                    <Text style={ms.upgradeBtnText}>Replace Photo</Text>
+                  </Pressable>
+                  <Pressable style={[ms.deleteBtn, { flex: 1, marginTop: 0 }]} onPress={handleRemoveLicense}>
+                    <Text style={ms.deleteBtnText}>Remove</Text>
+                  </Pressable>
+                </View>
+              </>
+            ) : (
+              <Pressable style={ms.licenseAddBtn} onPress={handleAddLicense}>
+                <Text style={ms.licenseAddIcon}>📄</Text>
+                <Text style={ms.licenseAddText}>Add License Photo</Text>
+                <Text style={ms.licenseAddSub}>Camera or Gallery</Text>
+              </Pressable>
+            )}
+          </View>
+
+          {/* License Full-Screen Viewer */}
+          <Modal visible={licenseViewer} transparent={false} animationType="fade" onRequestClose={() => setLicenseViewer(false)}>
+            <View style={ms.licenseViewerBg}>
+              <Image source={{ uri: licenseUri }} style={ms.licenseViewerImage} resizeMode="contain" />
+              <Pressable style={ms.licenseViewerClose} onPress={() => setLicenseViewer(false)}>
+                <Text style={ms.closeBtnText}>✕  Close</Text>
+              </Pressable>
+            </View>
+          </Modal>
+
+          {/* Accent Color Theme */}
+          <View style={ms.section}>
+            <Text style={ms.sectionTitle}>Accent Color</Text>
+            <Text style={ms.sectionSub}>
+              Personalize the look of DuckSmart. Pick a color that matches your style.
+            </Text>
+            <View style={ms.themeGrid}>
+              {presets.map((p) => (
+                <Pressable
+                  key={p.key}
+                  style={[
+                    ms.themeSwatch,
+                    { backgroundColor: p.bg, borderColor: p.color },
+                    accent.key === p.key && ms.themeSwatchSelected,
+                  ]}
+                  onPress={() => setAccent(p)}
+                >
+                  <View style={[ms.themeCircle, { backgroundColor: p.color }]} />
+                  <Text style={[ms.themeLabel, { color: p.color }]}>{p.label}</Text>
+                  {accent.key === p.key && <Text style={[ms.themeCheck, { color: p.color }]}>✓</Text>}
+                </Pressable>
+              ))}
+            </View>
+          </View>
+
           {/* App Info */}
           <View style={ms.section}>
             <Text style={ms.sectionTitle}>About DuckSmart</Text>
@@ -285,4 +450,89 @@ const ms = StyleSheet.create({
     marginTop: 10, paddingVertical: 10, alignItems: "center",
   },
   restoreBtnText: { color: COLORS.mutedDark, fontWeight: "700", fontSize: 13 },
+
+  // Hunting License
+  licenseThumb: {
+    width: "100%",
+    height: 200,
+    borderRadius: 14,
+    backgroundColor: COLORS.bgDeep,
+    borderWidth: 1,
+    borderColor: COLORS.borderSubtle,
+  },
+  licenseTapHint: {
+    color: COLORS.mutedDarker,
+    fontSize: 11,
+    fontWeight: "700",
+    textAlign: "center",
+    marginTop: 6,
+  },
+  licenseAddBtn: {
+    alignItems: "center",
+    justifyContent: "center",
+    paddingVertical: 28,
+    borderRadius: 14,
+    backgroundColor: COLORS.bgDeep,
+    borderWidth: 1,
+    borderColor: COLORS.border,
+    borderStyle: "dashed",
+  },
+  licenseAddIcon: { fontSize: 28, marginBottom: 6 },
+  licenseAddText: { color: COLORS.white, fontWeight: "900", fontSize: 14 },
+  licenseAddSub: { color: COLORS.mutedDark, fontWeight: "700", fontSize: 12, marginTop: 4 },
+
+  licenseViewerBg: {
+    flex: 1,
+    backgroundColor: COLORS.black,
+    alignItems: "center",
+    justifyContent: "center",
+    padding: 16,
+  },
+  licenseViewerImage: {
+    width: "100%",
+    height: "75%",
+    borderRadius: 14,
+  },
+  licenseViewerClose: {
+    marginTop: 20,
+    paddingVertical: 14,
+    paddingHorizontal: 40,
+    borderRadius: 14,
+    backgroundColor: COLORS.bg,
+    borderWidth: 1,
+    borderColor: COLORS.border,
+  },
+
+  // Accent Color Theme
+  themeGrid: {
+    flexDirection: "row",
+    flexWrap: "wrap",
+    gap: 10,
+  },
+  themeSwatch: {
+    width: "47%",
+    flexDirection: "row",
+    alignItems: "center",
+    padding: 12,
+    borderRadius: 14,
+    borderWidth: 1,
+    gap: 8,
+  },
+  themeSwatchSelected: {
+    borderWidth: 2,
+  },
+  themeCircle: {
+    width: 20,
+    height: 20,
+    borderRadius: 10,
+  },
+  themeLabel: {
+    fontSize: 12,
+    fontWeight: "800",
+    flex: 1,
+  },
+  themeCheck: {
+    fontSize: 14,
+    fontWeight: "900",
+  },
 });
