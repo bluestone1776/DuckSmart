@@ -338,7 +338,8 @@ function SpreadImageModal({ visible, onClose, spread }) {
 // ---------------------------------------------------------------------------
 // Freemium gating limits
 // ---------------------------------------------------------------------------
-const FREE_HOURLY_LIMIT = 3;   // Free users see 3 hours; Pro sees all 5
+const FREE_HOURLY_LIMIT = 3;   // Free users see 3 consecutive hours
+const PRO_HOURLY_LIMIT = 5;    // Pro users see 5 consecutive hours
 const FREE_SPREAD_LIMIT = 2;   // Free users see 2 spreads; Pro sees all
 
 export default function TodayScreen({ onLogout }) {
@@ -586,13 +587,13 @@ export default function TodayScreen({ onLogout }) {
           </TodayCard>
         )}
 
-        {/* Hourly quick look — free: 3hrs, Pro: all */}
+        {/* Hourly quick look — free: 3 consecutive hrs, Pro: 5 consecutive hrs */}
         <TodayCard
           title="Hourly Snapshot"
           right={
             !isPro ? (
               <View style={s.proTagPill}>
-                <Text style={s.proTagText}>PRO unlocks all</Text>
+                <Text style={s.proTagText}>PRO: 5 hours</Text>
               </View>
             ) : null
           }
@@ -600,7 +601,7 @@ export default function TodayScreen({ onLogout }) {
           <ScrollView horizontal showsHorizontalScrollIndicator={false}>
             <View style={s.hourlyRow}>
               {weather.hourly
-                .slice(0, isPro ? weather.hourly.length : FREE_HOURLY_LIMIT)
+                .slice(0, isPro ? PRO_HOURLY_LIMIT : FREE_HOURLY_LIMIT)
                 .map((h) => (
                   <View key={h.t} style={s.hourlyCard}>
                     <Text style={s.hourlyTime}>{h.t}</Text>
@@ -611,12 +612,12 @@ export default function TodayScreen({ onLogout }) {
                   </View>
                 ))}
 
-              {/* Locked placeholder cards for free users */}
-              {!isPro && weather.hourly.length > FREE_HOURLY_LIMIT && (
+              {/* Locked placeholder card for free users */}
+              {!isPro && (
                 <View style={[s.hourlyCard, s.hourlyCardLocked]}>
                   <Text style={s.hourlyLockIcon}>🔒</Text>
                   <Text style={s.hourlyLockText}>
-                    +{weather.hourly.length - FREE_HOURLY_LIMIT} more{"\n"}with Pro
+                    +{PRO_HOURLY_LIMIT - FREE_HOURLY_LIMIT} more{"\n"}with Pro
                   </Text>
                 </View>
               )}

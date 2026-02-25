@@ -58,6 +58,81 @@ function formatHourLabel(unix, tzOffsetSec) {
   return `${hours - 12}p`;
 }
 
+// ── hourly interpolation ─────────────────────────────────────
+//
+// OWM 5-day forecast gives 3-hour steps. We interpolate to generate
+// 1-hour resolution data so the Hourly Snapshot shows e.g. 7pm 8pm 9pm.
+// We produce up to 6 hourly entries starting from the current hour.
+
+function lerp(a, b, t) {
+  return a + (b - a) * t;
+}
+
+function formatFullHourLabel(unix, tzOffsetSec) {
+  const utcMs = unix * 1000;
+  const localMs = utcMs + tzOffsetSec * 1000;
+  const d = new Date(localMs);
+  let hours = d.getUTCHours();
+  const ampm = hours >= 12 ? "pm" : "am";
+  hours = hours % 12 || 12;
+  return `${hours}${ampm}`;
+}
+
+function buildHourlyFromForecast(list, nowUnix, tzOffset) {
+  if (!list || list.length < 2) return [];
+
+  const HOURS_TO_GENERATE = 6; // enough for 3 free + 5 pro + 1 buffer
+  const result = [];
+
+  // Start from the top of the current hour
+  const currentHourUnix = Math.floor(nowUnix / 3600) * 3600;
+
+  for (let h = 0; h < HOURS_TO_GENERATE; h++) {
+    const targetUnix = currentHourUnix + h * 3600;
+
+    // Find the two forecast entries that bracket this hour
+    let before = null;
+    let after = null;
+    for (let i = 0; i < list.length - 1; i++) {
+      if (list[i].dt <= targetUnix && list[i + 1].dt >= targetUnix) {
+        before = list[i];
+        after = list[i + 1];
+        break;
+      }
+    }
+
+    // If target is before the first entry, use the first entry
+    if (!before && list.length > 0 && targetUnix <= list[0].dt) {
+      before = list[0];
+      after = list[0];
+    }
+    // If target is after the last bracketed pair, use the nearest entry
+    if (!before) {
+      const nearest = list.find((e) => e.dt >= targetUnix) || list[list.length - 1];
+      before = nearest;
+      after = nearest;
+    }
+
+    // Calculate interpolation factor (0..1 between the two entries)
+    const span = after.dt - before.dt;
+    const t = span > 0 ? (targetUnix - before.dt) / span : 0;
+
+    result.push({
+      t: h === 0 ? "Now" : formatFullHourLabel(targetUnix, tzOffset),
+      temp: Math.round(lerp(before.main.temp, after.main.temp, t)),
+      precip: Math.round(lerp((before.pop || 0) * 100, (after.pop || 0) * 100, t)),
+      wind: Math.round(lerp(before.wind.speed, after.wind.speed, t)),
+      gust: Math.round(lerp(
+        before.wind.gust || before.wind.speed,
+        after.wind.gust || after.wind.speed,
+        t
+      )),
+    });
+  }
+
+  return result;
+}
+
 // ── transform ────────────────────────────────────────────────
 
 function buildWeatherObject(current, forecast) {
@@ -107,14 +182,10 @@ function buildWeatherObject(current, forecast) {
     deltaPressure3h = Math.round((pressureInHg - futureInHg) * 100) / 100;
   }
 
-  // --- hourly array (next 5 forecast entries) ---
-  const hourly = list.slice(0, 5).map((entry, idx) => ({
-    t: idx === 0 ? "Now" : formatHourLabel(entry.dt, tzOffset),
-    temp: Math.round(entry.main.temp),
-    precip: Math.round((entry.pop || 0) * 100),
-    wind: Math.round(entry.wind.speed),
-    gust: Math.round(entry.wind.gust || entry.wind.speed),
-  }));
+  // --- hourly array (1-hour intervals, interpolated from 3-hour forecast) ---
+  // OWM free tier gives 3-hour steps. We linearly interpolate to get true
+  // hour-by-hour data so the UI can show e.g. 7pm, 8pm, 9pm, 10pm, 11pm.
+  const hourly = buildHourlyFromForecast(list, now, tzOffset);
 
   // --- 48-hour trend data (up to 16 forecast entries = 48hrs at 3hr intervals) ---
   const trends48h = list.slice(0, 16).map((entry) => ({
@@ -185,10 +256,11 @@ export const MOCK_WEATHER = {
   sunset: "5:18 PM",
   hourly: [
     { t: "Now", temp: 31, precip: 25, wind: 12, gust: 18 },
-    { t: "1p", temp: 33, precip: 30, wind: 13, gust: 20 },
-    { t: "2p", temp: 34, precip: 35, wind: 14, gust: 22 },
-    { t: "3p", temp: 34, precip: 40, wind: 13, gust: 21 },
-    { t: "4p", temp: 32, precip: 30, wind: 11, gust: 17 },
+    { t: "1pm", temp: 32, precip: 28, wind: 12, gust: 19 },
+    { t: "2pm", temp: 33, precip: 30, wind: 13, gust: 20 },
+    { t: "3pm", temp: 34, precip: 35, wind: 14, gust: 22 },
+    { t: "4pm", temp: 34, precip: 40, wind: 13, gust: 21 },
+    { t: "5pm", temp: 32, precip: 30, wind: 11, gust: 17 },
   ],
   trends48h: [
     { t: "12p", temp: 31, pressureInHg: 30.08, wind: 12, windDeg: 315 },
