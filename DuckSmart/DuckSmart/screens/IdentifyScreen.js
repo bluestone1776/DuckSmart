@@ -153,10 +153,15 @@ function IdentifyHome({ navigation }) {
     [group, habitat, size, query]
   );
 
+  // Track filter interactions for easter egg reveal
+  const [filterTaps, setFilterTaps] = useState(0);
+
   // Toggle selection — tap again to deselect
-  function toggleGroup(g) { setGroup((prev) => (prev === g ? null : g)); }
-  function toggleHabitat(h) { setHabitat((prev) => (prev === h ? null : h)); }
-  function toggleSize(sz) { setSize((prev) => (prev === sz ? null : sz)); }
+  function toggleGroup(g) { setGroup((prev) => (prev === g ? null : g)); setFilterTaps((n) => n + 1); }
+  function toggleHabitat(h) { setHabitat((prev) => (prev === h ? null : h)); setFilterTaps((n) => n + 1); }
+  function toggleSize(sz) { setSize((prev) => (prev === sz ? null : sz)); setFilterTaps((n) => n + 1); }
+
+  const hasFilter = !!(group || habitat || size || query);
 
   return (
     <SafeAreaView style={s.safe}>
@@ -319,70 +324,73 @@ function IdentifyHome({ navigation }) {
         <IdentifyCard
           title="Matches"
           right={
-            <View style={s.sheetPill}>
-              <Text style={s.sheetPillText}>{matches.length} shown</Text>
-            </View>
+            hasFilter ? (
+              <View style={s.sheetPill}>
+                <Text style={s.sheetPillText}>{matches.filter(({ species }) => isPro || FREE_SPECIES_IDS.includes(species.id)).length} shown</Text>
+              </View>
+            ) : null
           }
         >
-          {matches.length === 0 ? (
+          {!hasFilter ? (
+            <View style={s.noteBox}>
+              <Text style={s.noteTextMuted}>
+                Select a group, habitat, or size above — or type a search — to find matching species.
+              </Text>
+            </View>
+          ) : matches.length === 0 ? (
             <View style={s.noteBox}>
               <Text style={s.noteTextMuted}>
                 No matches found. Try changing filters or clear the search.
               </Text>
             </View>
           ) : (
-            matches.map(({ species, score }) => {
-              const isFree = FREE_SPECIES_IDS.includes(species.id);
-              return (
-                <Pressable
-                  key={species.id}
-                  onPress={() => {
-                    if (isFree) {
-                      navigation.navigate("SpeciesDetail", { id: species.id });
-                    } else {
-                      Alert.alert(
-                        "Pro Feature",
-                        `${species.name} details are available with DuckSmart Pro. Upgrade to unlock all 30+ species.`,
-                        [{ text: "OK" }]
-                      );
-                    }
-                  }}
-                  style={[s.matchRow, !isFree && { opacity: 0.55 }]}
-                >
-                  {ASSETS.ducks[species.name] ? (
-                    <Image source={ASSETS.ducks[species.name].male || ASSETS.ducks[species.name]} style={s.matchThumb} resizeMode="cover" />
-                  ) : (
-                    <View style={[s.matchThumb, { alignItems: "center", justifyContent: "center" }]}>
-                      <Text style={{ color: COLORS.mutedDark, fontSize: 20 }}>🦆</Text>
+            <>
+              {matches.map(({ species, score }) => {
+                const isFree = FREE_SPECIES_IDS.includes(species.id);
+                if (!isPro && !isFree) return null; // hide locked ducks from list
+                return (
+                  <Pressable
+                    key={species.id}
+                    onPress={() => navigation.navigate("SpeciesDetail", { id: species.id })}
+                    style={s.matchRow}
+                  >
+                    {ASSETS.ducks[species.name] ? (
+                      <Image source={ASSETS.ducks[species.name].male || ASSETS.ducks[species.name]} style={s.matchThumb} resizeMode="cover" />
+                    ) : (
+                      <View style={[s.matchThumb, { alignItems: "center", justifyContent: "center" }]}>
+                        <Text style={{ color: COLORS.mutedDark, fontSize: 20 }}>🦆</Text>
+                      </View>
+                    )}
+                    <View style={{ flex: 1 }}>
+                      <Text style={s.matchTitle}>{species.name}</Text>
+                      <Text style={s.matchSub}>
+                        {species.group} • {species.size}
+                      </Text>
+                      <Text style={s.matchHint} numberOfLines={2}>
+                        {species.keyMarks[0]}
+                      </Text>
                     </View>
-                  )}
-                  <View style={{ flex: 1 }}>
-                    <Text style={s.matchTitle}>{species.name}</Text>
-                    <Text style={s.matchSub}>
-                      {species.group} • {species.size}
-                    </Text>
-                    <Text style={s.matchHint} numberOfLines={2}>
-                      {species.keyMarks[0]}
-                    </Text>
-                  </View>
-
-                  {isFree ? (
                     <View style={s.scoreBubble}>
                       <Text style={s.scoreBubbleText}>{score}</Text>
                     </View>
-                  ) : (
-                    <View style={s.lockBubble}>
-                      <Text style={s.lockIcon}>🔒</Text>
-                      <Text style={s.lockLabel}>PRO</Text>
-                    </View>
-                  )}
-                </Pressable>
-              );
-            })
+                  </Pressable>
+                );
+              })}
+
+              {/* Pro upsell — shown to free users when there are hidden species */}
+              {!isPro && matches.some(({ species }) => !FREE_SPECIES_IDS.includes(species.id)) && (
+                <View style={s.proUnlockBox}>
+                  <Text style={s.proUnlockIcon}>🔒</Text>
+                  <Text style={s.proUnlockText}>
+                    Upgrade to Pro to unlock {matches.filter(({ species }) => !FREE_SPECIES_IDS.includes(species.id)).length} more species matching your filters.
+                  </Text>
+                </View>
+              )}
+            </>
           )}
 
-          {/* ── Easter Egg Duck — always at the very bottom ── */}
-          {!group && !habitat && !size && !query && (
+          {/* ── Easter Egg Duck — appears after 10+ filter taps ── */}
+          {filterTaps >= 10 && (
             <Pressable
               style={[s.matchRow, { opacity: 0.7 }]}
               onPress={() => navigation.navigate("SpeciesDetail", { id: EASTER_EGG_DUCK.id })}
@@ -658,19 +666,6 @@ const s = StyleSheet.create({
   },
   scoreBubbleText: { color: COLORS.green, fontWeight: "900" },
 
-  lockBubble: {
-    width: 44,
-    height: 44,
-    borderRadius: 14,
-    borderWidth: 1,
-    borderColor: COLORS.yellow,
-    backgroundColor: COLORS.bgDeep,
-    alignItems: "center",
-    justifyContent: "center",
-  },
-  lockIcon: { fontSize: 14 },
-  lockLabel: { color: COLORS.yellow, fontWeight: "900", fontSize: 9, marginTop: 1 },
-
   disclaimer: { marginTop: 12, color: COLORS.mutedDarker, fontSize: 12, lineHeight: 18, fontWeight: "700" },
 
   noteBox: { padding: 12, borderRadius: 14, backgroundColor: COLORS.bgDeep, borderWidth: 1, borderColor: COLORS.borderSubtle, marginTop: 10 },
@@ -706,6 +701,27 @@ const s = StyleSheet.create({
 
   primaryBtn: { paddingVertical: 12, paddingHorizontal: 14, borderRadius: 14, backgroundColor: COLORS.greenBg, borderWidth: 1, borderColor: COLORS.green, alignItems: "center" },
   primaryBtnText: { color: COLORS.green, fontWeight: "900" },
+
+  // Pro unlock note
+  proUnlockBox: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 10,
+    marginTop: 12,
+    padding: 12,
+    borderRadius: 14,
+    backgroundColor: COLORS.bgDeep,
+    borderWidth: 1,
+    borderColor: COLORS.yellow,
+  },
+  proUnlockIcon: { fontSize: 18 },
+  proUnlockText: {
+    flex: 1,
+    color: COLORS.muted,
+    fontWeight: "800",
+    fontSize: 12,
+    lineHeight: 17,
+  },
 
   // Easter Egg Duck
   eggThumb: {

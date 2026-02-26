@@ -107,7 +107,9 @@ export default function HistoryScreen({ logs, deleteLog, onLogout }) {
                       <Text style={styles.historySub}>
                         {l.environment} • {l.spread} • Score {l.huntScore}{l.ducksHarvested != null ? ` • ${l.ducksHarvested} ducks` : ""}
                       </Text>
-                      <Image source={ASSETS.spreads[l.spread]} style={styles.spreadThumbSmall} resizeMode="cover" />
+                      {ASSETS.spreads[l.spread] ? (
+                        <Image source={ASSETS.spreads[l.spread]} style={styles.spreadThumbSmall} resizeMode="cover" />
+                      ) : null}
                       {l.notes ? (
                         <Text style={styles.historyNotes} numberOfLines={2}>
                           {l.notes}
