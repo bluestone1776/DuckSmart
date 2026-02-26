@@ -40,4 +40,9 @@ const auth =
       })
     : getAuth(app);
 
-export { app, auth };
+// ── Firestore ─────────────────────────────────────────────────
+import { getFirestore } from "firebase/firestore";
+
+const db = getFirestore(app);
+
+export { app, auth, db };

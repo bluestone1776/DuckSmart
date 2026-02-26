@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback } from "react";
+import React, { useState, useEffect, useCallback, useRef } from "react";
 import { View, ActivityIndicator } from "react-native";
 import { NavigationContainer } from "@react-navigation/native";
 import { createBottomTabNavigator } from "@react-navigation/bottom-tabs";
@@ -7,10 +7,14 @@ import { Ionicons } from "@expo/vector-icons";
 import { COLORS } from "./constants/theme";
 import { WeatherProvider } from "./context/WeatherContext";
 import { AuthProvider, useAuth } from "./context/AuthContext";
-import { PremiumProvider } from "./context/PremiumContext";
+import { PremiumProvider, usePremium } from "./context/PremiumContext";
 import { ThemeProvider, useTheme } from "./context/ThemeContext";
 import { saveLogs, loadLogs, savePins, loadPins } from "./services/storage";
 import { preloadInterstitialAd } from "./services/ads";
+import {
+  pushLogs, pushPins, pullLogs, pullPins,
+  mergeLogs, mergePins, pushDeleteLog, pushDeletePin,
+} from "./services/sync";
 
 import TodayScreen from "./screens/TodayScreen";
 import MapScreen from "./screens/MapScreen";
@@ -41,10 +45,113 @@ const SEED_PINS = [
   },
 ];
 
+// --- Cloud sync bridge — renders nothing, just manages Firestore sync ---
+
+function SyncManager({ uid, logs, pins, setLogs, setPins, ready }) {
+  const { isPro } = usePremium();
+  const hasSynced = useRef(false);
+  const isMerging = useRef(false);
+  const prevLogIds = useRef(new Set());
+  const prevPinIds = useRef(new Set());
+  const prevIsPro = useRef(isPro);
+  const pushLogsTimer = useRef(null);
+  const pushPinsTimer = useRef(null);
+
+  // ── Pull on login (once) — merge cloud data with local ──
+  useEffect(() => {
+    if (!ready || !uid || !isPro || hasSynced.current) return;
+    hasSynced.current = true;
+
+    (async () => {
+      isMerging.current = true;
+      try {
+        const [cloudLogs, cloudPins] = await Promise.all([
+          pullLogs(uid),
+          pullPins(uid),
+        ]);
+
+        if (cloudLogs) {
+          setLogs((local) => {
+            const merged = mergeLogs(local, cloudLogs);
+            prevLogIds.current = new Set(merged.map((l) => l.id));
+            return merged;
+          });
+        }
+        if (cloudPins) {
+          setPins((local) => {
+            const merged = mergePins(local, cloudPins);
+            prevPinIds.current = new Set(merged.map((p) => p.id));
+            return merged;
+          });
+        }
+      } catch (err) {
+        console.warn("DuckSmart sync: initial pull failed —", err.message);
+      }
+      // Allow pushes after a short delay so merge-triggered effects settle
+      setTimeout(() => { isMerging.current = false; }, 1000);
+    })();
+  }, [ready, uid, isPro]);
+
+  // ── Push logs after local changes (debounced 2s) ──
+  useEffect(() => {
+    if (!ready || !uid || !isPro || !hasSynced.current || isMerging.current) return;
+
+    // Detect deletions by comparing previous IDs to current
+    const currentIds = new Set(logs.map((l) => l.id));
+    for (const prevId of prevLogIds.current) {
+      if (!currentIds.has(prevId)) {
+        pushDeleteLog(uid, prevId);
+      }
+    }
+    prevLogIds.current = currentIds;
+
+    // Debounced push
+    clearTimeout(pushLogsTimer.current);
+    pushLogsTimer.current = setTimeout(() => {
+      pushLogs(uid, logs);
+    }, 2000);
+
+    return () => clearTimeout(pushLogsTimer.current);
+  }, [logs, ready, uid, isPro]);
+
+  // ── Push pins after local changes (debounced 2s) ──
+  useEffect(() => {
+    if (!ready || !uid || !isPro || !hasSynced.current || isMerging.current) return;
+
+    // Detect pin deletions
+    const currentIds = new Set(pins.map((p) => p.id));
+    for (const prevId of prevPinIds.current) {
+      if (!currentIds.has(prevId)) {
+        pushDeletePin(uid, prevId);
+      }
+    }
+    prevPinIds.current = currentIds;
+
+    clearTimeout(pushPinsTimer.current);
+    pushPinsTimer.current = setTimeout(() => {
+      pushPins(uid, pins);
+    }, 2000);
+
+    return () => clearTimeout(pushPinsTimer.current);
+  }, [pins, ready, uid, isPro]);
+
+  // ── Handle upgrade to Pro: push all existing local data ──
+  useEffect(() => {
+    if (prevIsPro.current === false && isPro === true && uid && ready) {
+      pushLogs(uid, logs);
+      pushPins(uid, pins);
+      hasSynced.current = true;
+    }
+    prevIsPro.current = isPro;
+  }, [isPro]);
+
+  return null;
+}
+
 // --- Main app (tabs + data) — only renders when authenticated ---
 
 function MainApp() {
-  const { logout } = useAuth();
+  const { user, logout } = useAuth();
   const { accentColor } = useTheme();
   const [logs, setLogs] = useState([]);
   const [pins, setPins] = useState(SEED_PINS);
@@ -89,6 +196,7 @@ function MainApp() {
 
   return (
     <PremiumProvider>
+    <SyncManager uid={user?.uid} logs={logs} pins={pins} setLogs={setLogs} setPins={setPins} ready={ready} />
     <WeatherProvider>
     <NavigationContainer>
       <Tab.Navigator

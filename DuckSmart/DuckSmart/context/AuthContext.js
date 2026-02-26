@@ -18,6 +18,7 @@ import {
 } from "firebase/auth";
 import { auth } from "../services/firebase";
 import { clearAllData } from "../services/storage";
+import { deleteAllUserData } from "../services/sync";
 import Constants from "expo-constants";
 
 // ---------------------------------------------------------------------------
@@ -227,8 +228,16 @@ export function AuthProvider({ children }) {
           /* ignore */
         }
       }
+      const uid = auth.currentUser?.uid;
+
       // Clear local data (logs, pins, weather cache)
       await clearAllData();
+
+      // Clear Firestore data (must happen BEFORE deleteUser — security rules require auth)
+      if (uid) {
+        await deleteAllUserData(uid);
+      }
+
       // Delete the Firebase user (permanently removes the account)
       await deleteUser(auth.currentUser);
     } catch (err) {
