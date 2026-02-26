@@ -38,9 +38,14 @@ module.exports = {
         foregroundImage: "./assets/adaptive-icon.png",
         backgroundColor: "#000000",
       },
-      edgeToEdgeEnabled: true,
+      edgeToEdgeEnabled: false,
       package: "com.ducksmart.app",
       versionCode: 1,
+      config: {
+        googleMaps: {
+          apiKey: "AIzaSyBnwwwpGQv_-UfdxPmDWbQM1tR7Z6obH74",
+        },
+      },
     },
     web: {
       favicon: "./assets/favicon.png",
