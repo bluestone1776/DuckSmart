@@ -210,7 +210,7 @@ export default function HistoryScreen({ logs, deleteLog, onLogout }) {
   }
 
   return (
-    <ScreenBackground style={styles.safe}>
+    <ScreenBackground style={styles.safe} bg={ASSETS.backgrounds.history}>
       <SafeAreaView style={{ flex: 1 }}>
       <StatusBar barStyle="light-content" />
 

@@ -208,7 +208,7 @@ export default function MapScreen({ pins, setPins }) {
   };
 
   return (
-    <ScreenBackground style={styles.safe}>
+    <ScreenBackground style={styles.safe} bg={ASSETS.backgrounds.map}>
       <SafeAreaView style={{ flex: 1 }}>
       <StatusBar barStyle="light-content" />
       <View style={styles.mapWrap}>

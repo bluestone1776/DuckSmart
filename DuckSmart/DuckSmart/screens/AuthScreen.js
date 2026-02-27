@@ -75,7 +75,7 @@ export default function AuthScreen() {
   const showApple = Platform.OS === "ios";
 
   return (
-    <ScreenBackground style={s.safe}>
+    <ScreenBackground style={s.safe} bg={ASSETS.backgrounds.auth}>
       <SafeAreaView style={{ flex: 1 }}>
       <StatusBar barStyle="light-content" />
       <KeyboardAvoidingView

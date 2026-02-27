@@ -2,6 +2,15 @@
 
 export const ASSETS = {
   logo: require("../assets/logo_ducksmart.png"),
+  bgMarsh: require("../assets/bg_marsh.jpg"),
+  backgrounds: {
+    today: require("../assets/today_background.png"),
+    map: require("../assets/today_background.png"),
+    log: require("../assets/hunt_log_background.png"),
+    history: require("../assets/history_background.png"),
+    identify: require("../assets/identify_background.png"),
+    auth: require("../assets/bg_marsh.jpg"),
+  },
   spreads: {
     "J-Hook": require("../assets/spread_j_hook.png"),
     "U-Shape": require("../assets/spread_u_shape.png"),

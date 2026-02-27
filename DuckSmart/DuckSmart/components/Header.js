@@ -13,7 +13,7 @@ export default function Header({ subtitle = "Today", onGearPress }) {
             <Text style={styles.brandDuck}>Duck</Text>
             <Text style={styles.brandSmart}>Smart</Text>
           </Text>
-          <Text style={styles.subHeader}>{subtitle}</Text>
+          <Text style={styles.brandDuck}>{subtitle}</Text>
         </View>
       </View>
 

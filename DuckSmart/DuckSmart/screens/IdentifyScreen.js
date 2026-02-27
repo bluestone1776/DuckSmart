@@ -165,7 +165,7 @@ function IdentifyHome({ navigation }) {
   const hasFilter = !!(group || habitat || size || query);
 
   return (
-    <ScreenBackground style={s.safe}>
+    <ScreenBackground style={s.safe} bg={ASSETS.backgrounds.identify}>
       <SafeAreaView style={{ flex: 1 }}>
       <StatusBar barStyle="light-content" />
       <ScrollView contentContainerStyle={s.container}>
@@ -177,7 +177,7 @@ function IdentifyHome({ navigation }) {
                 <Text style={s.brandDuck}>Duck</Text>
                 <Text style={s.brandSmart}>Smart</Text>
               </Text>
-              <Text style={s.subHeader}>Identify Duck</Text>
+              <Text style={s.brandDuck}>Identify Duck</Text>
             </View>
           </View>
           <Pressable style={[s.gearButton, { backgroundColor: isPro ? COLORS.greenBg : COLORS.bg }]} onPress={promptAIDuckID}>
@@ -430,7 +430,7 @@ function SpeciesDetail({ route, navigation }) {
 
   if (!sp) {
     return (
-      <ScreenBackground style={s.safe}>
+      <ScreenBackground style={s.safe} bg={ASSETS.backgrounds.identify}>
         <SafeAreaView style={{ flex: 1 }}>
         <StatusBar barStyle="light-content" />
         <View style={[s.container, { justifyContent: "center", alignItems: "center" }]}>
@@ -452,7 +452,7 @@ function SpeciesDetail({ route, navigation }) {
     : duckAsset || null;
 
   return (
-    <ScreenBackground style={s.safe}>
+    <ScreenBackground style={s.safe} bg={ASSETS.backgrounds.identify}>
       <SafeAreaView style={{ flex: 1 }}>
       <StatusBar barStyle="light-content" />
       <ScrollView contentContainerStyle={s.container}>

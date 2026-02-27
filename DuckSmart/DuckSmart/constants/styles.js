@@ -31,7 +31,7 @@ export const sharedStyles = StyleSheet.create({
 
   card: {
     marginTop: 14,
-    backgroundColor: COLORS.bg,
+    backgroundColor: COLORS.transparentBg,
     borderRadius: 18,
     borderWidth: 1,
     borderColor: COLORS.border,

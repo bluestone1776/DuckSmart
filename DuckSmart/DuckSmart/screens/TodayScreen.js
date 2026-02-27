@@ -484,7 +484,7 @@ export default function TodayScreen({ onLogout }) {
 
   if (loading && !weather.tempF) {
     return (
-      <ScreenBackground style={s.safe}>
+      <ScreenBackground style={s.safe} bg={ASSETS.backgrounds.today}>
         <SafeAreaView style={{ flex: 1 }}>
         <StatusBar barStyle="light-content" />
         <View style={{ flex: 1, alignItems: "center", justifyContent: "center" }}>
@@ -500,7 +500,7 @@ export default function TodayScreen({ onLogout }) {
   const addon = recommendation.addon;
 
   return (
-    <ScreenBackground style={s.safe}>
+    <ScreenBackground style={s.safe} bg={ASSETS.backgrounds.today}>
       <SafeAreaView style={{ flex: 1 }}>
       <StatusBar barStyle="light-content" />
 
@@ -620,7 +620,7 @@ export default function TodayScreen({ onLogout }) {
                 <Text style={s.brandDuck}>Duck</Text>
                 <Text style={s.brandSmart}>Smart</Text>
               </Text>
-              <Text style={s.subHeader}>
+              <Text style={s.brandDuck}>
                 Today • {weather.locationName}
               </Text>
             </View>

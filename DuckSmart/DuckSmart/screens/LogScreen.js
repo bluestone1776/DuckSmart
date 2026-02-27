@@ -131,7 +131,7 @@ export default function LogScreen({ addLog, onLogout }) {
   }
 
   return (
-    <ScreenBackground style={styles.safe}>
+    <ScreenBackground style={styles.safe} bg={ASSETS.backgrounds.log}>
       <SafeAreaView style={{ flex: 1 }}>
       <StatusBar barStyle="light-content" />
       <KeyboardAvoidingView behavior={Platform.OS === "ios" ? "padding" : undefined} style={{ flex: 1 }}>

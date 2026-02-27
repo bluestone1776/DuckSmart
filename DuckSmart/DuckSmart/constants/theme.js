@@ -3,6 +3,7 @@
 export const COLORS = {
   black: "#000000",
   bg: "#141414",
+  transparentBg: "rgba(20, 20, 20, 0.8)",
   bgDeep: "#0E0E0E",
   bgDeepest: "#0A0A0A",
   surface: "#141414",
