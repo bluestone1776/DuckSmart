@@ -197,7 +197,7 @@ export default function SettingsModal({ visible, onClose, onLogout }) {
   }
 
   return (
-    <Modal visible={visible} animationType="slide" transparent={false} onRequestClose={onClose}>
+    <Modal visible={visible} animationType="slide" transparent={true} onRequestClose={onClose}>
       <KeyboardAvoidingView behavior={Platform.OS === "ios" ? "padding" : undefined} style={ms.safe}>
         <ScrollView contentContainerStyle={ms.container}>
           {/* Header */}
@@ -377,7 +377,7 @@ export default function SettingsModal({ visible, onClose, onLogout }) {
 }
 
 const ms = StyleSheet.create({
-  safe: { flex: 1, backgroundColor: COLORS.black },
+  safe: { flex: 1, backgroundColor: COLORS.transparentBlack },
   container: { padding: 16, paddingBottom: 28 },
 
   headerRow: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", marginBottom: 20, paddingTop: 10 },

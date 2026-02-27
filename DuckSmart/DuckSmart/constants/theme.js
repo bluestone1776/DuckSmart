@@ -2,6 +2,7 @@
 
 export const COLORS = {
   black: "#000000",
+  transparentBlack: "rgba(0, 0, 0, 0.8)",
   bg: "#141414",
   transparentBg: "rgba(20, 20, 20, 0.8)",
   bgDeep: "#0E0E0E",
