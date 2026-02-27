@@ -11,20 +11,164 @@ import {
   KeyboardAvoidingView,
   Image,
   Share,
+  Modal,
+  Dimensions,
+  StyleSheet,
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import MapView, { Marker } from "react-native-maps";
 
 import { sharedStyles as styles } from "../constants/styles";
+import { COLORS } from "../constants/theme";
 import { ASSETS } from "../constants/assets";
 import Card from "../components/Card";
 import Header from "../components/Header";
 import ScreenBackground from "../components/ScreenBackground";
 
+const SCREEN_WIDTH = Dimensions.get("window").width;
+
+// ---------------------------------------------------------------------------
+// Full-screen photo viewer modal
+// ---------------------------------------------------------------------------
+function PhotoViewerModal({ photos, index, onClose, onChangeIndex }) {
+  if (!photos || photos.length === 0) return null;
+  const current = photos[index] || photos[0];
+  const hasMultiple = photos.length > 1;
+
+  return (
+    <Modal visible transparent={false} animationType="fade" onRequestClose={onClose}>
+      <SafeAreaView style={viewerStyles.safe}>
+        {/* Top bar */}
+        <View style={viewerStyles.topBar}>
+          <View style={{ flex: 1 }}>
+            <Text style={viewerStyles.counter}>
+              {hasMultiple ? `${index + 1} of ${photos.length}` : "Photo"}
+            </Text>
+          </View>
+          <Pressable style={viewerStyles.closeBtn} onPress={onClose}>
+            <Text style={viewerStyles.closeBtnText}>✕</Text>
+          </Pressable>
+        </View>
+
+        {/* Image */}
+        <View style={viewerStyles.imageWrap}>
+          <Image
+            source={{ uri: current.uri }}
+            style={viewerStyles.image}
+            resizeMode="contain"
+          />
+
+          {/* Nav arrows */}
+          {hasMultiple && index > 0 && (
+            <Pressable
+              style={[viewerStyles.arrowBtn, viewerStyles.arrowLeft]}
+              onPress={() => onChangeIndex(index - 1)}
+            >
+              <Text style={viewerStyles.arrowText}>‹</Text>
+            </Pressable>
+          )}
+          {hasMultiple && index < photos.length - 1 && (
+            <Pressable
+              style={[viewerStyles.arrowBtn, viewerStyles.arrowRight]}
+              onPress={() => onChangeIndex(index + 1)}
+            >
+              <Text style={viewerStyles.arrowText}>›</Text>
+            </Pressable>
+          )}
+        </View>
+
+        {/* Bottom close */}
+        <Pressable style={viewerStyles.bottomCloseBtn} onPress={onClose}>
+          <Text style={viewerStyles.bottomCloseBtnText}>Close</Text>
+        </Pressable>
+      </SafeAreaView>
+    </Modal>
+  );
+}
+
+const viewerStyles = StyleSheet.create({
+  safe: { flex: 1, backgroundColor: COLORS.black },
+  topBar: {
+    flexDirection: "row",
+    alignItems: "center",
+    paddingHorizontal: 16,
+    paddingVertical: 10,
+  },
+  counter: {
+    color: COLORS.white,
+    fontSize: 15,
+    fontWeight: "800",
+  },
+  closeBtn: {
+    width: 42,
+    height: 42,
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: COLORS.border,
+    backgroundColor: COLORS.bg,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  closeBtnText: { color: COLORS.white, fontSize: 18, fontWeight: "700" },
+
+  imageWrap: {
+    flex: 1,
+    justifyContent: "center",
+    alignItems: "center",
+  },
+  image: {
+    width: SCREEN_WIDTH,
+    height: "100%",
+  },
+
+  arrowBtn: {
+    position: "absolute",
+    top: "50%",
+    marginTop: -24,
+    width: 48,
+    height: 48,
+    borderRadius: 24,
+    backgroundColor: "rgba(14,14,14,0.75)",
+    borderWidth: 1,
+    borderColor: COLORS.border,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  arrowLeft: { left: 12 },
+  arrowRight: { right: 12 },
+  arrowText: { color: COLORS.white, fontSize: 28, fontWeight: "900", marginTop: -2 },
+
+  bottomCloseBtn: {
+    marginHorizontal: 16,
+    marginBottom: 12,
+    paddingVertical: 14,
+    borderRadius: 14,
+    backgroundColor: COLORS.greenBg,
+    borderWidth: 1,
+    borderColor: COLORS.green,
+    alignItems: "center",
+  },
+  bottomCloseBtnText: { color: COLORS.green, fontWeight: "900", fontSize: 15 },
+});
+
 export default function HistoryScreen({ logs, deleteLog, onLogout }) {
   const [query, setQuery] = useState("");
   const [selectedId, setSelectedId] = useState(null);
   const selected = useMemo(() => logs.find((l) => l.id === selectedId) || null, [logs, selectedId]);
+
+  // Photo viewer state
+  const [viewerPhotos, setViewerPhotos] = useState(null);
+  const [viewerIndex, setViewerIndex] = useState(0);
+
+  function openPhotoViewer(photos, index) {
+    setViewerPhotos(photos);
+    setViewerIndex(index);
+  }
+
+  function closePhotoViewer() {
+    setViewerPhotos(null);
+    setViewerIndex(0);
+  }
 
   const filtered = useMemo(() => {
     const q = (query || "").toLowerCase().trim();
@@ -69,6 +213,15 @@ export default function HistoryScreen({ logs, deleteLog, onLogout }) {
     <ScreenBackground style={styles.safe}>
       <SafeAreaView style={{ flex: 1 }}>
       <StatusBar barStyle="light-content" />
+
+      {/* Full-screen photo viewer */}
+      <PhotoViewerModal
+        photos={viewerPhotos}
+        index={viewerIndex}
+        onClose={closePhotoViewer}
+        onChangeIndex={setViewerIndex}
+      />
+
       <KeyboardAvoidingView behavior={Platform.OS === "ios" ? "padding" : undefined} style={{ flex: 1 }}>
         <ScrollView contentContainerStyle={styles.container}>
           <Header subtitle="Hunt History" onGearPress={onLogout} />
@@ -173,10 +326,14 @@ export default function HistoryScreen({ logs, deleteLog, onLogout }) {
                   <Text style={[styles.inputLabel, { marginTop: 12 }]}>Photos</Text>
                   <ScrollView horizontal showsHorizontalScrollIndicator={false}>
                     <View style={styles.photoRow}>
-                      {selected.photos.map((p) => (
-                        <View key={p.uri} style={styles.photoCard}>
+                      {selected.photos.map((p, i) => (
+                        <Pressable
+                          key={p.uri}
+                          style={styles.photoCard}
+                          onPress={() => openPhotoViewer(selected.photos, i)}
+                        >
                           <Image source={{ uri: p.uri }} style={styles.photo} />
-                        </View>
+                        </Pressable>
                       ))}
                     </View>
                   </ScrollView>
