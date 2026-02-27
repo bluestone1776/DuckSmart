@@ -26,6 +26,7 @@ import { scoreHuntToday } from "../utils/scoring";
 import Card from "../components/Card";
 import Chip from "../components/Chip";
 import Header from "../components/Header";
+import ScreenBackground from "../components/ScreenBackground";
 import { useWeather } from "../context/WeatherContext";
 import { usePremium } from "../context/PremiumContext";
 import { showInterstitialAd } from "../services/ads";
@@ -130,7 +131,8 @@ export default function LogScreen({ addLog, onLogout }) {
   }
 
   return (
-    <SafeAreaView style={styles.safe}>
+    <ScreenBackground style={styles.safe}>
+      <SafeAreaView style={{ flex: 1 }}>
       <StatusBar barStyle="light-content" />
       <KeyboardAvoidingView behavior={Platform.OS === "ios" ? "padding" : undefined} style={{ flex: 1 }}>
         <ScrollView contentContainerStyle={styles.container}>
@@ -343,6 +345,7 @@ export default function LogScreen({ addLog, onLogout }) {
           <View style={{ height: 20 }} />
         </ScrollView>
       </KeyboardAvoidingView>
-    </SafeAreaView>
+      </SafeAreaView>
+    </ScreenBackground>
   );
 }

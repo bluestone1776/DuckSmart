@@ -23,6 +23,7 @@ import { ASSETS } from "../constants/assets";
 import { COLORS, PIN_TYPES } from "../constants/theme";
 import Chip from "../components/Chip";
 import RowHeader from "../components/RowHeader";
+import ScreenBackground from "../components/ScreenBackground";
 import { usePremium } from "../context/PremiumContext";
 import { REGRID_TOKEN } from "../config";
 
@@ -207,7 +208,8 @@ export default function MapScreen({ pins, setPins }) {
   };
 
   return (
-    <SafeAreaView style={styles.safe}>
+    <ScreenBackground style={styles.safe}>
+      <SafeAreaView style={{ flex: 1 }}>
       <StatusBar barStyle="light-content" />
       <View style={styles.mapWrap}>
         <View style={styles.mapTopBar}>
@@ -425,7 +427,8 @@ export default function MapScreen({ pins, setPins }) {
           </View>
         </KeyboardAvoidingView>
       </View>
-    </SafeAreaView>
+      </SafeAreaView>
+    </ScreenBackground>
   );
 }
 

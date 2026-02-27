@@ -20,6 +20,7 @@ import {
 import { COLORS } from "../constants/theme";
 import { ASSETS } from "../constants/assets";
 import { useAuth } from "../context/AuthContext";
+import ScreenBackground from "../components/ScreenBackground";
 
 // ---------------------------------------------------------------------------
 // SVG-like icon components for Google & Apple (pure RN, no extra dep)
@@ -74,7 +75,8 @@ export default function AuthScreen() {
   const showApple = Platform.OS === "ios";
 
   return (
-    <SafeAreaView style={s.safe}>
+    <ScreenBackground style={s.safe}>
+      <SafeAreaView style={{ flex: 1 }}>
       <StatusBar barStyle="light-content" />
       <KeyboardAvoidingView
         behavior={Platform.OS === "ios" ? "padding" : undefined}
@@ -187,12 +189,13 @@ export default function AuthScreen() {
           </Pressable>
         </View>
       </KeyboardAvoidingView>
-    </SafeAreaView>
+      </SafeAreaView>
+    </ScreenBackground>
   );
 }
 
 const s = StyleSheet.create({
-  safe: { flex: 1, backgroundColor: COLORS.black },
+  safe: { flex: 1 },
   inner: { paddingHorizontal: 24 },
 
   brandWrap: { alignItems: "center", marginBottom: 32 },

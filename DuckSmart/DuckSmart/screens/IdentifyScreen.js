@@ -21,6 +21,7 @@ import { ASSETS } from "../constants/assets";
 import { identifyDuck, isAIAvailable } from "../services/ai";
 import { usePremium } from "../context/PremiumContext";
 import ProUpgradePrompt from "../components/ProUpgradePrompt";
+import ScreenBackground from "../components/ScreenBackground";
 import {
   IDENTIFY_SPECIES,
   IDENTIFY_GROUPS,
@@ -164,7 +165,8 @@ function IdentifyHome({ navigation }) {
   const hasFilter = !!(group || habitat || size || query);
 
   return (
-    <SafeAreaView style={s.safe}>
+    <ScreenBackground style={s.safe}>
+      <SafeAreaView style={{ flex: 1 }}>
       <StatusBar barStyle="light-content" />
       <ScrollView contentContainerStyle={s.container}>
         <View style={s.headerRow}>
@@ -185,7 +187,7 @@ function IdentifyHome({ navigation }) {
 
         {/* AI Duck ID Result Modal */}
         <Modal visible={aiModalVisible} transparent={false} animationType="slide" onRequestClose={() => setAiModalVisible(false)}>
-          <SafeAreaView style={s.safe}>
+          <SafeAreaView style={[s.safe, { backgroundColor: "#000" }]}>
             <ScrollView contentContainerStyle={s.container}>
               <View style={s.detailHeader}>
                 <Pressable style={s.backBtn} onPress={() => setAiModalVisible(false)}>
@@ -414,7 +416,8 @@ function IdentifyHome({ navigation }) {
 
         <View style={{ height: 22 }} />
       </ScrollView>
-    </SafeAreaView>
+      </SafeAreaView>
+    </ScreenBackground>
   );
 }
 
@@ -427,7 +430,8 @@ function SpeciesDetail({ route, navigation }) {
 
   if (!sp) {
     return (
-      <SafeAreaView style={s.safe}>
+      <ScreenBackground style={s.safe}>
+        <SafeAreaView style={{ flex: 1 }}>
         <StatusBar barStyle="light-content" />
         <View style={[s.container, { justifyContent: "center", alignItems: "center" }]}>
           <Text style={{ color: COLORS.white, fontSize: 18, fontWeight: "900" }}>Not found</Text>
@@ -435,7 +439,8 @@ function SpeciesDetail({ route, navigation }) {
             <Text style={s.primaryBtnText}>Back</Text>
           </Pressable>
         </View>
-      </SafeAreaView>
+        </SafeAreaView>
+      </ScreenBackground>
     );
   }
 
@@ -447,7 +452,8 @@ function SpeciesDetail({ route, navigation }) {
     : duckAsset || null;
 
   return (
-    <SafeAreaView style={s.safe}>
+    <ScreenBackground style={s.safe}>
+      <SafeAreaView style={{ flex: 1 }}>
       <StatusBar barStyle="light-content" />
       <ScrollView contentContainerStyle={s.container}>
         <View style={s.detailHeader}>
@@ -570,7 +576,8 @@ function SpeciesDetail({ route, navigation }) {
 
         <View style={{ height: 24 }} />
       </ScrollView>
-    </SafeAreaView>
+      </SafeAreaView>
+    </ScreenBackground>
   );
 }
 
@@ -590,8 +597,8 @@ export default function IdentifyStackScreen() {
 // --- Styles ---
 
 const s = StyleSheet.create({
-  safe: { flex: 1, backgroundColor: COLORS.black },
-  container: { padding: 16, paddingBottom: 28, backgroundColor: COLORS.black },
+  safe: { flex: 1 },
+  container: { padding: 16, paddingBottom: 28 },
 
   headerRow: { flexDirection: "row", alignItems: "center", justifyContent: "space-between" },
   logoSmall: { width: 44, height: 44, borderRadius: 12 },

@@ -19,6 +19,7 @@ import { sharedStyles as styles } from "../constants/styles";
 import { ASSETS } from "../constants/assets";
 import Card from "../components/Card";
 import Header from "../components/Header";
+import ScreenBackground from "../components/ScreenBackground";
 
 export default function HistoryScreen({ logs, deleteLog, onLogout }) {
   const [query, setQuery] = useState("");
@@ -65,7 +66,8 @@ export default function HistoryScreen({ logs, deleteLog, onLogout }) {
   }
 
   return (
-    <SafeAreaView style={styles.safe}>
+    <ScreenBackground style={styles.safe}>
+      <SafeAreaView style={{ flex: 1 }}>
       <StatusBar barStyle="light-content" />
       <KeyboardAvoidingView behavior={Platform.OS === "ios" ? "padding" : undefined} style={{ flex: 1 }}>
         <ScrollView contentContainerStyle={styles.container}>
@@ -192,6 +194,7 @@ export default function HistoryScreen({ logs, deleteLog, onLogout }) {
           <View style={{ height: 20 }} />
         </ScrollView>
       </KeyboardAvoidingView>
-    </SafeAreaView>
+      </SafeAreaView>
+    </ScreenBackground>
   );
 }

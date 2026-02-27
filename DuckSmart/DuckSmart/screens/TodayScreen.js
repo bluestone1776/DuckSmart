@@ -34,6 +34,7 @@ import {
 import * as ImagePicker from "expo-image-picker";
 import AdBanner from "../components/AdBanner";
 import ProUpgradePrompt from "../components/ProUpgradePrompt";
+import ScreenBackground from "../components/ScreenBackground";
 import { usePremium } from "../context/PremiumContext";
 import { analyzeSpread as aiAnalyzeSpread, isAIAvailable } from "../services/ai";
 
@@ -483,13 +484,15 @@ export default function TodayScreen({ onLogout }) {
 
   if (loading && !weather.tempF) {
     return (
-      <SafeAreaView style={s.safe}>
+      <ScreenBackground style={s.safe}>
+        <SafeAreaView style={{ flex: 1 }}>
         <StatusBar barStyle="light-content" />
         <View style={{ flex: 1, alignItems: "center", justifyContent: "center" }}>
           <ActivityIndicator size="large" color={COLORS.green} />
           <Text style={{ color: COLORS.muted, marginTop: 14, fontWeight: "800" }}>Loading weather...</Text>
         </View>
-      </SafeAreaView>
+        </SafeAreaView>
+      </ScreenBackground>
     );
   }
 
@@ -497,7 +500,8 @@ export default function TodayScreen({ onLogout }) {
   const addon = recommendation.addon;
 
   return (
-    <SafeAreaView style={s.safe}>
+    <ScreenBackground style={s.safe}>
+      <SafeAreaView style={{ flex: 1 }}>
       <StatusBar barStyle="light-content" />
 
       {/* Spread image popup */}
@@ -509,7 +513,7 @@ export default function TodayScreen({ onLogout }) {
 
       {/* AI Spread Analyzer result modal */}
       <Modal visible={aiSpreadModalVisible} transparent={false} animationType="slide" onRequestClose={() => setAiSpreadModalVisible(false)}>
-        <SafeAreaView style={s.safe}>
+        <SafeAreaView style={[s.safe, { backgroundColor: "#000" }]}>
           <ScrollView contentContainerStyle={s.container}>
             <View style={{ flexDirection: "row", alignItems: "center", marginBottom: 12 }}>
               <Pressable style={s.gearButton} onPress={() => setAiSpreadModalVisible(false)}>
@@ -963,13 +967,14 @@ export default function TodayScreen({ onLogout }) {
 
         <View style={{ height: 22 }} />
       </ScrollView>
-    </SafeAreaView>
+      </SafeAreaView>
+    </ScreenBackground>
   );
 }
 
 const s = StyleSheet.create({
-  safe: { flex: 1, backgroundColor: COLORS.black },
-  container: { padding: 16, paddingBottom: 28, backgroundColor: COLORS.black },
+  safe: { flex: 1 },
+  container: { padding: 16, paddingBottom: 28 },
 
   headerRow: { flexDirection: "row", alignItems: "center", justifyContent: "space-between" },
   logoSmall: { width: 42, height: 42, borderRadius: 12 },

@@ -4,8 +4,8 @@ import { StyleSheet } from "react-native";
 import { COLORS } from "./theme";
 
 export const sharedStyles = StyleSheet.create({
-  safe: { flex: 1, backgroundColor: COLORS.black },
-  container: { padding: 16, paddingBottom: 28, backgroundColor: COLORS.black },
+  safe: { flex: 1 },
+  container: { padding: 16, paddingBottom: 28 },
 
   // general header
   headerRow: { flexDirection: "row", alignItems: "center", justifyContent: "space-between" },
