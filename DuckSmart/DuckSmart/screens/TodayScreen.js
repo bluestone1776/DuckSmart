@@ -1,6 +1,5 @@
 import React, { useMemo, useState, useCallback, useEffect } from "react";
 import {
-  SafeAreaView,
   View,
   Text,
   StyleSheet,
@@ -14,6 +13,7 @@ import {
   Image,
   Dimensions,
 } from "react-native";
+import { SafeAreaView } from "react-native-safe-area-context";
 import Svg, { Path, Circle, Line, Polygon, Text as SvgText } from "react-native-svg";
 import MapView, { UrlTile } from "react-native-maps";
 import { COLORS } from "../constants/theme";

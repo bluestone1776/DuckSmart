@@ -5,7 +5,6 @@
 
 import React, { useState } from "react";
 import {
-  SafeAreaView,
   View,
   Text,
   TextInput,
@@ -17,6 +16,7 @@ import {
   ActivityIndicator,
   Image,
 } from "react-native";
+import { SafeAreaView } from "react-native-safe-area-context";
 import { COLORS } from "../constants/theme";
 import { ASSETS } from "../constants/assets";
 import { useAuth } from "../context/AuthContext";

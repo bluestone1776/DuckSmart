@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useCallback, useRef } from "react";
 import { View, ActivityIndicator } from "react-native";
+import { SafeAreaProvider } from "react-native-safe-area-context";
 import { NavigationContainer } from "@react-navigation/native";
 import { createBottomTabNavigator } from "@react-navigation/bottom-tabs";
 import { Ionicons } from "@expo/vector-icons";
@@ -206,8 +207,6 @@ function MainApp() {
             backgroundColor: COLORS.bg,
             borderTopColor: COLORS.border,
             borderTopWidth: 1,
-            height: 62,
-            paddingBottom: 10,
             paddingTop: 8,
           },
           tabBarActiveTintColor: accentColor,
@@ -254,10 +253,12 @@ function AuthGate() {
 
 export default function App() {
   return (
-    <ThemeProvider>
-      <AuthProvider>
-        <AuthGate />
-      </AuthProvider>
-    </ThemeProvider>
+    <SafeAreaProvider>
+      <ThemeProvider>
+        <AuthProvider>
+          <AuthGate />
+        </AuthProvider>
+      </ThemeProvider>
+    </SafeAreaProvider>
   );
 }

@@ -56,6 +56,7 @@
         "projectId": "1e281451-6f41-4ee8-a71e-363eff7ee6ee"
       }
     },
+    "scheme": "ducksmart",
     "plugins": [
       "expo-font",
       [

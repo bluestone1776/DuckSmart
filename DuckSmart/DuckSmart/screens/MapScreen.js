@@ -1,6 +1,5 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import {
-  SafeAreaView,
   View,
   Text,
   Pressable,
@@ -14,6 +13,7 @@ import {
   Image,
   Linking,
 } from "react-native";
+import { SafeAreaView } from "react-native-safe-area-context";
 import MapView, { Marker, UrlTile } from "react-native-maps";
 import * as Location from "expo-location";
 import * as FileSystem from "expo-file-system";
