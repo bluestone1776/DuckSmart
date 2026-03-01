@@ -45,4 +45,9 @@ import { getFirestore } from "firebase/firestore";
 
 const db = getFirestore(app);
 
-export { app, auth, db };
+// ── Storage ───────────────────────────────────────────────────
+import { getStorage } from "firebase/storage";
+
+const storage = getStorage(app);
+
+export { app, auth, db, storage };

@@ -29,11 +29,14 @@ import Header from "../components/Header";
 import ScreenBackground from "../components/ScreenBackground";
 import { useWeather } from "../context/WeatherContext";
 import { usePremium } from "../context/PremiumContext";
+import { useAuth } from "../context/AuthContext";
 import { showInterstitialAd } from "../services/ads";
+import { logHuntLogged } from "../services/analytics";
 
 export default function LogScreen({ addLog, onLogout }) {
   const { weather: liveWeather } = useWeather();
   const { isPro } = usePremium();
+  const { user } = useAuth();
   const hunt = scoreHuntToday(liveWeather);
   const huntScore = hunt.score;
   const [environment, setEnvironment] = useState("Marsh");
@@ -120,7 +123,14 @@ export default function LogScreen({ addLog, onLogout }) {
       photos,
     };
     addLog(entry);
-    Alert.alert("Saved", "Your hunt log was saved (in-app memory for now).");
+    logHuntLogged(user?.uid, {
+      environment,
+      spread,
+      huntScore,
+      ducksHarvested,
+      photoCount: photos.length,
+    });
+    Alert.alert("Saved", "Your hunt log has been saved.");
     resetForm();
 
     // Show interstitial ad for free-tier users after saving

@@ -25,6 +25,8 @@ import Chip from "../components/Chip";
 import RowHeader from "../components/RowHeader";
 import ScreenBackground from "../components/ScreenBackground";
 import { usePremium } from "../context/PremiumContext";
+import { useAuth } from "../context/AuthContext";
+import { logPinCreated } from "../services/analytics";
 import { REGRID_TOKEN } from "../config";
 
 const FREE_PIN_LIMIT = 5; // Free users: max 5 pins, Pro: unlimited
@@ -40,6 +42,7 @@ const PARCEL_CACHE_DIR = `${FileSystem.cacheDirectory}regrid_tiles/`;
 
 export default function MapScreen({ pins, setPins }) {
   const { isPro, purchase } = usePremium();
+  const { user } = useAuth();
   const mapRef = useRef(null);
   const [permissionState, setPermissionState] = useState("unknown");
   const [userLoc, setUserLoc] = useState(null);
@@ -128,6 +131,7 @@ export default function MapScreen({ pins, setPins }) {
       createdAt: Date.now(),
     };
     setPins((prev) => [newPin, ...prev]);
+    logPinCreated(user?.uid, draftType);
     setIsAddMode(false);
     setDraftCoord(null);
 

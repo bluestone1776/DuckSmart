@@ -1,34 +1,51 @@
 // DuckSmart — Feedback Service
 //
 // Stores user feedback/support tickets in Firebase Firestore.
-// Falls back to AsyncStorage if Firebase is unavailable.
+// Also saves locally in AsyncStorage as a fallback.
 
 import AsyncStorage from "@react-native-async-storage/async-storage";
+import { db, auth } from "./firebase";
+import { collection, addDoc } from "firebase/firestore";
+import { Platform } from "react-native";
+import Constants from "expo-constants";
 
 const FEEDBACK_KEY = "ducksmart_feedback";
 
 /**
- * Save a feedback ticket locally (and optionally to Firebase in future).
- * @param {{ message: string, category: string, email?: string }} ticket
+ * Submit a feedback ticket to Firestore and save locally as backup.
+ * @param {{ message: string, category: string }} ticket
  */
 export async function submitFeedback(ticket) {
+  const user = auth.currentUser;
   const entry = {
     id: `fb-${Date.now()}`,
     ...ticket,
+    userId: user?.uid || null,
+    email: user?.email || null,
+    platform: Platform.OS,
+    appVersion: Constants.expoConfig?.version || "1.0.0",
     createdAt: new Date().toISOString(),
+    timestamp: Date.now(),
     status: "pending",
   };
 
   try {
-    // Store locally for now — will sync to Firebase in v2
+    // Push to Firestore
+    await addDoc(collection(db, "feedback"), entry);
+  } catch (err) {
+    console.warn("DuckSmart feedback: Firestore write failed —", err.message);
+  }
+
+  try {
+    // Also save locally as backup
     const existing = await loadFeedback();
     const updated = [entry, ...existing];
     await AsyncStorage.setItem(FEEDBACK_KEY, JSON.stringify(updated));
-    return entry;
   } catch (err) {
-    console.error("Failed to save feedback:", err);
-    throw err;
+    console.warn("DuckSmart feedback: local save failed —", err.message);
   }
+
+  return entry;
 }
 
 /**

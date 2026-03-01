@@ -15,7 +15,9 @@ import { preloadInterstitialAd } from "./services/ads";
 import {
   pushLogs, pushPins, pullLogs, pullPins,
   mergeLogs, mergePins, pushDeleteLog, pushDeletePin,
+  upsertUserProfile,
 } from "./services/sync";
+import { logAppOpen, logHuntLogged, logHuntDeleted, logPinCreated, logPinDeleted } from "./services/analytics";
 
 import TodayScreen from "./screens/TodayScreen";
 import MapScreen from "./screens/MapScreen";
@@ -47,20 +49,36 @@ const SEED_PINS = [
 ];
 
 // --- Cloud sync bridge — renders nothing, just manages Firestore sync ---
+// Syncs ALL users (not just Pro) — local storage is offline cache only.
 
-function SyncManager({ uid, logs, pins, setLogs, setPins, ready }) {
+function SyncManager({ uid, user, logs, pins, setLogs, setPins, ready }) {
   const { isPro } = usePremium();
   const hasSynced = useRef(false);
   const isMerging = useRef(false);
   const prevLogIds = useRef(new Set());
   const prevPinIds = useRef(new Set());
-  const prevIsPro = useRef(isPro);
   const pushLogsTimer = useRef(null);
   const pushPinsTimer = useRef(null);
 
+  // ── Create/update user profile + log app open on login ──
+  useEffect(() => {
+    if (!ready || !uid || !user) return;
+
+    // Get location from most recent log (if any)
+    const recentLocation = logs.length > 0 ? logs[0].location : null;
+    upsertUserProfile(user, { location: recentLocation, isPro });
+    logAppOpen(uid);
+  }, [ready, uid]);
+
+  // ── Update user profile when Pro status changes ──
+  useEffect(() => {
+    if (!ready || !uid || !user) return;
+    upsertUserProfile(user, { isPro });
+  }, [isPro]);
+
   // ── Pull on login (once) — merge cloud data with local ──
   useEffect(() => {
-    if (!ready || !uid || !isPro || hasSynced.current) return;
+    if (!ready || !uid || hasSynced.current) return;
     hasSynced.current = true;
 
     (async () => {
@@ -91,17 +109,18 @@ function SyncManager({ uid, logs, pins, setLogs, setPins, ready }) {
       // Allow pushes after a short delay so merge-triggered effects settle
       setTimeout(() => { isMerging.current = false; }, 1000);
     })();
-  }, [ready, uid, isPro]);
+  }, [ready, uid]);
 
   // ── Push logs after local changes (debounced 2s) ──
   useEffect(() => {
-    if (!ready || !uid || !isPro || !hasSynced.current || isMerging.current) return;
+    if (!ready || !uid || !hasSynced.current || isMerging.current) return;
 
     // Detect deletions by comparing previous IDs to current
     const currentIds = new Set(logs.map((l) => l.id));
     for (const prevId of prevLogIds.current) {
       if (!currentIds.has(prevId)) {
         pushDeleteLog(uid, prevId);
+        logHuntDeleted(uid);
       }
     }
     prevLogIds.current = currentIds;
@@ -113,17 +132,18 @@ function SyncManager({ uid, logs, pins, setLogs, setPins, ready }) {
     }, 2000);
 
     return () => clearTimeout(pushLogsTimer.current);
-  }, [logs, ready, uid, isPro]);
+  }, [logs, ready, uid]);
 
   // ── Push pins after local changes (debounced 2s) ──
   useEffect(() => {
-    if (!ready || !uid || !isPro || !hasSynced.current || isMerging.current) return;
+    if (!ready || !uid || !hasSynced.current || isMerging.current) return;
 
     // Detect pin deletions
     const currentIds = new Set(pins.map((p) => p.id));
     for (const prevId of prevPinIds.current) {
       if (!currentIds.has(prevId)) {
         pushDeletePin(uid, prevId);
+        logPinDeleted(uid);
       }
     }
     prevPinIds.current = currentIds;
@@ -134,17 +154,7 @@ function SyncManager({ uid, logs, pins, setLogs, setPins, ready }) {
     }, 2000);
 
     return () => clearTimeout(pushPinsTimer.current);
-  }, [pins, ready, uid, isPro]);
-
-  // ── Handle upgrade to Pro: push all existing local data ──
-  useEffect(() => {
-    if (prevIsPro.current === false && isPro === true && uid && ready) {
-      pushLogs(uid, logs);
-      pushPins(uid, pins);
-      hasSynced.current = true;
-    }
-    prevIsPro.current = isPro;
-  }, [isPro]);
+  }, [pins, ready, uid]);
 
   return null;
 }
@@ -197,7 +207,7 @@ function MainApp() {
 
   return (
     <PremiumProvider>
-    <SyncManager uid={user?.uid} logs={logs} pins={pins} setLogs={setLogs} setPins={setPins} ready={ready} />
+    <SyncManager uid={user?.uid} user={user} logs={logs} pins={pins} setLogs={setLogs} setPins={setPins} ready={ready} />
     <WeatherProvider>
     <NavigationContainer>
       <Tab.Navigator

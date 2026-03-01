@@ -20,6 +20,8 @@ import { COLORS } from "../constants/theme";
 import { ASSETS } from "../constants/assets";
 import { identifyDuck, isAIAvailable } from "../services/ai";
 import { usePremium } from "../context/PremiumContext";
+import { useAuth } from "../context/AuthContext";
+import { logDuckIdentified } from "../services/analytics";
 import ProUpgradePrompt from "../components/ProUpgradePrompt";
 import ScreenBackground from "../components/ScreenBackground";
 import {
@@ -81,6 +83,7 @@ function ratingColor(rating) {
 
 function IdentifyHome({ navigation }) {
   const { isPro, purchase } = usePremium();
+  const { user } = useAuth();
   const [group, setGroup] = useState(null);
   const [habitat, setHabitat] = useState(null);
   const [size, setSize] = useState(null);
@@ -133,6 +136,7 @@ function IdentifyHome({ navigation }) {
 
       const identification = await identifyDuck(uri);
       setAiResult(identification);
+      logDuckIdentified(user?.uid);
     } catch (err) {
       Alert.alert("AI Error", err.message || "Could not identify the duck. Please try again.");
       setAiModalVisible(false);

@@ -16,6 +16,8 @@
 import React, { createContext, useContext, useEffect, useState, useCallback } from "react";
 import { Platform, Alert } from "react-native";
 import Constants from "expo-constants";
+import { auth } from "../services/firebase";
+import { logProUpgrade } from "../services/analytics";
 
 // ---------------------------------------------------------------------------
 // RevenueCat — lazy-loaded so app doesn't crash in Expo Go
@@ -46,10 +48,13 @@ const REVENUECAT_API_KEYS = {
 // The entitlement identifier you set up in RevenueCat dashboard
 const PRO_ENTITLEMENT = "pro";
 
+// ── Dev override: set to true to simulate Pro during development ──
+const DEV_FORCE_PRO = __DEV__ && false; // flip to true to test Pro features
+
 const PremiumContext = createContext(null);
 
 export function PremiumProvider({ children }) {
-  const [isPro, setIsPro] = useState(false);
+  const [isPro, setIsPro] = useState(DEV_FORCE_PRO);
   const [loading, setLoading] = useState(true);
   const [offerings, setOfferings] = useState(null);
 
@@ -145,6 +150,7 @@ export function PremiumProvider({ children }) {
       setIsPro(hasPro);
 
       if (hasPro) {
+        logProUpgrade(auth.currentUser?.uid);
         Alert.alert("Welcome to Pro!", "You now have access to all DuckSmart features. Happy hunting!");
       }
       return hasPro;

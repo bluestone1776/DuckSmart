@@ -25,6 +25,7 @@ import { submitFeedback } from "../services/feedback";
 import { useAuth } from "../context/AuthContext";
 import { usePremium } from "../context/PremiumContext";
 import { useTheme } from "../context/ThemeContext";
+import { logFeedbackSubmitted, logProUpgrade } from "../services/analytics";
 
 // ---------------------------------------------------------------------------
 // Hunting License — stored locally in the document directory
@@ -34,7 +35,7 @@ const LICENSE_PATH = `${FileSystem.documentDirectory}hunting_license.jpg`;
 const CATEGORIES = ["Bug", "Feature Request", "Question", "Other"];
 
 export default function SettingsModal({ visible, onClose, onLogout }) {
-  const { deleteAccount } = useAuth();
+  const { deleteAccount, user } = useAuth();
   const { isPro, purchase, restore, getProPrice } = usePremium();
   const { accent, presets, setAccent } = useTheme();
   const [feedbackMsg, setFeedbackMsg] = useState("");
@@ -137,6 +138,7 @@ export default function SettingsModal({ visible, onClose, onLogout }) {
     setSubmitting(true);
     try {
       await submitFeedback({ message: msg, category });
+      logFeedbackSubmitted(user?.uid, category);
       Alert.alert("Thanks!", "Your feedback has been submitted. We'll look into it.");
       setFeedbackMsg("");
       setCategory("Bug");

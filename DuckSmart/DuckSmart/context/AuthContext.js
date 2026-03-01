@@ -19,6 +19,7 @@ import {
 import { auth } from "../services/firebase";
 import { clearAllData } from "../services/storage";
 import { deleteAllUserData } from "../services/sync";
+import { logLogin, logSignup } from "../services/analytics";
 import Constants from "expo-constants";
 
 // ---------------------------------------------------------------------------
@@ -91,7 +92,8 @@ export function AuthProvider({ children }) {
     setError(null);
     setLoading(true);
     try {
-      await signInWithEmailAndPassword(auth, email, password);
+      const result = await signInWithEmailAndPassword(auth, email, password);
+      logLogin(result.user.uid, "email");
     } catch (err) {
       setError(formatAuthError(err.code));
       setLoading(false);
@@ -102,7 +104,8 @@ export function AuthProvider({ children }) {
     setError(null);
     setLoading(true);
     try {
-      await createUserWithEmailAndPassword(auth, email, password);
+      const result = await createUserWithEmailAndPassword(auth, email, password);
+      logSignup(result.user.uid, "email");
     } catch (err) {
       console.error("Signup error:", err, err.code, err.message);
       setError(formatAuthError(err.code));
@@ -131,7 +134,8 @@ export function AuthProvider({ children }) {
         throw new Error("No ID token returned from Google Sign-In.");
       }
       const credential = GoogleAuthProvider.credential(idToken);
-      await signInWithCredential(auth, credential);
+      const result = await signInWithCredential(auth, credential);
+      logLogin(result.user.uid, "google");
     } catch (err) {
       console.error("Google sign-in error:", err);
       // User cancelled the flow
@@ -183,7 +187,8 @@ export function AuthProvider({ children }) {
         idToken: identityToken,
         rawNonce: rawNonce,
       });
-      await signInWithCredential(auth, credential);
+      const result = await signInWithCredential(auth, credential);
+      logLogin(result.user.uid, "apple");
     } catch (err) {
       console.error("Apple sign-in error:", err);
       // User cancelled the flow
