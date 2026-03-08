@@ -1,0 +1,12 @@
+# EAS Build ignore file — reduces archive upload size
+# EAS reinstalls node_modules on the build server
+
+node_modules
+.git
+__tests__
+**/__tests__
+**/*.test.js
+**/*.test.ts
+*.md
+.vscode
+web
