@@ -35,7 +35,6 @@ module.exports = {
       },
     },
     android: {
-      supportsTablet: false,
       adaptiveIcon: {
         foregroundImage: "./assets/adaptive-icon.png",
         backgroundColor: "#000000",
