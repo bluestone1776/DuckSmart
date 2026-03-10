@@ -73,12 +73,16 @@ function computePushGo(weather, targetDate) {
   // Solunar: moon-phase feeding activity (0.4 at quarters, 1.0 at new/full)
   const solunar = solunarSignal(targetDate || new Date());
 
+  // Migration signal: 1.0 = neutral (no data), 0.5-1.5 from eBird
+  const migration = weather.migration?.signal ?? 1.0;
+
   // Multiplicative final score with asymmetric exponents
   // Solunar^0.25 gives a subtle ±15% swing based on moon phase
-  const raw = Math.pow(push, 0.9) * Math.pow(go, 1.1) * Math.pow(solunar, 0.25);
+  // Migration^0.3 gives ~±12% swing when eBird data is available
+  const raw = Math.pow(push, 0.9) * Math.pow(go, 1.1) * Math.pow(solunar, 0.25) * Math.pow(migration, 0.3);
   const score = clamp(Math.round(100 * raw), 0, 100);
 
-  return { score, push, go, signals: { cold, pressure, tailwind, noPrecip, cloud, solunar } };
+  return { score, push, go, signals: { cold, pressure, tailwind, noPrecip, cloud, solunar, migration } };
 }
 
 // ── exported API (backwards-compatible) ──────────────────────
@@ -128,6 +132,13 @@ export function scoreHuntToday(weather, targetDate) {
     reasons.push({ type: "up", text: `${moon.emoji} ${moon.name} — peak solunar feeding activity.` });
   } else if (signals.solunar <= 0.55) {
     reasons.push({ type: "down", text: `${moon.emoji} ${moon.name} — weaker solunar feeding period.` });
+  }
+
+  // Migration reasons (only when eBird data is available)
+  if (signals.migration > 1.0 && weather.migration) {
+    reasons.push({ type: "up", text: weather.migration.summary || "Waterfowl activity rising in your area." });
+  } else if (signals.migration < 0.85 && weather.migration) {
+    reasons.push({ type: "down", text: weather.migration.summary || "Waterfowl activity declining in your area." });
   }
 
   // Keep top 3 reasons, prefer positives first

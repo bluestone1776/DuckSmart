@@ -8,6 +8,7 @@ import React, { createContext, useContext, useEffect, useState, useCallback, use
 import * as Location from "expo-location";
 import { fetchWeather, MOCK_WEATHER } from "../services/weather";
 import { cacheWeather, loadCachedWeather } from "../services/storage";
+import { fetchMigrationData } from "../services/ebird";
 
 const WeatherContext = createContext(null);
 
@@ -31,8 +32,11 @@ export function WeatherProvider({ children }) {
       const result = await fetchWeather(coords.latitude, coords.longitude);
       if (result) {
         setWeather(result);
-        // Cache for offline use
         cacheWeather(result);
+        // Non-blocking: fetch eBird migration data in parallel
+        fetchMigrationData(coords.latitude, coords.longitude).then((mig) => {
+          if (mig) setWeather((prev) => ({ ...prev, migration: mig }));
+        });
       } else {
         // API failed — try loading from cache
         const cached = await loadCachedWeather();

@@ -15,3 +15,8 @@ export const REGRID_TOKEN =
 // Get a key at https://platform.openai.com/api-keys
 export const OPENAI_API_KEY =
   Constants.expoConfig?.extra?.openaiApiKey || "";
+
+// eBird API v2 — live waterfowl migration intelligence
+// Free key from https://ebird.org/api/keygen
+export const EBIRD_API_KEY =
+  Constants.expoConfig?.extra?.ebirdApiKey || "";

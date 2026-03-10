@@ -736,6 +736,38 @@ export default function TodayScreen({ onLogout }) {
           </TodayCard>
         )}
 
+        {/* Migration Intel — eBird live data */}
+        {weather.migration && (
+          <TodayCard title="Migration Intel">
+            <Text style={s.migSummary}>{weather.migration.summary}</Text>
+
+            {weather.migration.topSpecies?.length > 0 && (
+              <View style={s.migSpeciesList}>
+                {weather.migration.topSpecies.map((sp, i) => (
+                  <View key={i} style={s.migSpeciesRow}>
+                    <Text style={s.migSpeciesName}>{sp.name}</Text>
+                    <Text style={s.migSpeciesCount}>{sp.count} sighted</Text>
+                  </View>
+                ))}
+              </View>
+            )}
+
+            <View style={s.migFooter}>
+              <View style={[s.migTrendPill, {
+                backgroundColor: weather.migration.trending === "up" ? "#2ECC7122" : weather.migration.trending === "down" ? "#D94C4C22" : "#88888822",
+              }]}>
+                <Text style={[s.migTrendText, {
+                  color: weather.migration.trending === "up" ? COLORS.green : weather.migration.trending === "down" ? COLORS.red : COLORS.muted,
+                }]}>
+                  {weather.migration.trending === "up" ? "▲" : weather.migration.trending === "down" ? "▼" : "—"}{" "}
+                  {weather.migration.changePercent > 0 ? "+" : ""}{weather.migration.changePercent}% vs last week
+                </Text>
+              </View>
+              <Text style={s.migSource}>via eBird</Text>
+            </View>
+          </TodayCard>
+        )}
+
         {/* Real-time Weather */}
         <TodayCard title="Real-Time Weather">
           <View style={s.metricRow}>
@@ -1545,5 +1577,54 @@ const s = StyleSheet.create({
     fontSize: 12,
     fontWeight: "700",
     marginTop: 2,
+  },
+
+  // Migration Intel card
+  migSummary: {
+    color: COLORS.white,
+    fontSize: 15,
+    fontWeight: "800",
+    marginBottom: 10,
+  },
+  migSpeciesList: {
+    marginBottom: 10,
+  },
+  migSpeciesRow: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    alignItems: "center",
+    paddingVertical: 6,
+    borderBottomWidth: 1,
+    borderBottomColor: COLORS.border,
+  },
+  migSpeciesName: {
+    color: COLORS.white,
+    fontSize: 14,
+    fontWeight: "700",
+  },
+  migSpeciesCount: {
+    color: COLORS.muted,
+    fontSize: 13,
+    fontWeight: "700",
+  },
+  migFooter: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    marginTop: 4,
+  },
+  migTrendPill: {
+    paddingHorizontal: 10,
+    paddingVertical: 5,
+    borderRadius: 8,
+  },
+  migTrendText: {
+    fontSize: 13,
+    fontWeight: "800",
+  },
+  migSource: {
+    color: COLORS.mutedDark,
+    fontSize: 11,
+    fontWeight: "700",
   },
 });
