@@ -21,6 +21,7 @@ import { getRadarTileUrl, formatRadarAge } from "../services/radar";
 import { ASSETS } from "../constants/assets";
 import { clamp, formatWind } from "../utils/helpers";
 import { scoreHunt, scoreHuntToday } from "../utils/scoring";
+import { getMoonPhase } from "../utils/solunar";
 import { useWeather } from "../context/WeatherContext";
 import { scheduleHuntAlerts, cancelHuntAlerts } from "../services/notifications";
 import {
@@ -405,11 +406,15 @@ export default function TodayScreen({ onLogout }) {
     const days = [{ label: "Today", score: scoreHunt(weather).score }];
     if (weather.forecast5Day) {
       weather.forecast5Day.forEach((day) => {
-        days.push({ label: day.label, score: scoreHunt(day).score });
+        const date = day.dateUnix ? new Date(day.dateUnix * 1000) : undefined;
+        days.push({ label: day.label, score: scoreHunt(day, date).score });
       });
     }
     return days.slice(0, 5);
   }, [weather]);
+
+  // Moon phase for today
+  const moonPhase = useMemo(() => getMoonPhase(), []);
 
   // ---------------------------------------------------------------------------
   // Decoy Spread Advisor state
@@ -765,6 +770,17 @@ export default function TodayScreen({ onLogout }) {
                   <Text style={s.sunValue}>{weather.sunset}</Text>
                 </View>
               </View>
+            </View>
+          </View>
+
+          {/* Moon phase */}
+          <View style={s.moonRow}>
+            <Text style={s.moonEmoji}>{moonPhase.emoji}</Text>
+            <View style={{ flex: 1 }}>
+              <Text style={s.moonName}>{moonPhase.name}</Text>
+              <Text style={s.moonDetail}>
+                {Math.round(moonPhase.illumination * 100)}% illuminated • Solunar {moonPhase.illumination < 0.15 || moonPhase.illumination > 0.85 ? "peak" : moonPhase.illumination > 0.35 && moonPhase.illumination < 0.65 ? "low" : "moderate"}
+              </Text>
             </View>
           </View>
 
@@ -1502,5 +1518,32 @@ const s = StyleSheet.create({
     color: COLORS.green,
     fontSize: 13,
     fontWeight: "800",
+  },
+
+  // ---- Moon Phase ----
+  moonRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    marginTop: 10,
+    padding: 12,
+    borderRadius: 14,
+    backgroundColor: COLORS.bgDeep,
+    borderWidth: 1,
+    borderColor: COLORS.borderSubtle,
+  },
+  moonEmoji: {
+    fontSize: 28,
+    marginRight: 12,
+  },
+  moonName: {
+    color: COLORS.white,
+    fontSize: 14,
+    fontWeight: "800",
+  },
+  moonDetail: {
+    color: COLORS.mutedDark,
+    fontSize: 12,
+    fontWeight: "700",
+    marginTop: 2,
   },
 });

@@ -1,14 +1,19 @@
-// DuckSmart hunt scoring — Push/Go dual-engine formula
+// DuckSmart hunt scoring — Push/Go/Solunar triple-engine formula
 //
 // Push Score  = pressure-to-move (cold fronts, snow, freezing temps push birds south)
 // Go Score    = flight-window quality (tailwinds, clear skies, low precip let birds fly)
-// Final Score = 100 * (Push^0.9) * (Go^1.1)   (multiplicative — both engines must fire)
+// Solunar    = moon-phase feeding activity (new/full moon = peak, quarter = low)
+// Final Score = 100 * (Push^0.9) * (Go^1.1) * (Solunar^0.25)
+//
+// The solunar exponent (0.25) gives moon phase a subtle but meaningful
+// influence — roughly ±15% swing between best and worst phases.
 //
 // MVP weights (until we have snow persistence data from API):
 //   Push  = 60% cold-signal + 40% pressure-signal
 //   Go    = 55% tailwind + 30% no-precip + 15% cloud-clearance
 
 import { clamp } from "./helpers";
+import { solunarSignal, getMoonPhase } from "./solunar";
 
 // ── helpers ──────────────────────────────────────────────────
 
@@ -55,7 +60,7 @@ function cloudSignal(cloudPct) {
 
 // ── main scoring ─────────────────────────────────────────────
 
-function computePushGo(weather) {
+function computePushGo(weather, targetDate) {
   const cold = coldSignal(weather.deltaTemp24hF);
   const pressure = pressureSignal(weather.deltaPressure3h);
   const push = 0.60 * cold + 0.40 * pressure;
@@ -65,22 +70,26 @@ function computePushGo(weather) {
   const cloud = cloudSignal(weather.cloudPct);
   const go = 0.55 * tailwind + 0.30 * noPrecip + 0.15 * cloud;
 
+  // Solunar: moon-phase feeding activity (0.4 at quarters, 1.0 at new/full)
+  const solunar = solunarSignal(targetDate || new Date());
+
   // Multiplicative final score with asymmetric exponents
-  const raw = Math.pow(push, 0.9) * Math.pow(go, 1.1);
+  // Solunar^0.25 gives a subtle ±15% swing based on moon phase
+  const raw = Math.pow(push, 0.9) * Math.pow(go, 1.1) * Math.pow(solunar, 0.25);
   const score = clamp(Math.round(100 * raw), 0, 100);
 
-  return { score, push, go, signals: { cold, pressure, tailwind, noPrecip, cloud } };
+  return { score, push, go, signals: { cold, pressure, tailwind, noPrecip, cloud, solunar } };
 }
 
 // ── exported API (backwards-compatible) ──────────────────────
 
-export function scoreHunt(weather) {
-  const { score } = computePushGo(weather);
+export function scoreHunt(weather, targetDate) {
+  const { score } = computePushGo(weather, targetDate);
   return { score };
 }
 
-export function scoreHuntToday(weather) {
-  const { score, push, go, signals } = computePushGo(weather);
+export function scoreHuntToday(weather, targetDate) {
+  const { score, push, go, signals } = computePushGo(weather, targetDate);
   const reasons = [];
 
   // Push engine reasons
@@ -111,6 +120,14 @@ export function scoreHuntToday(weather) {
     reasons.push({ type: "up", text: "Cloud cover extends quality light and reduces glare." });
   } else if (signals.cloud <= 0.5) {
     reasons.push({ type: "down", text: "Extreme cloud conditions reduce flight quality." });
+  }
+
+  // Solunar reasons
+  const moon = getMoonPhase(targetDate || new Date());
+  if (signals.solunar >= 0.85) {
+    reasons.push({ type: "up", text: `${moon.emoji} ${moon.name} — peak solunar feeding activity.` });
+  } else if (signals.solunar <= 0.55) {
+    reasons.push({ type: "down", text: `${moon.emoji} ${moon.name} — weaker solunar feeding period.` });
   }
 
   // Keep top 3 reasons, prefer positives first

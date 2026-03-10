@@ -190,6 +190,7 @@ function buildDailyForecasts(list, currentTemp, tzOffset) {
 
     result.push({
       label: dayLabel,
+      dateUnix: entries[0].dt,
       deltaTemp24hF: deltaTemp,
       deltaPressure3h: Math.round(maxPressureSwing * 100) / 100,
       windMph: Math.round(avgWind),
@@ -355,9 +356,9 @@ export const MOCK_WEATHER = {
     { t: "9a",  temp: 23, pressureInHg: 30.08, wind: 9,  windDeg: 255 },
   ],
   forecast5Day: [
-    { label: "Wed", deltaTemp24hF: -8, deltaPressure3h: 0.08, windMph: 14, precipChance: 20, cloudPct: 55 },
-    { label: "Thu", deltaTemp24hF: -3, deltaPressure3h: 0.04, windMph: 10, precipChance: 45, cloudPct: 80 },
-    { label: "Fri", deltaTemp24hF: 5, deltaPressure3h: 0.02, windMph: 6, precipChance: 60, cloudPct: 90 },
-    { label: "Sat", deltaTemp24hF: 2, deltaPressure3h: 0.03, windMph: 8, precipChance: 30, cloudPct: 40 },
+    { label: "Wed", dateUnix: Math.floor(Date.now() / 1000) + 86400, deltaTemp24hF: -8, deltaPressure3h: 0.08, windMph: 14, precipChance: 20, cloudPct: 55 },
+    { label: "Thu", dateUnix: Math.floor(Date.now() / 1000) + 172800, deltaTemp24hF: -3, deltaPressure3h: 0.04, windMph: 10, precipChance: 45, cloudPct: 80 },
+    { label: "Fri", dateUnix: Math.floor(Date.now() / 1000) + 259200, deltaTemp24hF: 5, deltaPressure3h: 0.02, windMph: 6, precipChance: 60, cloudPct: 90 },
+    { label: "Sat", dateUnix: Math.floor(Date.now() / 1000) + 345600, deltaTemp24hF: 2, deltaPressure3h: 0.03, windMph: 8, precipChance: 30, cloudPct: 40 },
   ],
 };
