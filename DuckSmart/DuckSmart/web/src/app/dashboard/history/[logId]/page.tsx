@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { useParams, useRouter } from "next/navigation";
 import Link from "next/link";
+import Image from "next/image";
 import dynamic from "next/dynamic";
 import { useAuth } from "@/hooks/useAuth";
 import { getHuntLog, updateHuntLog, deleteHuntLog } from "@/lib/firestore";
@@ -332,9 +333,11 @@ export default function HuntLogDetailPage() {
                 onClick={() => setPhotoModal(photo.uri)}
                 className="cursor-pointer"
               >
-                <img
+                <Image
                   src={photo.uri}
                   alt={`Hunt photo ${idx + 1}`}
+                  width={photo.width || 400}
+                  height={photo.height || 300}
                   className="w-full h-32 object-cover rounded-[14px] border border-[#3A3A3A] hover:border-[#2ECC71] transition-colors"
                 />
               </button>
@@ -350,11 +353,16 @@ export default function HuntLogDetailPage() {
         title="Photo"
       >
         {photoModal && (
-          <img
-            src={photoModal}
-            alt="Hunt photo full size"
-            className="w-full rounded-[14px]"
-          />
+          <div className="relative w-full" style={{ minHeight: 300 }}>
+            <Image
+              src={photoModal}
+              alt="Hunt photo full size"
+              width={800}
+              height={600}
+              className="w-full rounded-[14px] object-contain"
+              sizes="(max-width: 768px) 100vw, 800px"
+            />
+          </div>
         )}
       </Modal>
 

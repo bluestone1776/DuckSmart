@@ -1,8 +1,10 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { getAnalyticsEvents } from "@/lib/firestore";
+import type { QueryDocumentSnapshot } from "firebase/firestore";
 import Card from "@/components/ui/Card";
+import Button from "@/components/ui/Button";
 import StatCard from "@/components/ui/StatCard";
 import Skeleton from "@/components/ui/Skeleton";
 import EmptyState from "@/components/ui/EmptyState";
@@ -51,27 +53,54 @@ const EVENT_COLORS: Record<string, string> = {
   screen_view: "#6D6D6D",
 };
 
+const PAGE_SIZE = 500;
+
 export default function AdminAnalyticsPage() {
   const [events, setEvents] = useState<AnalyticsEvent[]>([]);
   const [loading, setLoading] = useState(true);
+  const [loadingMore, setLoadingMore] = useState(false);
+  const cursorRef = useRef<QueryDocumentSnapshot | null>(null);
+  const [hasMore, setHasMore] = useState(true);
 
+  const fetchPage = useCallback(async (cursor: QueryDocumentSnapshot | null) => {
+    const thirtyDaysAgo = subDays(new Date(), 30).getTime();
+    const { events: page, lastDoc } = await getAnalyticsEvents({
+      startDate: thirtyDaysAgo,
+      limit: PAGE_SIZE,
+      cursor,
+    });
+    cursorRef.current = lastDoc;
+    setHasMore(!!lastDoc);
+    return page;
+  }, []);
+
+  // Initial load — first page
   useEffect(() => {
-    async function fetchEvents() {
+    (async () => {
       try {
-        const thirtyDaysAgo = subDays(new Date(), 30).getTime();
-        const data = await getAnalyticsEvents({
-          startDate: thirtyDaysAgo,
-          limit: 5000,
-        });
-        setEvents(data);
+        const page = await fetchPage(null);
+        setEvents(page);
       } catch (err) {
         console.error("Failed to fetch analytics:", err);
       } finally {
         setLoading(false);
       }
+    })();
+  }, [fetchPage]);
+
+  // Load more
+  async function handleLoadMore() {
+    if (!hasMore || loadingMore) return;
+    setLoadingMore(true);
+    try {
+      const page = await fetchPage(cursorRef.current);
+      setEvents((prev) => [...prev, ...page]);
+    } catch (err) {
+      console.error("Failed to load more analytics:", err);
+    } finally {
+      setLoadingMore(false);
     }
-    fetchEvents();
-  }, []);
+  }
 
   // Computed metrics
   const stats = useMemo(() => {
@@ -272,6 +301,15 @@ export default function AdminAnalyticsPage() {
               </ResponsiveContainer>
             </div>
           </Card>
+        </div>
+      )}
+
+      {/* Load More */}
+      {hasMore && events.length > 0 && (
+        <div className="flex justify-center pt-2">
+          <Button variant="secondary" onClick={handleLoadMore} disabled={loadingMore}>
+            {loadingMore ? "Loading..." : `Load More Events (${events.length} loaded)`}
+          </Button>
         </div>
       )}
     </div>

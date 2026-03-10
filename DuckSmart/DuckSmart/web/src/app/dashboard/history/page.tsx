@@ -2,6 +2,7 @@
 
 import { useMemo, useState } from "react";
 import Link from "next/link";
+import Image from "next/image";
 import { useHuntLogs } from "@/hooks/useHuntLogs";
 import { formatDate, getScoreColor } from "@/lib/utils";
 import { ENVIRONMENTS, SPREAD_NAMES } from "@/lib/constants";
@@ -229,9 +230,11 @@ function HuntLogCard({ log }: { log: HuntLog }) {
             </div>
           </div>
           {log.photos && log.photos.length > 0 && (
-            <img
+            <Image
               src={log.photos[0].uri}
               alt="Hunt photo"
+              width={56}
+              height={56}
               className="w-14 h-14 rounded-[10px] object-cover border border-[#3A3A3A]"
             />
           )}

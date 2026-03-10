@@ -1,6 +1,7 @@
 "use client";
 
 import Link from "next/link";
+import Image from "next/image";
 import { usePathname } from "next/navigation";
 import clsx from "clsx";
 import { useAuth } from "@/hooks/useAuth";
@@ -92,9 +93,11 @@ export default function Sidebar({ isAdmin }: SidebarProps) {
         >
           <div className="w-8 h-8 rounded-full bg-[#0E1A12] border border-[#2ECC71] flex items-center justify-center overflow-hidden flex-shrink-0">
             {user?.photoURL ? (
-              <img
+              <Image
                 src={user.photoURL}
                 alt="Avatar"
+                width={32}
+                height={32}
                 className="w-full h-full object-cover"
               />
             ) : (

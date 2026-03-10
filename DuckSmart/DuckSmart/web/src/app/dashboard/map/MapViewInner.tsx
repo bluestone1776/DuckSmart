@@ -9,6 +9,7 @@ import {
   useMap,
   useMapEvents,
 } from "react-leaflet";
+import MarkerClusterGroup from "react-leaflet-cluster";
 import L from "leaflet";
 import "leaflet/dist/leaflet.css";
 import { formatDate, getScoreColor, getPinColor } from "@/lib/utils";
@@ -125,82 +126,110 @@ export default function MapViewInner({
       {/* Map click handler — active only when callback is provided */}
       {onMapClick && <MapClickHandler onMapClick={onMapClick} />}
 
-      {/* Hunt log markers */}
-      {showLogs &&
-        logs.map((log) => {
-          if (!log.location?.latitude || !log.location?.longitude) return null;
-          const color = getScoreColor(log.huntScore || 0);
-          return (
-            <CircleMarker
-              key={`log-${log.id}`}
-              center={[log.location.latitude, log.location.longitude]}
-              radius={8}
-              pathOptions={{
-                color,
-                fillColor: color,
-                fillOpacity: 0.7,
-                weight: 2,
-              }}
-            >
-              <Popup>
-                <div style={{ minWidth: 160, fontSize: 12 }}>
-                  <p style={{ fontWeight: 800, fontSize: 13, marginBottom: 4 }}>
-                    {log.dateTime
-                      ? formatDate(log.dateTime)
-                      : formatDate(log.createdAt)}
-                  </p>
-                  <p><strong>Environment:</strong> {log.environment}</p>
-                  <p><strong>Score:</strong> {log.huntScore || 0}</p>
-                  <p><strong>Ducks:</strong> {log.ducksHarvested || 0}</p>
-                </div>
-              </Popup>
-            </CircleMarker>
-          );
-        })}
-
-      {/* Pin markers */}
-      {showPins &&
-        filteredPins.map((pin) => {
-          if (!pin.coordinate?.latitude || !pin.coordinate?.longitude) return null;
-          const color = getPinColor(pin.type);
-          const pinType = PIN_TYPES.find((p) => p.key === pin.type);
-          const isSelected = selectedPinId === pin.id;
-          return (
-            <CircleMarker
-              key={`pin-${pin.id}`}
-              center={[pin.coordinate.latitude, pin.coordinate.longitude]}
-              radius={isSelected ? 10 : 7}
-              pathOptions={{
-                color: isSelected ? "#FFFFFF" : color,
-                fillColor: color,
-                fillOpacity: isSelected ? 1 : 0.8,
-                weight: isSelected ? 3 : 2,
-              }}
-              eventHandlers={{
-                click: (e) => {
-                  if (onPinClick) {
-                    L.DomEvent.stopPropagation(e.originalEvent);
-                    onPinClick(pin.id);
-                  }
-                },
-              }}
-            >
-              {!onPinClick && (
+      {/* Hunt log markers — clustered */}
+      {showLogs && (
+        <MarkerClusterGroup
+          chunkedLoading
+          maxClusterRadius={50}
+          iconCreateFunction={(cluster: any) => {
+            const count = cluster.getChildCount();
+            return L.divIcon({
+              html: `<div style="background:#2ECC71;color:#fff;border-radius:50%;width:36px;height:36px;display:flex;align-items:center;justify-content:center;font-weight:900;font-size:13px;border:2px solid #0E1A12;">${count}</div>`,
+              className: "",
+              iconSize: L.point(36, 36),
+            });
+          }}
+        >
+          {logs.map((log) => {
+            if (!log.location?.latitude || !log.location?.longitude) return null;
+            const color = getScoreColor(log.huntScore || 0);
+            return (
+              <CircleMarker
+                key={`log-${log.id}`}
+                center={[log.location.latitude, log.location.longitude]}
+                radius={8}
+                pathOptions={{
+                  color,
+                  fillColor: color,
+                  fillOpacity: 0.7,
+                  weight: 2,
+                }}
+              >
                 <Popup>
-                  <div style={{ minWidth: 140, fontSize: 12 }}>
+                  <div style={{ minWidth: 160, fontSize: 12 }}>
                     <p style={{ fontWeight: 800, fontSize: 13, marginBottom: 4 }}>
-                      {pin.title}
+                      {log.dateTime
+                        ? formatDate(log.dateTime)
+                        : formatDate(log.createdAt)}
                     </p>
-                    <p><strong>Type:</strong> {pinType?.label || pin.type}</p>
-                    {pin.notes && (
-                      <p style={{ marginTop: 4, color: "#666" }}>{pin.notes}</p>
-                    )}
+                    <p><strong>Environment:</strong> {log.environment}</p>
+                    <p><strong>Score:</strong> {log.huntScore || 0}</p>
+                    <p><strong>Ducks:</strong> {log.ducksHarvested || 0}</p>
                   </div>
                 </Popup>
-              )}
-            </CircleMarker>
-          );
-        })}
+              </CircleMarker>
+            );
+          })}
+        </MarkerClusterGroup>
+      )}
+
+      {/* Pin markers — clustered */}
+      {showPins && (
+        <MarkerClusterGroup
+          chunkedLoading
+          maxClusterRadius={40}
+          iconCreateFunction={(cluster: any) => {
+            const count = cluster.getChildCount();
+            return L.divIcon({
+              html: `<div style="background:#D9A84C;color:#fff;border-radius:50%;width:36px;height:36px;display:flex;align-items:center;justify-content:center;font-weight:900;font-size:13px;border:2px solid #1a1a0e;">${count}</div>`,
+              className: "",
+              iconSize: L.point(36, 36),
+            });
+          }}
+        >
+          {filteredPins.map((pin) => {
+            if (!pin.coordinate?.latitude || !pin.coordinate?.longitude) return null;
+            const color = getPinColor(pin.type);
+            const pinType = PIN_TYPES.find((p) => p.key === pin.type);
+            const isSelected = selectedPinId === pin.id;
+            return (
+              <CircleMarker
+                key={`pin-${pin.id}`}
+                center={[pin.coordinate.latitude, pin.coordinate.longitude]}
+                radius={isSelected ? 10 : 7}
+                pathOptions={{
+                  color: isSelected ? "#FFFFFF" : color,
+                  fillColor: color,
+                  fillOpacity: isSelected ? 1 : 0.8,
+                  weight: isSelected ? 3 : 2,
+                }}
+                eventHandlers={{
+                  click: (e) => {
+                    if (onPinClick) {
+                      L.DomEvent.stopPropagation(e.originalEvent);
+                      onPinClick(pin.id);
+                    }
+                  },
+                }}
+              >
+                {!onPinClick && (
+                  <Popup>
+                    <div style={{ minWidth: 140, fontSize: 12 }}>
+                      <p style={{ fontWeight: 800, fontSize: 13, marginBottom: 4 }}>
+                        {pin.title}
+                      </p>
+                      <p><strong>Type:</strong> {pinType?.label || pin.type}</p>
+                      {pin.notes && (
+                        <p style={{ marginTop: 4, color: "#666" }}>{pin.notes}</p>
+                      )}
+                    </div>
+                  </Popup>
+                )}
+              </CircleMarker>
+            );
+          })}
+        </MarkerClusterGroup>
+      )}
 
       {/* Draft pin marker (while placing a new pin) */}
       {draftPosition && (

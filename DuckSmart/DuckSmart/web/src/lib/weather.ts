@@ -1,10 +1,7 @@
 // DuckSmart — Web Weather Service
 //
 // TypeScript port of services/weather.js for the Next.js web dashboard.
-// Uses the same OpenWeatherMap free-tier endpoints and transformation logic.
-
-const OWM_API_KEY = process.env.NEXT_PUBLIC_OWM_API_KEY || "";
-const BASE = "https://api.openweathermap.org/data/2.5";
+// All OWM requests go through /api/weather to keep the API key server-side.
 
 // ── Types ────────────────────────────────────────────────────
 
@@ -41,20 +38,12 @@ export interface WeatherData {
   trends48h: TrendEntry[];
 }
 
-// ── Raw API calls ────────────────────────────────────────────
+// ── Raw API calls (proxied through /api/weather) ─────────────
 
-async function fetchCurrentWeather(lat: number, lon: number) {
-  const url = `${BASE}/weather?lat=${lat}&lon=${lon}&units=imperial&appid=${OWM_API_KEY}`;
-  const res = await fetch(url);
-  if (!res.ok) throw new Error(`OWM current: ${res.status}`);
-  return res.json();
-}
-
-async function fetchForecast(lat: number, lon: number) {
-  const url = `${BASE}/forecast?lat=${lat}&lon=${lon}&units=imperial&appid=${OWM_API_KEY}`;
-  const res = await fetch(url);
-  if (!res.ok) throw new Error(`OWM forecast: ${res.status}`);
-  return res.json();
+async function fetchRawWeather(lat: number, lon: number) {
+  const res = await fetch(`/api/weather?lat=${lat}&lon=${lon}`);
+  if (!res.ok) throw new Error(`Weather API: ${res.status}`);
+  return res.json() as Promise<{ current: any; forecast: any }>;
 }
 
 // ── Helpers ──────────────────────────────────────────────────
@@ -238,16 +227,8 @@ export async function fetchWeather(
   lat: number,
   lon: number
 ): Promise<WeatherData | null> {
-  if (!OWM_API_KEY || OWM_API_KEY === "YOUR_API_KEY_HERE") {
-    console.warn("DuckSmart: No OWM API key. Using mock data.");
-    return null;
-  }
-
   try {
-    const [current, forecast] = await Promise.all([
-      fetchCurrentWeather(lat, lon),
-      fetchForecast(lat, lon),
-    ]);
+    const { current, forecast } = await fetchRawWeather(lat, lon);
     return buildWeatherObject(current, forecast);
   } catch (err: any) {
     console.error("DuckSmart weather fetch error:", err.message);
@@ -256,15 +237,13 @@ export async function fetchWeather(
 }
 
 /**
- * Geocode a US zip code to coordinates using OWM Geocoding API.
+ * Geocode a US zip code to coordinates via server-side proxy.
  */
 export async function geocodeZip(
   zip: string
 ): Promise<{ lat: number; lon: number; name: string } | null> {
-  if (!OWM_API_KEY) return null;
-  const url = `https://api.openweathermap.org/geo/1.0/zip?zip=${zip},US&appid=${OWM_API_KEY}`;
   try {
-    const res = await fetch(url);
+    const res = await fetch(`/api/weather?zip=${encodeURIComponent(zip)}`);
     if (!res.ok) return null;
     const data = await res.json();
     return { lat: data.lat, lon: data.lon, name: data.name };

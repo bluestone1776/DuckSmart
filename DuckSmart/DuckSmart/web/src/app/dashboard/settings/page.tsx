@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import Image from "next/image";
 import { useAuth } from "@/hooks/useAuth";
 import { useRole } from "@/hooks/useRole";
 import { getUserProfile } from "@/lib/firestore";
@@ -67,9 +68,11 @@ export default function SettingsPage() {
           <div className="flex items-center gap-4">
             <div className="w-14 h-14 rounded-full bg-[#0E1A12] border-2 border-[#2ECC71] flex items-center justify-center">
               {user?.photoURL ? (
-                <img
+                <Image
                   src={user.photoURL}
                   alt="Avatar"
+                  width={56}
+                  height={56}
                   className="w-full h-full rounded-full object-cover"
                 />
               ) : (

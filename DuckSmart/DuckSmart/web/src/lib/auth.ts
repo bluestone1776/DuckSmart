@@ -29,6 +29,8 @@ export async function loginWithGoogle() {
 // ---------------------------------------------------------------------------
 
 export async function logout() {
+  // Clear session cookie so middleware redirects to login immediately
+  document.cookie = "__session=; path=/; max-age=0";
   return signOut(auth);
 }
 

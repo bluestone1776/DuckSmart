@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import Image from "next/image";
 import { getAllUsers } from "@/lib/firestore";
 import { formatDateTime } from "@/lib/utils";
 import Card from "@/components/ui/Card";
@@ -108,9 +109,11 @@ export default function AdminUsersPage() {
                 <div className="flex items-center gap-4 min-w-0">
                   <div className="w-10 h-10 rounded-full bg-[#0E0E0E] border border-[#3A3A3A] flex items-center justify-center flex-shrink-0">
                     {u.photoURL ? (
-                      <img
+                      <Image
                         src={u.photoURL}
-                        alt=""
+                        alt={`${u.displayName || "User"} avatar`}
+                        width={40}
+                        height={40}
                         className="w-full h-full rounded-full object-cover"
                       />
                     ) : (

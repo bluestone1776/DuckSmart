@@ -1,15 +1,17 @@
 "use client";
 
-import { useEffect, useState } from "react";
-import { useRouter } from "next/navigation";
+import { Suspense, useEffect, useState } from "react";
+import { useRouter, useSearchParams } from "next/navigation";
 import { useAuth } from "@/hooks/useAuth";
 import { loginWithEmail, loginWithGoogle, formatAuthError } from "@/lib/auth";
 import Button from "@/components/ui/Button";
 import Input from "@/components/ui/Input";
 
-export default function LoginPage() {
+function LoginForm() {
   const { user, loading } = useAuth();
   const router = useRouter();
+  const searchParams = useSearchParams();
+  const redirectTo = searchParams.get("redirect") || "/dashboard/history";
 
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
@@ -18,9 +20,9 @@ export default function LoginPage() {
 
   useEffect(() => {
     if (!loading && user) {
-      router.replace("/dashboard/history");
+      router.replace(redirectTo);
     }
-  }, [user, loading, router]);
+  }, [user, loading, router, redirectTo]);
 
   async function handleEmailLogin(e: React.FormEvent) {
     e.preventDefault();
@@ -28,7 +30,7 @@ export default function LoginPage() {
     setSubmitting(true);
     try {
       await loginWithEmail(email, password);
-      router.push("/dashboard/history");
+      router.push(redirectTo);
     } catch (err: any) {
       setError(formatAuthError(err?.code ?? ""));
     } finally {
@@ -41,7 +43,7 @@ export default function LoginPage() {
     setSubmitting(true);
     try {
       await loginWithGoogle();
-      router.push("/dashboard/history");
+      router.push(redirectTo);
     } catch (err: any) {
       setError(formatAuthError(err?.code ?? ""));
     } finally {
@@ -141,5 +143,19 @@ export default function LoginPage() {
         </Button>
       </div>
     </div>
+  );
+}
+
+export default function LoginPage() {
+  return (
+    <Suspense
+      fallback={
+        <div className="flex min-h-screen items-center justify-center bg-[#0A0A0A]">
+          <div className="w-10 h-10 border-4 border-[#2ECC71] border-t-transparent rounded-full animate-spin" />
+        </div>
+      }
+    >
+      <LoginForm />
+    </Suspense>
   );
 }

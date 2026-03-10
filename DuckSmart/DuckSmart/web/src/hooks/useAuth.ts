@@ -31,9 +31,21 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    const unsubscribe = onAuthStateChanged(auth, (firebaseUser) => {
+    const unsubscribe = onAuthStateChanged(auth, async (firebaseUser) => {
       setUser(firebaseUser);
       setLoading(false);
+
+      // Sync __session cookie so middleware can gate protected routes
+      if (firebaseUser) {
+        try {
+          const token = await firebaseUser.getIdToken();
+          document.cookie = `__session=${token}; path=/; max-age=${60 * 60 * 24 * 7}; SameSite=Lax`;
+        } catch {
+          // Token fetch failed — cookie stays stale, client-side auth still works
+        }
+      } else {
+        document.cookie = "__session=; path=/; max-age=0";
+      }
     });
     return unsubscribe;
   }, []);

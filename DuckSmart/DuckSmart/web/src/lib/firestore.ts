@@ -17,6 +17,8 @@ import {
   orderBy,
   where,
   limit,
+  startAfter,
+  type QueryDocumentSnapshot,
 } from "firebase/firestore";
 import { ref, listAll, deleteObject } from "firebase/storage";
 
@@ -212,19 +214,22 @@ export async function updateFeedbackStatus(
 }
 
 /**
- * Fetch analytics events with optional filters.
+ * Fetch analytics events with optional filters and cursor-based pagination.
  *
  * @param options.startDate  Only events at or after this timestamp (ms)
  * @param options.endDate    Only events at or before this timestamp (ms)
  * @param options.eventName  Filter by event name
- * @param options.limit      Maximum number of events to return
+ * @param options.limit      Maximum number of events per page (default 500)
+ * @param options.cursor     Last document snapshot from a previous page
  */
 export async function getAnalyticsEvents(options: {
   startDate?: number;
   endDate?: number;
   eventName?: string;
   limit?: number;
-}): Promise<AnalyticsEvent[]> {
+  cursor?: QueryDocumentSnapshot | null;
+}): Promise<{ events: AnalyticsEvent[]; lastDoc: QueryDocumentSnapshot | null }> {
+  const pageSize = options.limit ?? 500;
   const constraints = [];
 
   if (options.startDate !== undefined) {
@@ -240,11 +245,17 @@ export async function getAnalyticsEvents(options: {
   // Order by timestamp descending
   constraints.push(orderBy("timestamp", "desc"));
 
-  if (options.limit !== undefined) {
-    constraints.push(limit(options.limit));
+  // Cursor-based pagination
+  if (options.cursor) {
+    constraints.push(startAfter(options.cursor));
   }
+
+  constraints.push(limit(pageSize));
 
   const q = query(collection(db, "analytics"), ...constraints);
   const snap = await getDocs(q);
-  return snap.docs.map((d) => ({ ...d.data(), id: d.id } as unknown as AnalyticsEvent));
+  const events = snap.docs.map((d) => ({ ...d.data(), id: d.id } as unknown as AnalyticsEvent));
+  const lastDoc = snap.docs.length === pageSize ? snap.docs[snap.docs.length - 1] : null;
+
+  return { events, lastDoc };
 }
