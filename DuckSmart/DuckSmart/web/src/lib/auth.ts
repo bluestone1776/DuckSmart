@@ -66,6 +66,8 @@ const AUTH_ERROR_MAP: Record<string, string> = {
     "This credential is already associated with another account.",
   "auth/operation-not-allowed":
     "This sign-in method is not enabled. Please contact support.",
+  "auth/unauthorized-domain":
+    "This domain is not authorized for sign-in. Please contact support.",
   "auth/internal-error":
     "An internal authentication error occurred. Please try again.",
 };
