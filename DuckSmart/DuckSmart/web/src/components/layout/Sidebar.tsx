@@ -7,6 +7,7 @@ import { useAuth } from "@/hooks/useAuth";
 import {
   Clock,
   MapPin,
+  Cloud,
   BarChart3,
   Search,
   Settings,
@@ -21,6 +22,7 @@ interface SidebarProps {
 const navItems = [
   { label: "History", href: "/dashboard/history", icon: Clock },
   { label: "Map", href: "/dashboard/map", icon: MapPin },
+  { label: "Weather", href: "/dashboard/weather", icon: Cloud },
   { label: "Analytics", href: "/dashboard/analytics", icon: BarChart3 },
   { label: "Species Guide", href: "/dashboard/species", icon: Search },
   { label: "Settings", href: "/dashboard/settings", icon: Settings },

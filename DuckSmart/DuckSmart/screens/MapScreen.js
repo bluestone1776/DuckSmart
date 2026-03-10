@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useRef, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   View,
   Text,
@@ -9,7 +9,6 @@ import {
   TextInput,
   Alert,
   Platform,
-  KeyboardAvoidingView,
   Image,
   Linking,
 } from "react-native";
@@ -17,6 +16,7 @@ import { SafeAreaView } from "react-native-safe-area-context";
 import MapView, { Marker, UrlTile } from "react-native-maps";
 import * as Location from "expo-location";
 import * as FileSystem from "expo-file-system";
+import BottomSheet, { BottomSheetScrollView } from "@gorhom/bottom-sheet";
 
 import { sharedStyles as styles } from "../constants/styles";
 import { ASSETS } from "../constants/assets";
@@ -40,10 +40,24 @@ const REGRID_TILE_URL = REGRID_TOKEN
 
 const PARCEL_CACHE_DIR = `${FileSystem.cacheDirectory}regrid_tiles/`;
 
+// ---------------------------------------------------------------------------
+// Bottom sheet snap points:
+//   0 = collapsed (handle + pin count)
+//   1 = peek (pin list)
+//   2 = expanded (add form / detail)
+// ---------------------------------------------------------------------------
+const SNAP_COLLAPSED = 0;
+const SNAP_PEEK = 1;
+const SNAP_EXPANDED = 2;
+
 export default function MapScreen({ pins, setPins }) {
   const { isPro, purchase } = usePremium();
   const { user } = useAuth();
   const mapRef = useRef(null);
+  const bottomSheetRef = useRef(null);
+  const snapPoints = useMemo(() => [80, 200, "55%"], []);
+  const [sheetIndex, setSheetIndex] = useState(SNAP_COLLAPSED);
+
   const [permissionState, setPermissionState] = useState("unknown");
   const [userLoc, setUserLoc] = useState(null);
   const [region, setRegion] = useState(null);
@@ -59,6 +73,7 @@ export default function MapScreen({ pins, setPins }) {
   const [selectedPinId, setSelectedPinId] = useState(null);
   const selectedPin = useMemo(() => pins.find((p) => p.id === selectedPinId) || null, [pins, selectedPinId]);
 
+  // --- Location ---
   useEffect(() => {
     (async () => {
       try {
@@ -81,8 +96,35 @@ export default function MapScreen({ pins, setPins }) {
     })();
   }, []);
 
+  // --- Bottom sheet callbacks ---
+  const handleSheetChange = useCallback((index) => {
+    setSheetIndex(index);
+    // Dragging to collapsed clears detail/add modes
+    if (index === SNAP_COLLAPSED) {
+      if (isAddMode) {
+        setIsAddMode(false);
+        setDraftCoord(null);
+      }
+      if (selectedPinId) setSelectedPinId(null);
+    }
+  }, [isAddMode, selectedPinId]);
+
+  // Auto-expand when entering add mode
+  useEffect(() => {
+    if (isAddMode) {
+      bottomSheetRef.current?.snapToIndex(SNAP_EXPANDED);
+    }
+  }, [isAddMode]);
+
+  // Auto-expand when selecting a pin
+  useEffect(() => {
+    if (selectedPinId) {
+      bottomSheetRef.current?.snapToIndex(SNAP_EXPANDED);
+    }
+  }, [selectedPinId]);
+
+  // --- Pin actions ---
   function startAddPin() {
-    // Free users limited to FREE_PIN_LIMIT pins
     if (!isPro && pins.length >= FREE_PIN_LIMIT) {
       Alert.alert(
         "Pin Limit Reached",
@@ -106,6 +148,7 @@ export default function MapScreen({ pins, setPins }) {
   function cancelAddPin() {
     setIsAddMode(false);
     setDraftCoord(null);
+    bottomSheetRef.current?.snapToIndex(SNAP_COLLAPSED);
   }
 
   function onMapPress(e) {
@@ -134,6 +177,7 @@ export default function MapScreen({ pins, setPins }) {
     logPinCreated(user?.uid, draftType);
     setIsAddMode(false);
     setDraftCoord(null);
+    bottomSheetRef.current?.snapToIndex(SNAP_COLLAPSED);
 
     requestAnimationFrame(() => {
       mapRef.current?.animateToRegion({ ...draftCoord, latitudeDelta: 0.02, longitudeDelta: 0.02 }, 500);
@@ -150,9 +194,15 @@ export default function MapScreen({ pins, setPins }) {
         onPress: () => {
           setPins((prev) => prev.filter((p) => p.id !== selectedPin.id));
           setSelectedPinId(null);
+          bottomSheetRef.current?.snapToIndex(SNAP_COLLAPSED);
         },
       },
     ]);
+  }
+
+  function closeDetail() {
+    setSelectedPinId(null);
+    bottomSheetRef.current?.snapToIndex(SNAP_COLLAPSED);
   }
 
   function toggleParcels() {
@@ -184,9 +234,7 @@ export default function MapScreen({ pins, setPins }) {
   function navigateToPin() {
     if (!selectedPin) return;
     const { latitude, longitude } = selectedPin.coordinate;
-    const label = encodeURIComponent(selectedPin.title);
 
-    // Try Google Maps first, fall back to Apple Maps
     const googleMapsUrl = `https://www.google.com/maps/dir/?api=1&destination=${latitude},${longitude}&travelmode=driving`;
     const appleMapsUrl = `maps://app?daddr=${latitude},${longitude}&dirflg=d&t=h`;
 
@@ -197,7 +245,6 @@ export default function MapScreen({ pins, setPins }) {
         if (supported) {
           Linking.openURL(url);
         } else {
-          // Fallback to Google Maps web URL
           Linking.openURL(googleMapsUrl);
         }
       })
@@ -210,6 +257,9 @@ export default function MapScreen({ pins, setPins }) {
     latitudeDelta: 0.06,
     longitudeDelta: 0.06,
   };
+
+  // Dynamic parcel badge position based on sheet state
+  const parcelBadgeBottom = sheetIndex === SNAP_COLLAPSED ? 100 : sheetIndex === SNAP_PEEK ? 220 : 280;
 
   return (
     <ScreenBackground style={styles.safe} bg={ASSETS.backgrounds.map}>
@@ -302,7 +352,7 @@ export default function MapScreen({ pins, setPins }) {
 
         {/* Property lines active indicator */}
         {showParcels && (
-          <View style={localStyles.parcelBadge}>
+          <View style={[localStyles.parcelBadge, { bottom: parcelBadgeBottom }]}>
             <Text style={localStyles.parcelBadgeText}>▦ Property Lines</Text>
             <Pressable onPress={() => setShowParcels(false)}>
               <Text style={localStyles.parcelBadgeClose}>✕</Text>
@@ -310,8 +360,26 @@ export default function MapScreen({ pins, setPins }) {
           </View>
         )}
 
-        <KeyboardAvoidingView behavior={Platform.OS === "ios" ? "padding" : undefined}>
-          <View style={styles.sheet}>
+        {/* ─── Collapsible Bottom Sheet ─── */}
+        <BottomSheet
+          ref={bottomSheetRef}
+          index={SNAP_COLLAPSED}
+          snapPoints={snapPoints}
+          onChange={handleSheetChange}
+          handleIndicatorStyle={{ backgroundColor: COLORS.muted, width: 40 }}
+          backgroundStyle={{
+            backgroundColor: COLORS.bg,
+            borderTopLeftRadius: 18,
+            borderTopRightRadius: 18,
+            borderTopWidth: 1,
+            borderTopColor: COLORS.border,
+          }}
+          keyboardBehavior="interactive"
+          keyboardBlurBehavior="restore"
+          android_keyboardInputMode="adjustResize"
+        >
+          <BottomSheetScrollView contentContainerStyle={styles.sheet}>
+            {/* ── Add Pin Mode (expanded) ── */}
             {isAddMode ? (
               <>
                 <RowHeader title="Add Pin" pill={draftCoord ? "Tap Save" : "Tap map to drop"} />
@@ -356,6 +424,8 @@ export default function MapScreen({ pins, setPins }) {
                   </Pressable>
                 </View>
               </>
+
+            /* ── Pin Detail Mode (expanded) ── */
             ) : selectedPin ? (
               <>
                 <View style={styles.sheetHeaderRow}>
@@ -382,7 +452,7 @@ export default function MapScreen({ pins, setPins }) {
                 )}
 
                 <View style={styles.sheetBtnRow}>
-                  <Pressable style={styles.secondaryBtn} onPress={() => setSelectedPinId(null)}>
+                  <Pressable style={styles.secondaryBtn} onPress={closeDetail}>
                     <Text style={styles.secondaryBtnText}>Close</Text>
                   </Pressable>
                   <Pressable
@@ -396,40 +466,56 @@ export default function MapScreen({ pins, setPins }) {
                   </Pressable>
                 </View>
               </>
+
+            /* ── Default: Pin List (collapsed/peek) ── */
             ) : (
               <>
-                <RowHeader
-                  title="Pins"
-                  pill={isPro ? `${pins.length} saved` : `${pins.length}/${FREE_PIN_LIMIT}`}
-                />
-                <ScrollView horizontal showsHorizontalScrollIndicator={false}>
-                  <View style={styles.pinListRow}>
-                    {pins.slice(0, 10).map((p) => (
-                      <Pressable
-                        key={p.id}
-                        style={styles.pinPill}
-                        onPress={() => {
-                          setSelectedPinId(p.id);
-                          mapRef.current?.animateToRegion({ ...p.coordinate, latitudeDelta: 0.02, longitudeDelta: 0.02 }, 450);
-                        }}
-                      >
-                        <Text style={styles.pinPillType}>{p.type}</Text>
-                        <Text style={styles.pinPillTitle} numberOfLines={1}>
-                          {p.title}
-                        </Text>
-                      </Pressable>
-                    ))}
-                  </View>
-                </ScrollView>
-                <Text style={styles.sheetHint}>
-                  {!isPro && pins.length >= FREE_PIN_LIMIT
-                    ? "Pin limit reached — upgrade to Pro for unlimited pins."
-                    : <>Tap <Text style={{ color: "#2ECC71", fontWeight: "900" }}>+</Text> to add a scouting pin, or tap a marker to view details.</>}
-                </Text>
+                {/* Collapsed summary — tappable to expand */}
+                <Pressable onPress={() => bottomSheetRef.current?.snapToIndex(SNAP_PEEK)}>
+                  <Text style={[styles.sheetTitle, { textAlign: "center" }]}>
+                    {isPro ? `${pins.length} Pins` : `${pins.length}/${FREE_PIN_LIMIT} Pins`}
+                  </Text>
+                </Pressable>
+
+                {/* Pin list — visible at peek + expanded */}
+                {sheetIndex >= SNAP_PEEK && (
+                  <>
+                    <View style={{ marginTop: 8 }}>
+                      <RowHeader
+                        title="Pins"
+                        pill={isPro ? `${pins.length} saved` : `${pins.length}/${FREE_PIN_LIMIT}`}
+                      />
+                    </View>
+                    <ScrollView horizontal showsHorizontalScrollIndicator={false}>
+                      <View style={styles.pinListRow}>
+                        {pins.slice(0, 10).map((p) => (
+                          <Pressable
+                            key={p.id}
+                            style={styles.pinPill}
+                            onPress={() => {
+                              setSelectedPinId(p.id);
+                              mapRef.current?.animateToRegion({ ...p.coordinate, latitudeDelta: 0.02, longitudeDelta: 0.02 }, 450);
+                            }}
+                          >
+                            <Text style={styles.pinPillType}>{p.type}</Text>
+                            <Text style={styles.pinPillTitle} numberOfLines={1}>
+                              {p.title}
+                            </Text>
+                          </Pressable>
+                        ))}
+                      </View>
+                    </ScrollView>
+                    <Text style={styles.sheetHint}>
+                      {!isPro && pins.length >= FREE_PIN_LIMIT
+                        ? "Pin limit reached — upgrade to Pro for unlimited pins."
+                        : <>Tap <Text style={{ color: "#2ECC71", fontWeight: "900" }}>+</Text> to add a scouting pin, or tap a marker to view details.</>}
+                    </Text>
+                  </>
+                )}
               </>
             )}
-          </View>
-        </KeyboardAvoidingView>
+          </BottomSheetScrollView>
+        </BottomSheet>
       </View>
       </SafeAreaView>
     </ScreenBackground>
@@ -442,7 +528,6 @@ export default function MapScreen({ pins, setPins }) {
 const localStyles = StyleSheet.create({
   parcelBadge: {
     position: "absolute",
-    bottom: 180,
     alignSelf: "center",
     flexDirection: "row",
     alignItems: "center",

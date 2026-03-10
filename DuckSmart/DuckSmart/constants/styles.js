@@ -172,16 +172,7 @@ export const sharedStyles = StyleSheet.create({
   map: { flex: 1 },
 
   sheet: {
-    position: "absolute",
-    left: 0,
-    right: 0,
-    bottom: 0,
     padding: 14,
-    backgroundColor: COLORS.bg,
-    borderTopLeftRadius: 18,
-    borderTopRightRadius: 18,
-    borderTopWidth: 1,
-    borderTopColor: COLORS.border,
   },
   sheetHeaderRow: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", gap: 10 },
   sheetTitle: { color: COLORS.white, fontSize: 16, fontWeight: "900" },
