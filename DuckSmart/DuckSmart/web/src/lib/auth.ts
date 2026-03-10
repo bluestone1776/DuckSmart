@@ -50,11 +50,27 @@ const AUTH_ERROR_MAP: Record<string, string> = {
   "auth/email-already-in-use": "An account with that email already exists.",
   "auth/weak-password": "Password must be at least 6 characters.",
   "auth/invalid-email": "Please enter a valid email address.",
+  "auth/invalid-credential": "Invalid email or password.",
   "auth/too-many-requests":
     "Too many failed attempts. Please try again later.",
+  "auth/network-request-failed": "Network error. Check your connection.",
+  "auth/user-disabled": "This account has been disabled.",
+  // OAuth-specific errors
+  "auth/popup-closed-by-user": "Sign-in was cancelled.",
+  "auth/cancelled-popup-request": "Sign-in was cancelled.",
+  "auth/popup-blocked":
+    "Sign-in popup was blocked. Please allow popups and try again.",
+  "auth/account-exists-with-different-credential":
+    "An account already exists with a different sign-in method.",
+  "auth/credential-already-in-use":
+    "This credential is already associated with another account.",
+  "auth/operation-not-allowed":
+    "This sign-in method is not enabled. Please contact support.",
+  "auth/internal-error":
+    "An internal authentication error occurred. Please try again.",
 };
 
 /** Map a Firebase auth error code to a user-friendly message. */
 export function formatAuthError(code: string): string {
-  return AUTH_ERROR_MAP[code] ?? "An unexpected error occurred. Please try again.";
+  return AUTH_ERROR_MAP[code] ?? `An unexpected error occurred (${code || "unknown"}). Please try again.`;
 }

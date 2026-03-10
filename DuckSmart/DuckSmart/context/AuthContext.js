@@ -137,13 +137,16 @@ export function AuthProvider({ children }) {
       const result = await signInWithCredential(auth, credential);
       logLogin(result.user.uid, "google");
     } catch (err) {
-      console.error("Google sign-in error:", err);
+      console.error("Google sign-in error:", err?.code, err?.message, err);
       // User cancelled the flow
       if (err.code === "SIGN_IN_CANCELLED" || err.code === "12501") {
         setLoading(false);
         return;
       }
-      setError(formatAuthError(err.code || "auth/google-signin-failed"));
+      // Pass through the actual error code/message for better debugging
+      const code = err.code || "auth/google-signin-failed";
+      const msg = formatAuthError(code);
+      setError(msg);
       setLoading(false);
     }
   }, []);
@@ -328,7 +331,13 @@ function formatAuthError(code) {
       return "Google Sign-In failed. Please try again.";
     case "auth/apple-signin-failed":
       return "Apple Sign-In failed. Please try again.";
+    case "auth/popup-blocked":
+      return "Sign-in popup was blocked. Please allow popups and try again.";
+    case "auth/operation-not-allowed":
+      return "This sign-in method is not enabled. Please contact support.";
+    case "auth/internal-error":
+      return "An internal authentication error occurred. Please try again.";
     default:
-      return "Authentication failed. Please try again.";
+      return `Authentication failed (${code || "unknown"}). Please try again.`;
   }
 }
