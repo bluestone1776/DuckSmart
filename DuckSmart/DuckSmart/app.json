@@ -33,7 +33,7 @@
       "versionCode": 1,
       "config": {
         "googleMaps": {
-          "apiKey": "AIzaSyBnwwwpGQv_-UfdxPmDWbQM1tR7Z6obH74"
+          "apiKey": "REPLACE_WITH_ENV"
         }
       }
     },
@@ -42,15 +42,15 @@
     },
     "extra": {
       "firebase": {
-        "androidApiKey": "AIzaSyBnwwwpGQv_-UfdxPmDWbQM1tR7Z6obH74",
-        "iosApiKey": "AIzaSyAYuVXKtrMbp1D8pAy0EAFArONDrp6W-iY",
-        "authDomain": "ducksmart-9c80e.firebaseapp.com",
-        "projectId": "ducksmart-9c80e",
-        "storageBucket": "ducksmart-9c80e.firebasestorage.app",
-        "messagingSenderId": "747578003996",
-        "androidAppId": "1:747578003996:android:fa1b978454b9f99fca85d9",
-        "iosAppId": "1:747578003996:ios:7bef85dda10811b4ca85d9",
-        "googleWebClientId": "747578003996-1vuqq0capvfg22n607dj9l6icrpfor1f.apps.googleusercontent.com"
+        "androidApiKey": "REPLACE_WITH_ENV",
+        "iosApiKey": "REPLACE_WITH_ENV",
+        "authDomain": "REPLACE_WITH_ENV",
+        "projectId": "REPLACE_WITH_ENV",
+        "storageBucket": "REPLACE_WITH_ENV",
+        "messagingSenderId": "REPLACE_WITH_ENV",
+        "androidAppId": "REPLACE_WITH_ENV",
+        "iosAppId": "REPLACE_WITH_ENV",
+        "googleWebClientId": "REPLACE_WITH_ENV"
       },
       "eas": {
         "projectId": "1e281451-6f41-4ee8-a71e-363eff7ee6ee"

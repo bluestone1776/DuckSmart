@@ -689,7 +689,7 @@ export default function TodayScreen({ onLogout }) {
             </View>
           </View>
 
-          <Pressable style={s.gearButton} onPress={onLogout || (() => {})}>
+          <Pressable style={s.gearButton} onPress={onLogout || (() => {})} accessibilityLabel="Settings" accessibilityRole="button">
             <Text style={s.gearText}>⚙︎</Text>
           </Pressable>
         </View>
@@ -816,7 +816,7 @@ export default function TodayScreen({ onLogout }) {
             </View>
           </View>
 
-          <Pressable style={[s.alertBtn, alertsOn ? s.alertBtnActive : null]} onPress={toggleHuntAlerts}>
+          <Pressable style={[s.alertBtn, alertsOn ? s.alertBtnActive : null]} onPress={toggleHuntAlerts} accessibilityLabel={alertsOn ? "Turn off hunt alerts" : "Set sunrise and sunset alerts"} accessibilityRole="button">
             <Text style={[s.alertBtnText, alertsOn ? s.alertBtnTextActive : null]}>
               {alertsOn ? "🔔  Alerts On" : "🔕  Set Shoot-Time Alerts"}
             </Text>
@@ -829,7 +829,7 @@ export default function TodayScreen({ onLogout }) {
             title="Weather Radar"
             right={
               isPro ? (
-                <Pressable style={s.radarRefreshBtn} onPress={loadRadar}>
+                <Pressable style={s.radarRefreshBtn} onPress={loadRadar} accessibilityLabel="Refresh radar" accessibilityRole="button">
                   <Text style={s.radarRefreshText}>↻</Text>
                 </Pressable>
               ) : (
@@ -957,6 +957,8 @@ export default function TodayScreen({ onLogout }) {
             <Pressable
               style={[s.radarRefreshBtn, isPro && { borderColor: COLORS.green, backgroundColor: COLORS.greenBg }]}
               onPress={promptAISpreadAnalyzer}
+              accessibilityLabel="AI Spread Analyzer"
+              accessibilityRole="button"
             >
               <Text style={[s.radarRefreshText, isPro && { color: COLORS.green }]}>📷</Text>
             </Pressable>

@@ -163,6 +163,9 @@ export default function AuthScreen() {
             secureTextEntry
             textContentType={mode === "signup" ? "newPassword" : "password"}
           />
+          {mode === "signup" && (
+            <Text style={s.hint}>Must be at least 6 characters</Text>
+          )}
 
           {/* Submit button */}
           <Pressable
@@ -260,6 +263,7 @@ const s = StyleSheet.create({
   },
 
   label: { color: COLORS.muted, fontSize: 12, fontWeight: "900", marginBottom: 8, marginTop: 12 },
+  hint: { color: COLORS.mutedDark, fontSize: 11, fontWeight: "700", marginTop: 6 },
   input: {
     borderWidth: 1,
     borderColor: COLORS.border,

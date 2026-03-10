@@ -284,16 +284,20 @@ export default function MapScreen({ pins, setPins }) {
             <Pressable
               style={styles.iconBtn}
               onPress={() => setMapType((prev) => prev === "standard" ? "satellite" : prev === "satellite" ? "hybrid" : "standard")}
+              accessibilityLabel="Toggle map type"
+              accessibilityRole="button"
             >
               <Text style={styles.iconBtnText}>{mapType === "standard" ? "🗺" : mapType === "satellite" ? "🛰" : "🛰"}</Text>
             </Pressable>
             <Pressable
               style={[styles.iconBtn, showParcels ? styles.iconBtnActive : null]}
               onPress={toggleParcels}
+              accessibilityLabel={showParcels ? "Hide property lines" : "Show property lines"}
+              accessibilityRole="button"
             >
               <Text style={styles.iconBtnText}>▦</Text>
             </Pressable>
-            <Pressable style={styles.iconBtn} onPress={goToUser} disabled={!userLoc}>
+            <Pressable style={styles.iconBtn} onPress={goToUser} disabled={!userLoc} accessibilityLabel="Go to my location" accessibilityRole="button">
               <Text style={styles.iconBtnText}>◎</Text>
             </Pressable>
             <Pressable

@@ -45,7 +45,7 @@ module.exports = {
       versionCode: 1,
       config: {
         googleMaps: {
-          apiKey: "AIzaSyBnwwwpGQv_-UfdxPmDWbQM1tR7Z6obH74",
+          apiKey: process.env.GOOGLE_MAPS_API_KEY || "",
         },
       },
     },
@@ -57,19 +57,21 @@ module.exports = {
       openWeatherMapApiKey: process.env.OWM_API_KEY || "",
       regridToken: process.env.REGRID_TOKEN || "",
       openaiApiKey: process.env.OPENAI_API_KEY || "",
+      ebirdApiKey: process.env.EBIRD_API_KEY || "",
 
-      // Firebase — client-side keys (safe to commit)
+      // Firebase — client-side keys loaded from .env
+      // These are safe to ship in client bundles but should still
+      // live in .env so they aren't committed to public repos.
       firebase: {
-        androidApiKey: "AIzaSyBnwwwpGQv_-UfdxPmDWbQM1tR7Z6obH74",
-        iosApiKey: "AIzaSyAYuVXKtrMbp1D8pAy0EAFArONDrp6W-iY",
-        authDomain: "ducksmart-9c80e.firebaseapp.com",
-        projectId: "ducksmart-9c80e",
-        storageBucket: "ducksmart-9c80e.firebasestorage.app",
-        messagingSenderId: "747578003996",
-        androidAppId: "1:747578003996:android:fa1b978454b9f99fca85d9",
-        iosAppId: "1:747578003996:ios:7bef85dda10811b4ca85d9",
-        googleWebClientId:
-          "747578003996-1vuqq0capvfg22n607dj9l6icrpfor1f.apps.googleusercontent.com",
+        androidApiKey: process.env.FIREBASE_ANDROID_API_KEY || "",
+        iosApiKey: process.env.FIREBASE_IOS_API_KEY || "",
+        authDomain: process.env.FIREBASE_AUTH_DOMAIN || "",
+        projectId: process.env.FIREBASE_PROJECT_ID || "",
+        storageBucket: process.env.FIREBASE_STORAGE_BUCKET || "",
+        messagingSenderId: process.env.FIREBASE_MESSAGING_SENDER_ID || "",
+        androidAppId: process.env.FIREBASE_ANDROID_APP_ID || "",
+        iosAppId: process.env.FIREBASE_IOS_APP_ID || "",
+        googleWebClientId: process.env.FIREBASE_GOOGLE_WEB_CLIENT_ID || "",
       },
       eas: {
         projectId: "1e281451-6f41-4ee8-a71e-363eff7ee6ee",

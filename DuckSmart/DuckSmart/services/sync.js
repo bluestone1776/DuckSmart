@@ -103,6 +103,14 @@ async function uploadPhoto(uid, logId, photo, index) {
 
     const response = await fetch(photo.uri);
     const blob = await response.blob();
+
+    // Reject photos larger than 10 MB to prevent quota abuse
+    const MAX_PHOTO_BYTES = 10 * 1024 * 1024;
+    if (blob.size > MAX_PHOTO_BYTES) {
+      console.warn(`DuckSmart sync: photo ${index} too large (${(blob.size / 1024 / 1024).toFixed(1)} MB), skipping upload`);
+      return photo;
+    }
+
     await uploadBytes(storageRef, blob);
 
     const downloadUrl = await getDownloadURL(storageRef);

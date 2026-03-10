@@ -1,0 +1,43 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // Users can only read/write their own hunt logs
+    match /users/{uid}/logs/{logId} {
+      allow read, write: if request.auth != null && request.auth.uid == uid;
+    }
+
+    // Users can only read/write their own map pins
+    match /users/{uid}/pins/{pinId} {
+      allow read, write: if request.auth != null && request.auth.uid == uid;
+    }
+
+    // Users can read/write their own profile
+    match /users/{uid} {
+      allow read, write: if request.auth != null && request.auth.uid == uid;
+    }
+
+    // Roles — read-only for the user, write-only for admins
+    match /roles/{uid} {
+      allow read: if request.auth != null && request.auth.uid == uid;
+      allow write: if false; // admin-only via Firebase Admin SDK
+    }
+
+    // Analytics — write-only (no client reads)
+    match /analytics/{docId} {
+      allow create: if request.auth != null;
+      allow read, update, delete: if false;
+    }
+
+    // Feedback — authenticated users can create, only admins read/update
+    match /feedback/{docId} {
+      allow create: if request.auth != null;
+      allow read, update, delete: if false; // admin-only via Firebase Admin SDK
+    }
+
+    // Deny everything else by default
+    match /{document=**} {
+      allow read, write: if false;
+    }
+  }
+}

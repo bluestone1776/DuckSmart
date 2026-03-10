@@ -34,11 +34,22 @@ async function imageToBase64(uri) {
   return `data:${mimeFromUri(uri)};base64,${base64}`;
 }
 
+// Simple rate limiter — minimum 15 seconds between AI requests
+let lastAIRequestTime = 0;
+const AI_COOLDOWN_MS = 15000;
+
 /** Call the OpenAI chat completions API with a vision prompt */
 async function callVision(systemPrompt, userText, imageUri) {
   if (!OPENAI_API_KEY) {
     throw new Error("AI features require an OpenAI API key. Add it in app.json → extra → openaiApiKey.");
   }
+
+  const now = Date.now();
+  if (now - lastAIRequestTime < AI_COOLDOWN_MS) {
+    const waitSec = Math.ceil((AI_COOLDOWN_MS - (now - lastAIRequestTime)) / 1000);
+    throw new Error(`Please wait ${waitSec}s before making another AI request.`);
+  }
+  lastAIRequestTime = now;
 
   const dataUrl = await imageToBase64(imageUri);
 

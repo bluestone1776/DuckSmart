@@ -5,6 +5,7 @@
 // and graceful fallback to mock data.
 
 import React, { createContext, useContext, useEffect, useState, useCallback, useRef } from "react";
+import { AppState } from "react-native";
 import * as Location from "expo-location";
 import { fetchWeather, MOCK_WEATHER } from "../services/weather";
 import { cacheWeather, loadCachedWeather } from "../services/storage";
@@ -110,15 +111,29 @@ export function WeatherProvider({ children }) {
     })();
 
     // Auto-refresh every 15 minutes
-    intervalRef.current = setInterval(() => {
-      if (coordsRef.current) {
-        loadWeather(coordsRef.current);
+    function startInterval() {
+      if (intervalRef.current) clearInterval(intervalRef.current);
+      intervalRef.current = setInterval(() => {
+        if (coordsRef.current) loadWeather(coordsRef.current);
+      }, REFRESH_INTERVAL_MS);
+    }
+    startInterval();
+
+    // Pause interval when app is backgrounded to save battery/data
+    const appStateSub = AppState.addEventListener("change", (state) => {
+      if (state === "active") {
+        startInterval();
+        // Refresh immediately when coming back to foreground
+        if (coordsRef.current) loadWeather(coordsRef.current);
+      } else {
+        if (intervalRef.current) clearInterval(intervalRef.current);
       }
-    }, REFRESH_INTERVAL_MS);
+    });
 
     return () => {
       mounted = false;
       if (intervalRef.current) clearInterval(intervalRef.current);
+      appStateSub.remove();
     };
   }, [loadWeather]);
 

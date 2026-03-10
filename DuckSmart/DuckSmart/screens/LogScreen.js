@@ -99,6 +99,11 @@ export default function LogScreen({ addLog, onLogout }) {
       Alert.alert("Missing GPS", "Wait for GPS (or enable location) before saving this hunt.");
       return;
     }
+
+    // Input validation
+    const safeHarvest = Math.max(0, Math.min(50, Math.round(ducksHarvested)));
+    const safeNotes = (notes || "").trim().slice(0, 5000);
+
     const selectedSpread = SPREADS.find((sp) => sp.key === spread);
     const entry = {
       id: `hunt-${Date.now()}`,
@@ -117,10 +122,10 @@ export default function LogScreen({ addLog, onLogout }) {
           }
         : null,
       huntScore,
-      ducksHarvested,
-      notes: notes.trim(),
+      ducksHarvested: safeHarvest,
+      notes: safeNotes,
       location,
-      photos,
+      photos: photos.slice(0, 12),
     };
     addLog(entry);
     logHuntLogged(user?.uid, {
@@ -268,13 +273,13 @@ export default function LogScreen({ addLog, onLogout }) {
               </Text>
             </View>
             <View style={styles.sliderRow}>
-              <Pressable onPress={() => setDucksHarvested((prev) => clamp(prev - 1, 0, 50))} style={styles.stepBtn}>
+              <Pressable onPress={() => setDucksHarvested((prev) => clamp(prev - 1, 0, 50))} style={styles.stepBtn} accessibilityLabel="Decrease ducks harvested" accessibilityRole="button">
                 <Text style={styles.stepBtnText}>–</Text>
               </Pressable>
               <View style={styles.sliderTrack}>
                 <View style={[styles.sliderFill, { width: `${clamp((ducksHarvested / 12) * 100, 0, 100)}%` }]} />
               </View>
-              <Pressable onPress={() => setDucksHarvested((prev) => clamp(prev + 1, 0, 50))} style={styles.stepBtn}>
+              <Pressable onPress={() => setDucksHarvested((prev) => clamp(prev + 1, 0, 50))} style={styles.stepBtn} accessibilityLabel="Increase ducks harvested" accessibilityRole="button">
                 <Text style={styles.stepBtnText}>+</Text>
               </Pressable>
             </View>

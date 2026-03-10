@@ -79,6 +79,30 @@ function ratingColor(rating) {
   return COLORS.mutedDark;
 }
 
+// Memoized species match row — prevents re-renders when parent state changes
+const SpeciesMatchRow = React.memo(function SpeciesMatchRow({ species, score, onPress }) {
+  const duckAsset = ASSETS.ducks[species.name];
+  return (
+    <Pressable onPress={onPress} style={s.matchRow}>
+      {duckAsset ? (
+        <Image source={duckAsset.male || duckAsset} style={s.matchThumb} resizeMode="cover" />
+      ) : (
+        <View style={[s.matchThumb, { alignItems: "center", justifyContent: "center" }]}>
+          <Text style={{ color: COLORS.mutedDark, fontSize: 20 }}>🦆</Text>
+        </View>
+      )}
+      <View style={{ flex: 1 }}>
+        <Text style={s.matchTitle}>{species.name}</Text>
+        <Text style={s.matchSub}>{species.group} • {species.size}</Text>
+        <Text style={s.matchHint} numberOfLines={2}>{species.keyMarks[0]}</Text>
+      </View>
+      <View style={s.scoreBubble}>
+        <Text style={s.scoreBubbleText}>{score}</Text>
+      </View>
+    </Pressable>
+  );
+});
+
 // --- Home screen ---
 
 function IdentifyHome({ navigation }) {
@@ -353,33 +377,14 @@ function IdentifyHome({ navigation }) {
             <>
               {matches.map(({ species, score }) => {
                 const isFree = FREE_SPECIES_IDS.includes(species.id);
-                if (!isPro && !isFree) return null; // hide locked ducks from list
+                if (!isPro && !isFree) return null;
                 return (
-                  <Pressable
+                  <SpeciesMatchRow
                     key={species.id}
+                    species={species}
+                    score={score}
                     onPress={() => navigation.navigate("SpeciesDetail", { id: species.id })}
-                    style={s.matchRow}
-                  >
-                    {ASSETS.ducks[species.name] ? (
-                      <Image source={ASSETS.ducks[species.name].male || ASSETS.ducks[species.name]} style={s.matchThumb} resizeMode="cover" />
-                    ) : (
-                      <View style={[s.matchThumb, { alignItems: "center", justifyContent: "center" }]}>
-                        <Text style={{ color: COLORS.mutedDark, fontSize: 20 }}>🦆</Text>
-                      </View>
-                    )}
-                    <View style={{ flex: 1 }}>
-                      <Text style={s.matchTitle}>{species.name}</Text>
-                      <Text style={s.matchSub}>
-                        {species.group} • {species.size}
-                      </Text>
-                      <Text style={s.matchHint} numberOfLines={2}>
-                        {species.keyMarks[0]}
-                      </Text>
-                    </View>
-                    <View style={s.scoreBubble}>
-                      <Text style={s.scoreBubbleText}>{score}</Text>
-                    </View>
-                  </Pressable>
+                  />
                 );
               })}
 
