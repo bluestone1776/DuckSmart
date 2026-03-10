@@ -133,6 +133,76 @@ function buildHourlyFromForecast(list, nowUnix, tzOffset) {
   return result;
 }
 
+// ── daily forecast aggregation ────────────────────────────────
+//
+// Groups the 3-hour forecast entries by local calendar date, then
+// computes per-day averages/extremes so the scoring engine can
+// produce a score for each day.  The first (partial) bucket is
+// skipped — the UI prepends "Today" using the live score instead.
+
+function buildDailyForecasts(list, currentTemp, tzOffset) {
+  if (!list || list.length < 8) return [];
+
+  // Group forecast entries by local date
+  const dayBuckets = new Map();
+  list.forEach((entry) => {
+    const localMs = entry.dt * 1000 + tzOffset * 1000;
+    const d = new Date(localMs);
+    const dateKey = `${d.getUTCFullYear()}-${d.getUTCMonth()}-${d.getUTCDate()}`;
+    if (!dayBuckets.has(dateKey)) {
+      dayBuckets.set(dateKey, { entries: [], localMs });
+    }
+    dayBuckets.get(dateKey).entries.push(entry);
+  });
+
+  const days = [...dayBuckets.values()].sort((a, b) => a.localMs - b.localMs);
+
+  // Skip today's partial bucket — UI will prepend "Today" with the live score
+  const futureDays = days.slice(1);
+
+  const result = [];
+  // Use today's entries (or current temp) as baseline for first delta
+  let prevAvgTemp = days[0]
+    ? days[0].entries.reduce((s, e) => s + e.main.temp, 0) / days[0].entries.length
+    : currentTemp;
+
+  for (let i = 0; i < Math.min(futureDays.length, 4); i++) {
+    const { entries, localMs } = futureDays[i];
+    const dayDate = new Date(localMs);
+    const dayLabel = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"][dayDate.getUTCDay()];
+
+    const avgTemp = entries.reduce((s, e) => s + e.main.temp, 0) / entries.length;
+    const avgWind = entries.reduce((s, e) => s + e.wind.speed, 0) / entries.length;
+    const avgClouds = entries.reduce((s, e) => s + e.clouds.all, 0) / entries.length;
+    const maxPrecip = Math.max(...entries.map((e) => (e.pop || 0) * 100));
+
+    // Delta temp: difference from previous day (negative = colder = stronger push)
+    const deltaTemp = Math.round(avgTemp - prevAvgTemp);
+
+    // Pressure swing: max absolute change between consecutive 3h entries
+    let maxPressureSwing = 0;
+    for (let j = 1; j < entries.length; j++) {
+      const swing = Math.abs(
+        hpaToInHg(entries[j].main.pressure) - hpaToInHg(entries[j - 1].main.pressure)
+      );
+      if (swing > maxPressureSwing) maxPressureSwing = swing;
+    }
+
+    result.push({
+      label: dayLabel,
+      deltaTemp24hF: deltaTemp,
+      deltaPressure3h: Math.round(maxPressureSwing * 100) / 100,
+      windMph: Math.round(avgWind),
+      precipChance: Math.round(maxPrecip),
+      cloudPct: Math.round(avgClouds),
+    });
+
+    prevAvgTemp = avgTemp;
+  }
+
+  return result;
+}
+
 // ── transform ────────────────────────────────────────────────
 
 function buildWeatherObject(current, forecast) {
@@ -196,6 +266,9 @@ function buildWeatherObject(current, forecast) {
     windDeg: entry.wind.deg || 0,
   }));
 
+  // --- 5-day forecast (daily aggregated weather for scoring) ---
+  const forecast5Day = buildDailyForecasts(list, tempF, tzOffset);
+
   return {
     locationName,
     tempF,
@@ -211,6 +284,7 @@ function buildWeatherObject(current, forecast) {
     sunset,
     hourly,
     trends48h,
+    forecast5Day,
   };
 }
 
@@ -279,5 +353,11 @@ export const MOCK_WEATHER = {
     { t: "3a",  temp: 20, pressureInHg: 30.04, wind: 7,  windDeg: 250 },
     { t: "6a",  temp: 19, pressureInHg: 30.06, wind: 6,  windDeg: 250 },
     { t: "9a",  temp: 23, pressureInHg: 30.08, wind: 9,  windDeg: 255 },
+  ],
+  forecast5Day: [
+    { label: "Wed", deltaTemp24hF: -8, deltaPressure3h: 0.08, windMph: 14, precipChance: 20, cloudPct: 55 },
+    { label: "Thu", deltaTemp24hF: -3, deltaPressure3h: 0.04, windMph: 10, precipChance: 45, cloudPct: 80 },
+    { label: "Fri", deltaTemp24hF: 5, deltaPressure3h: 0.02, windMph: 6, precipChance: 60, cloudPct: 90 },
+    { label: "Sat", deltaTemp24hF: 2, deltaPressure3h: 0.03, windMph: 8, precipChance: 30, cloudPct: 40 },
   ],
 };

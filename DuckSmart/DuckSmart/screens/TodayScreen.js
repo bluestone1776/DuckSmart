@@ -20,7 +20,7 @@ import { COLORS } from "../constants/theme";
 import { getRadarTileUrl, formatRadarAge } from "../services/radar";
 import { ASSETS } from "../constants/assets";
 import { clamp, formatWind } from "../utils/helpers";
-import { scoreHuntToday } from "../utils/scoring";
+import { scoreHunt, scoreHuntToday } from "../utils/scoring";
 import { useWeather } from "../context/WeatherContext";
 import { scheduleHuntAlerts, cancelHuntAlerts } from "../services/notifications";
 import {
@@ -163,6 +163,53 @@ function TrendSparkline({ data, color, width = 280, height = 60, suffix = "" }) 
           {minV}{suffix} – {maxV}{suffix}
         </Text>
       </View>
+    </View>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// 5-Day Forecast Bar Chart
+// ---------------------------------------------------------------------------
+function ForecastBarChart({ days }) {
+  if (!days || days.length === 0) return null;
+
+  const bestIdx = days.reduce((bi, d, i, arr) => (d.score > arr[bi].score ? i : bi), 0);
+  const BAR_MAX_H = 80;
+
+  return (
+    <View>
+      <View style={s.fcRow}>
+        {days.map((day, i) => {
+          const barH = Math.max((day.score / 100) * BAR_MAX_H, 6);
+          const color = day.score >= 70 ? COLORS.green : day.score >= 40 ? COLORS.yellow : COLORS.red;
+          const isBest = i === bestIdx && day.label !== "Today";
+
+          return (
+            <View key={i} style={s.fcCol}>
+              <Text style={[s.fcLabel, isBest && { color: COLORS.green }]}>{day.label}</Text>
+              <View style={s.fcBarTrack}>
+                <View
+                  style={[
+                    s.fcBar,
+                    { height: barH, backgroundColor: color },
+                    isBest && s.fcBarBest,
+                  ]}
+                />
+              </View>
+              <Text style={[s.fcScore, isBest && { color: COLORS.green }]}>{day.score}</Text>
+            </View>
+          );
+        })}
+      </View>
+
+      {/* Best-day callout */}
+      {days[bestIdx] && days[bestIdx].label !== "Today" && (
+        <View style={s.fcCallout}>
+          <Text style={s.fcCalloutText}>
+            {days[bestIdx].label} looks like the best day — score {days[bestIdx].score}
+          </Text>
+        </View>
+      )}
     </View>
   );
 }
@@ -352,6 +399,17 @@ export default function TodayScreen({ onLogout }) {
   const [refreshCount, setRefreshCount] = useState(0);
 
   const hunt = useMemo(() => scoreHuntToday(weather), [weather]);
+
+  // 5-Day Hunt Forecast: today (live score) + next 4 days from forecast
+  const forecast = useMemo(() => {
+    const days = [{ label: "Today", score: scoreHunt(weather).score }];
+    if (weather.forecast5Day) {
+      weather.forecast5Day.forEach((day) => {
+        days.push({ label: day.label, score: scoreHunt(day).score });
+      });
+    }
+    return days.slice(0, 5);
+  }, [weather]);
 
   // ---------------------------------------------------------------------------
   // Decoy Spread Advisor state
@@ -665,6 +723,13 @@ export default function TodayScreen({ onLogout }) {
             )}
           </View>
         </TodayCard>
+
+        {/* 5-Day Hunt Forecast */}
+        {forecast.length > 1 && (
+          <TodayCard title="5-Day Hunt Forecast">
+            <ForecastBarChart days={forecast} />
+          </TodayCard>
+        )}
 
         {/* Real-time Weather */}
         <TodayCard title="Real-Time Weather">
@@ -1380,5 +1445,62 @@ const s = StyleSheet.create({
     color: COLORS.green,
     fontWeight: "900",
     fontSize: 15,
+  },
+
+  // ---- 5-Day Forecast Bar Chart ----
+  fcRow: {
+    flexDirection: "row",
+    alignItems: "flex-end",
+    justifyContent: "space-between",
+    gap: 8,
+  },
+  fcCol: {
+    flex: 1,
+    alignItems: "center",
+  },
+  fcLabel: {
+    color: COLORS.muted,
+    fontSize: 12,
+    fontWeight: "800",
+    marginBottom: 8,
+  },
+  fcBarTrack: {
+    width: "100%",
+    height: 80,
+    justifyContent: "flex-end",
+    alignItems: "center",
+  },
+  fcBar: {
+    width: "70%",
+    borderRadius: 8,
+    minHeight: 6,
+  },
+  fcBarBest: {
+    borderWidth: 1,
+    borderColor: COLORS.green,
+    shadowColor: COLORS.green,
+    shadowOpacity: 0.4,
+    shadowRadius: 6,
+    elevation: 4,
+  },
+  fcScore: {
+    color: COLORS.white,
+    fontSize: 16,
+    fontWeight: "900",
+    marginTop: 8,
+  },
+  fcCallout: {
+    marginTop: 12,
+    padding: 10,
+    borderRadius: 12,
+    backgroundColor: COLORS.greenBg,
+    borderWidth: 1,
+    borderColor: COLORS.green,
+    alignItems: "center",
+  },
+  fcCalloutText: {
+    color: COLORS.green,
+    fontSize: 13,
+    fontWeight: "800",
   },
 });
