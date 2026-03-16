@@ -46,7 +46,7 @@ function getDeviceInfo() {
   return {
     platform: Platform.OS,
     osVersion: String(Platform.Version),
-    appVersion: Constants.expoConfig?.version || "1.0.0",
+    appVersion: Constants.expoConfig?.version || "1.1.0",
     model: Device?.modelName || null,
     brand: Device?.brand || null,
     manufacturer: Device?.manufacturer || null,

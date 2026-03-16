@@ -11,7 +11,7 @@ module.exports = {
   expo: {
     name: IS_DEV ? "DuckSmart (Dev)" : "DuckSmart",
     slug: "ducksmart",
-    version: "1.0.0",
+    version: "1.1.0",
     orientation: "portrait",
     icon: "./assets/icon.png",
     userInterfaceStyle: "dark",
@@ -86,7 +86,12 @@ module.exports = {
         },
       ],
       "expo-apple-authentication",
-      "@react-native-google-signin/google-signin",
+      [
+        "@react-native-google-signin/google-signin",
+        {
+          iosUrlScheme: process.env.GOOGLE_IOS_URL_SCHEME || "",
+        },
+      ],
       [
         "react-native-google-mobile-ads",
         {

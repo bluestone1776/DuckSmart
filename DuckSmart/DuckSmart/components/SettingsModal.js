@@ -36,7 +36,7 @@ const CATEGORIES = ["Bug", "Feature Request", "Question", "Other"];
 
 export default function SettingsModal({ visible, onClose, onLogout }) {
   const { deleteAccount, user } = useAuth();
-  const { isPro, purchase, restore, getProPrice } = usePremium();
+  const { isPro, purchase, restore, getMonthlyPrice, getAnnualPrice, monthlyPackage, annualPackage } = usePremium();
   const { accent, presets, setAccent } = useTheme();
   const [feedbackMsg, setFeedbackMsg] = useState("");
   const [category, setCategory] = useState("Bug");
@@ -270,9 +270,15 @@ export default function SettingsModal({ visible, onClose, onLogout }) {
                   Unlock animated radar, 48hr weather trends, extended forecasts,
                   unlimited map pins, all duck species, and an ad-free experience.
                 </Text>
-                <Pressable style={ms.upgradeBtn} onPress={purchase}>
+                <Pressable style={ms.upgradeBtn} onPress={() => purchase(annualPackage)}>
                   <Text style={ms.upgradeBtnText}>
-                    {getProPrice() ? `Upgrade to Pro — ${getProPrice()}` : "Upgrade to Pro"}
+                    {`Yearly — ${getAnnualPrice()}/yr`}
+                  </Text>
+                  <Text style={ms.upgradeBtnSub}>Best value — save 33%</Text>
+                </Pressable>
+                <Pressable style={ms.upgradeBtnSecondary} onPress={() => purchase(monthlyPackage)}>
+                  <Text style={ms.upgradeBtnSecondaryText}>
+                    {`Monthly — ${getMonthlyPrice()}/mo`}
                   </Text>
                 </Pressable>
                 <Pressable style={ms.restoreBtn} onPress={restore}>
@@ -353,7 +359,7 @@ export default function SettingsModal({ visible, onClose, onLogout }) {
           {/* App Info */}
           <View style={ms.section}>
             <Text style={ms.sectionTitle}>About DuckSmart</Text>
-            <Text style={ms.infoText}>Version 1.0.0</Text>
+            <Text style={ms.infoText}>Version 1.1.0</Text>
             <Text style={ms.infoText}>Built for duck hunters, by duck hunters.</Text>
             <Text style={ms.infoTextMuted}>
               Weather data provided by OpenWeatherMap. Prediction scores are estimates
@@ -447,6 +453,12 @@ const ms = StyleSheet.create({
     backgroundColor: COLORS.greenBg, borderWidth: 1, borderColor: COLORS.green, alignItems: "center",
   },
   upgradeBtnText: { color: COLORS.green, fontWeight: "900", fontSize: 15 },
+  upgradeBtnSub: { color: COLORS.green, fontWeight: "700", fontSize: 11, marginTop: 2, opacity: 0.7 },
+  upgradeBtnSecondary: {
+    marginTop: 10, paddingVertical: 14, borderRadius: 14,
+    backgroundColor: COLORS.bgDeep, borderWidth: 1, borderColor: COLORS.border, alignItems: "center",
+  },
+  upgradeBtnSecondaryText: { color: COLORS.white, fontWeight: "900", fontSize: 15 },
 
   restoreBtn: {
     marginTop: 10, paddingVertical: 10, alignItems: "center",

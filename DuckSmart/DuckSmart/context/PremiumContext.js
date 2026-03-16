@@ -48,6 +48,10 @@ const REVENUECAT_API_KEYS = {
 // The entitlement identifier you set up in RevenueCat dashboard
 const PRO_ENTITLEMENT = "pro";
 
+// Fallback prices shown when RevenueCat offerings haven't loaded yet
+const FALLBACK_MONTHLY_PRICE = "$4.99";
+const FALLBACK_ANNUAL_PRICE = "$39.99";
+
 // ── Dev override: set to true to simulate Pro during development ──
 const DEV_FORCE_PRO = __DEV__ && false; // flip to true to test Pro features
 
@@ -126,9 +130,20 @@ export function PremiumProvider({ children }) {
   }, []);
 
   // ---------------------------------------------------------------------------
-  // Purchase Pro subscription
+  // Find monthly & yearly packages from the current offering
   // ---------------------------------------------------------------------------
-  const purchase = useCallback(async () => {
+  const monthlyPackage = offerings?.availablePackages?.find(
+    (p) => p.packageType === "MONTHLY" || p.identifier === "$rc_monthly"
+  ) || null;
+
+  const annualPackage = offerings?.availablePackages?.find(
+    (p) => p.packageType === "ANNUAL" || p.identifier === "$rc_annual"
+  ) || null;
+
+  // ---------------------------------------------------------------------------
+  // Purchase Pro subscription — accepts a specific package
+  // ---------------------------------------------------------------------------
+  const purchase = useCallback(async (pkg) => {
     if (!isRevenueCatAvailable || !Purchases) {
       Alert.alert(
         "Not Available",
@@ -137,15 +152,17 @@ export function PremiumProvider({ children }) {
       return false;
     }
 
-    if (!offerings || !offerings.availablePackages.length) {
+    // If no package passed, fall back to first available
+    const targetPkg = pkg || monthlyPackage || annualPackage
+      || (offerings?.availablePackages?.[0] ?? null);
+
+    if (!targetPkg) {
       Alert.alert("Error", "No subscription packages available. Please try again later.");
       return false;
     }
 
     try {
-      // Use the first available package (should be our Pro subscription)
-      const pkg = offerings.availablePackages[0];
-      const { customerInfo } = await Purchases.purchasePackage(pkg);
+      const { customerInfo } = await Purchases.purchasePackage(targetPkg);
       const hasPro = customerInfo.entitlements.active[PRO_ENTITLEMENT] !== undefined;
       setIsPro(hasPro);
 
@@ -161,7 +178,7 @@ export function PremiumProvider({ children }) {
       Alert.alert("Purchase Failed", "Could not complete the purchase. Please try again.");
       return false;
     }
-  }, [offerings]);
+  }, [offerings, monthlyPackage, annualPackage]);
 
   // ---------------------------------------------------------------------------
   // Restore previous purchases (required by App Store guidelines)
@@ -192,12 +209,18 @@ export function PremiumProvider({ children }) {
   }, []);
 
   // ---------------------------------------------------------------------------
-  // Get price string for display on paywalls
+  // Get price strings for display on paywalls
   // ---------------------------------------------------------------------------
-  const getProPrice = useCallback(() => {
-    if (!offerings || !offerings.availablePackages.length) return null;
-    return offerings.availablePackages[0].product.priceString;
-  }, [offerings]);
+  const getMonthlyPrice = useCallback(() => {
+    return monthlyPackage?.product?.priceString || FALLBACK_MONTHLY_PRICE;
+  }, [monthlyPackage]);
+
+  const getAnnualPrice = useCallback(() => {
+    return annualPackage?.product?.priceString || FALLBACK_ANNUAL_PRICE;
+  }, [annualPackage]);
+
+  // Keep backward-compat alias
+  const getProPrice = getMonthlyPrice;
 
   return (
     <PremiumContext.Provider
@@ -207,6 +230,10 @@ export function PremiumProvider({ children }) {
         purchase,
         restore,
         getProPrice,
+        getMonthlyPrice,
+        getAnnualPrice,
+        monthlyPackage,
+        annualPackage,
         checkSubscription,
       }}
     >
@@ -217,7 +244,7 @@ export function PremiumProvider({ children }) {
 
 /**
  * Hook to access premium state from any screen.
- * Returns: { isPro, loading, purchase, restore, getProPrice, checkSubscription }
+ * Returns: { isPro, loading, purchase, restore, getProPrice, getMonthlyPrice, getAnnualPrice, monthlyPackage, annualPackage, checkSubscription }
  */
 export function usePremium() {
   const ctx = useContext(PremiumContext);

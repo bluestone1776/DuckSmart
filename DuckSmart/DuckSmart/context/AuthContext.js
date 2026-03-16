@@ -16,7 +16,7 @@ import {
   OAuthProvider,
   signInWithCredential,
 } from "firebase/auth";
-import { auth } from "../services/firebase";
+import { auth, isFirebaseConfigValid } from "../services/firebase";
 import { clearAllData } from "../services/storage";
 import { deleteAllUserData } from "../services/sync";
 import { logLogin, logSignup } from "../services/analytics";
@@ -79,11 +79,34 @@ export function AuthProvider({ children }) {
 
   // Listen for auth state changes (fires on login, logout, app restart)
   useEffect(() => {
+    // If Firebase config is invalid, don't wait forever — go straight to login
+    if (!isFirebaseConfigValid) {
+      console.warn("DuckSmart: Firebase config invalid — skipping auth listener");
+      setLoading(false);
+      return;
+    }
+
     const unsubscribe = onAuthStateChanged(auth, (firebaseUser) => {
       setUser(firebaseUser);
       setLoading(false);
     });
-    return unsubscribe;
+
+    // Safety timeout: if onAuthStateChanged never fires (e.g. network issue,
+    // Firebase misconfigured), stop loading after 10 seconds so the user
+    // can at least see the login screen instead of a blank screen.
+    const timeout = setTimeout(() => {
+      setLoading((current) => {
+        if (current) {
+          console.warn("DuckSmart: Auth listener timed out — showing login screen");
+        }
+        return false;
+      });
+    }, 10000);
+
+    return () => {
+      unsubscribe();
+      clearTimeout(timeout);
+    };
   }, []);
 
   // --------------- Email / Password ---------------

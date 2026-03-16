@@ -11,7 +11,7 @@ import { COLORS } from "../constants/theme";
 import { usePremium } from "../context/PremiumContext";
 
 export default function ProUpgradePrompt({ message, compact }) {
-  const { purchase } = usePremium();
+  const { purchase, monthlyPackage, annualPackage, getMonthlyPrice, getAnnualPrice } = usePremium();
 
   if (compact) {
     return (
@@ -27,8 +27,16 @@ export default function ProUpgradePrompt({ message, compact }) {
     <View style={styles.wrap}>
       <Text style={styles.lockIconLarge}>🔒</Text>
       <Text style={styles.message}>{message || "This feature requires DuckSmart Pro"}</Text>
-      <Pressable style={styles.upgradeBtn} onPress={purchase}>
-        <Text style={styles.upgradeBtnText}>Upgrade to Pro</Text>
+      <Pressable style={styles.upgradeBtn} onPress={() => purchase(annualPackage)}>
+        <Text style={styles.upgradeBtnText}>
+          {`${getAnnualPrice()}/yr`}
+        </Text>
+        <Text style={styles.upgradeBtnSub}>Best value — save 33%</Text>
+      </Pressable>
+      <Pressable style={[styles.upgradeBtn, styles.upgradeBtnSecondary]} onPress={() => purchase(monthlyPackage)}>
+        <Text style={styles.upgradeBtnTextSecondary}>
+          {`${getMonthlyPrice()}/mo`}
+        </Text>
       </Pressable>
     </View>
   );
@@ -67,6 +75,23 @@ const styles = StyleSheet.create({
   },
   upgradeBtnText: {
     color: COLORS.green,
+    fontWeight: "900",
+    fontSize: 14,
+  },
+  upgradeBtnSub: {
+    color: COLORS.green,
+    fontWeight: "700",
+    fontSize: 11,
+    marginTop: 2,
+    opacity: 0.7,
+  },
+  upgradeBtnSecondary: {
+    marginTop: 8,
+    backgroundColor: COLORS.bgDeep,
+    borderColor: COLORS.border,
+  },
+  upgradeBtnTextSecondary: {
+    color: COLORS.white,
     fontWeight: "900",
     fontSize: 14,
   },

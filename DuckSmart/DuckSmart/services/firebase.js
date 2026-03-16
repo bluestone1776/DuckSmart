@@ -21,10 +21,15 @@ const firebaseConfig = {
   appId: Platform.OS === "ios" ? extra?.iosAppId : extra?.androidAppId,
 };
 
-if (!firebaseConfig.apiKey || !firebaseConfig.appId) {
+// Flag so consumers can check whether Firebase has valid config
+export const isFirebaseConfigValid =
+  !!firebaseConfig.apiKey && !!firebaseConfig.appId && !!firebaseConfig.projectId;
+
+if (!isFirebaseConfigValid) {
   console.warn(
     "DuckSmart: Firebase config missing or incomplete for platform:",
-    Platform.OS
+    Platform.OS,
+    JSON.stringify(firebaseConfig)
   );
 }
 

@@ -23,7 +23,7 @@ export async function submitFeedback(ticket) {
     userId: user?.uid || null,
     email: user?.email || null,
     platform: Platform.OS,
-    appVersion: Constants.expoConfig?.version || "1.0.0",
+    appVersion: Constants.expoConfig?.version || "1.1.0",
     createdAt: new Date().toISOString(),
     timestamp: Date.now(),
     status: "pending",
