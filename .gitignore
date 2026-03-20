@@ -10,6 +10,10 @@ android/
 .env.local
 .env.*.local
 
+# Firebase service files (contain API keys)
+google-services.json
+GoogleService-Info.plist
+
 # Logs
 logs/
 *.log

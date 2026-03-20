@@ -18,14 +18,15 @@ module.exports = {
     newArchEnabled: true,
     splash: {
       image: "./assets/splash-icon.png",
-      resizeMode: "contain",
-      backgroundColor: "#000000",
+      resizeMode: "cover",
+      backgroundColor: "#1a1a2e",
     },
     ios: {
       supportsTablet: false,
       bundleIdentifier: "com.ducksmart.app",
       buildNumber: "1",
       usesAppleSignIn: true,
+      googleServicesFile: process.env.GOOGLE_SERVICES_PLIST || "./GoogleService-Info.plist",
       infoPlist: {
         ITSAppUsesNonExemptEncryption: false,
         NSLocationWhenInUseUsageDescription:
@@ -43,6 +44,7 @@ module.exports = {
       edgeToEdgeEnabled: false,
       package: "com.ducksmart.app",
       versionCode: 1,
+      googleServicesFile: process.env.GOOGLE_SERVICES_JSON || "./google-services.json",
       config: {
         googleMaps: {
           apiKey: process.env.GOOGLE_MAPS_API_KEY || "",

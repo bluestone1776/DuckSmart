@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useCallback, useRef } from "react";
 import { View, Text, Pressable, ActivityIndicator } from "react-native";
 import { GestureHandlerRootView } from "react-native-gesture-handler";
-import { SafeAreaProvider } from "react-native-safe-area-context";
+import { SafeAreaProvider, useSafeAreaInsets } from "react-native-safe-area-context";
 import { NavigationContainer } from "@react-navigation/native";
 import { createBottomTabNavigator } from "@react-navigation/bottom-tabs";
 import { Ionicons } from "@expo/vector-icons";
@@ -199,6 +199,7 @@ function SyncManager({ uid, user, logs, pins, setLogs, setPins, ready }) {
 function MainApp() {
   const { user, logout } = useAuth();
   const { accentColor } = useTheme();
+  const insets = useSafeAreaInsets();
   const [logs, setLogs] = useState([]);
   const [pins, setPins] = useState(SEED_PINS);
   const [ready, setReady] = useState(false);
@@ -253,6 +254,7 @@ function MainApp() {
             borderTopColor: COLORS.border,
             borderTopWidth: 1,
             paddingTop: 8,
+            paddingBottom: Math.max(insets.bottom, 8),
           },
           tabBarActiveTintColor: accentColor,
           tabBarInactiveTintColor: COLORS.muted,

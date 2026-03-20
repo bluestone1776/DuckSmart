@@ -48,7 +48,7 @@ const SPONSOR_SUBJECT = "Request for Sponsorship";
 const SPONSOR_BODY = "I'd like to learn more about sponsorship on the DuckSmart app.";
 
 // Set this to a sponsor object when you have one, or null to show the placeholder
-const ACTIVE_SPONSOR = { name: "Delta Waterfowl", tagline: "Proud sponsor of DuckSmart" };
+const ACTIVE_SPONSOR = { name: "Mallard Works", tagline: "Proud sponsor of DuckSmart", url: "https://mallardworks.io" };
 
 /**
  * AdBanner — shows ad + sponsor section.
@@ -89,11 +89,13 @@ export default function AdBanner() {
       {/* --- Sponsor CTA (always visible, all users) --- */}
       <View style={styles.sponsorSection}>
         {ACTIVE_SPONSOR ? (
-          <Text style={styles.sponsorText}>
-            Sponsored by{" "}
-            <Text style={styles.sponsorName}>{ACTIVE_SPONSOR.name}</Text>
-            {ACTIVE_SPONSOR.tagline ? ` — ${ACTIVE_SPONSOR.tagline}` : ""}
-          </Text>
+          <Pressable onPress={() => ACTIVE_SPONSOR.url && Linking.openURL(ACTIVE_SPONSOR.url).catch(() => {})}>
+            <Text style={styles.sponsorText}>
+              Sponsored by{" "}
+              <Text style={styles.sponsorName}>{ACTIVE_SPONSOR.name}</Text>
+              {ACTIVE_SPONSOR.tagline ? ` — ${ACTIVE_SPONSOR.tagline}` : ""}
+            </Text>
+          </Pressable>
         ) : (
           <Text style={styles.sponsorText}>
             Want your brand here?

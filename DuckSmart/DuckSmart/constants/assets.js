@@ -1,7 +1,7 @@
 // DuckSmart asset references
 
 export const ASSETS = {
-  logo: require("../assets/logo_ducksmart.png"),
+  logo: require("../assets/icon.png"),
   bgMarsh: require("../assets/bg_marsh.jpg"),
   backgrounds: {
     today: require("../assets/today_background.png"),

@@ -17,6 +17,7 @@ import {
   Platform,
   Image,
   ActivityIndicator,
+  Linking,
 } from "react-native";
 import * as ImagePicker from "expo-image-picker";
 import * as FileSystem from "expo-file-system";
@@ -284,6 +285,21 @@ export default function SettingsModal({ visible, onClose, onLogout }) {
                 <Pressable style={ms.restoreBtn} onPress={restore}>
                   <Text style={ms.restoreBtnText}>Restore Purchase</Text>
                 </Pressable>
+                <View style={ms.legalRow}>
+                  <Text
+                    style={ms.legalLink}
+                    onPress={() => Linking.openURL("https://mallardworks.io/privacy-policy")}
+                  >
+                    Privacy Policy
+                  </Text>
+                  <Text style={ms.legalSep}>|</Text>
+                  <Text
+                    style={ms.legalLink}
+                    onPress={() => Linking.openURL("https://mallardworks.io/terms-%26-conditions")}
+                  >
+                    Terms of Use (EULA)
+                  </Text>
+                </View>
               </>
             )}
           </View>
@@ -464,6 +480,10 @@ const ms = StyleSheet.create({
     marginTop: 10, paddingVertical: 10, alignItems: "center",
   },
   restoreBtnText: { color: COLORS.mutedDark, fontWeight: "700", fontSize: 13 },
+
+  legalRow: { flexDirection: "row", justifyContent: "center", alignItems: "center", marginTop: 8, gap: 8 },
+  legalLink: { color: COLORS.mutedDark, fontWeight: "700", fontSize: 12, textDecorationLine: "underline" },
+  legalSep: { color: COLORS.mutedDarker, fontSize: 12 },
 
   // Hunting License
   licenseThumb: {
