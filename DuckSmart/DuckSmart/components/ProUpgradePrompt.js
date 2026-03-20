@@ -6,9 +6,12 @@
 //   - Compact: single inline row for tight spaces (e.g. inside a list)
 
 import React from "react";
-import { View, Text, Pressable, StyleSheet } from "react-native";
+import { View, Text, Pressable, StyleSheet, Linking } from "react-native";
 import { COLORS } from "../constants/theme";
 import { usePremium } from "../context/PremiumContext";
+
+const PRIVACY_URL = "https://mallardworks.io/privacy-policy";
+const TERMS_URL = "https://mallardworks.io/terms-%26-conditions";
 
 export default function ProUpgradePrompt({ message, compact }) {
   const { purchase, monthlyPackage, annualPackage, getMonthlyPrice, getAnnualPrice } = usePremium();
@@ -26,18 +29,27 @@ export default function ProUpgradePrompt({ message, compact }) {
   return (
     <View style={styles.wrap}>
       <Text style={styles.lockIconLarge}>🔒</Text>
+      <Text style={styles.title}>DuckSmart Pro</Text>
       <Text style={styles.message}>{message || "This feature requires DuckSmart Pro"}</Text>
       <Pressable style={styles.upgradeBtn} onPress={() => purchase(annualPackage)}>
         <Text style={styles.upgradeBtnText}>
-          {`${getAnnualPrice()}/yr`}
+          {`${getAnnualPrice()} / year`}
         </Text>
         <Text style={styles.upgradeBtnSub}>Best value — save 33%</Text>
       </Pressable>
       <Pressable style={[styles.upgradeBtn, styles.upgradeBtnSecondary]} onPress={() => purchase(monthlyPackage)}>
         <Text style={styles.upgradeBtnTextSecondary}>
-          {`${getMonthlyPrice()}/mo`}
+          {`${getMonthlyPrice()} / month`}
         </Text>
       </Pressable>
+      <Text style={styles.legalNote}>
+        Payment is charged to your iTunes account at confirmation. Subscriptions auto-renew unless cancelled at least 24 hours before the end of the current period.
+      </Text>
+      <View style={styles.legalRow}>
+        <Text style={styles.legalLink} onPress={() => Linking.openURL(PRIVACY_URL)}>Privacy Policy</Text>
+        <Text style={styles.legalSep}>|</Text>
+        <Text style={styles.legalLink} onPress={() => Linking.openURL(TERMS_URL)}>Terms of Use</Text>
+      </View>
     </View>
   );
 }
@@ -55,7 +67,13 @@ const styles = StyleSheet.create({
   },
   lockIconLarge: {
     fontSize: 28,
-    marginBottom: 8,
+    marginBottom: 4,
+  },
+  title: {
+    color: COLORS.green,
+    fontSize: 18,
+    fontWeight: "900",
+    marginBottom: 6,
   },
   message: {
     color: COLORS.muted,
@@ -94,6 +112,32 @@ const styles = StyleSheet.create({
     color: COLORS.white,
     fontWeight: "900",
     fontSize: 14,
+  },
+
+  legalNote: {
+    color: COLORS.mutedDarker,
+    fontSize: 10,
+    fontWeight: "600",
+    textAlign: "center",
+    marginTop: 12,
+    lineHeight: 14,
+  },
+  legalRow: {
+    flexDirection: "row",
+    justifyContent: "center",
+    alignItems: "center",
+    marginTop: 6,
+    gap: 8,
+  },
+  legalLink: {
+    color: COLORS.mutedDark,
+    fontSize: 11,
+    fontWeight: "700",
+    textDecorationLine: "underline",
+  },
+  legalSep: {
+    color: COLORS.mutedDarker,
+    fontSize: 11,
   },
 
   // --- Compact inline prompt ---

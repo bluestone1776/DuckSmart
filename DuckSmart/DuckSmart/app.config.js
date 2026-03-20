@@ -31,8 +31,10 @@ module.exports = {
         ITSAppUsesNonExemptEncryption: false,
         NSLocationWhenInUseUsageDescription:
           "DuckSmart uses your location to provide accurate local weather forecasts and to mark your hunting spots on the map. For example, we'll show you wind speed and temperature at your current location to help plan your hunt.",
+        NSCameraUsageDescription:
+          "DuckSmart uses the camera to let you photograph your hunting license for quick offline reference and to snap photos of ducks for AI-powered species identification. For example, you can take a picture of a duck in the field and DuckSmart will identify the species for you.",
         NSPhotoLibraryUsageDescription:
-          "DuckSmart uses your photo library to attach photos to your hunt logs and to analyze duck species using AI identification. For example, you can add photos of your harvest to a log entry or upload a photo for AI duck identification.",
+          "DuckSmart accesses your photo library so you can select an existing photo of your hunting license to store for offline reference, or choose a duck photo for AI-powered species identification.",
       },
     },
     android: {
