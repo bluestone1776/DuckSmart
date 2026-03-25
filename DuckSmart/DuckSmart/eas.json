@@ -27,6 +27,11 @@
       "android": {
         "buildType": "app-bundle"
       }
+    },
+    "apk": {
+      "android": {
+        "buildType": "apk"
+      }
     }
   },
   "submit": {
@@ -34,6 +39,10 @@
       "ios": {
         "appleId": "james.stone87@yahoo.com",
         "appleTeamId": "M9DRF5JQJX"
+      },
+      "android": {
+        "track": "production",
+        "releaseStatus": "draft"
       }
     }
   }

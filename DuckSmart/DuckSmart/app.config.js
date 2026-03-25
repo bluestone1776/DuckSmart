@@ -18,8 +18,8 @@ module.exports = {
     newArchEnabled: true,
     splash: {
       image: "./assets/splash-icon.png",
-      resizeMode: "cover",
-      backgroundColor: "#1a1a2e",
+      resizeMode: "contain",
+      backgroundColor: "#000000",
     },
     ios: {
       supportsTablet: false,
@@ -82,6 +82,7 @@ module.exports = {
       },
     },
     plugins: [
+      "expo-splash-screen",
       "expo-font",
       [
         "expo-notifications",

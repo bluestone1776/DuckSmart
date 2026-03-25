@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useCallback, useRef } from "react";
-import { View, Text, Pressable, ActivityIndicator } from "react-native";
+import { View, Text, Pressable, ActivityIndicator, Image } from "react-native";
+import * as SplashScreen from "expo-splash-screen";
 import { GestureHandlerRootView } from "react-native-gesture-handler";
 import { SafeAreaProvider, useSafeAreaInsets } from "react-native-safe-area-context";
 import { NavigationContainer } from "@react-navigation/native";
@@ -27,6 +28,10 @@ import HistoryScreen from "./screens/HistoryScreen";
 import IdentifyStackScreen from "./screens/IdentifyScreen";
 import AuthScreen from "./screens/AuthScreen";
 import SettingsModal from "./components/SettingsModal";
+import { ASSETS } from "./constants/assets";
+
+// Keep native splash visible until we're ready
+SplashScreen.preventAutoHideAsync().catch(() => {});
 
 // --- Error Boundary — catches render crashes and shows recovery UI ---
 
@@ -253,8 +258,9 @@ function MainApp() {
             backgroundColor: COLORS.bg,
             borderTopColor: COLORS.border,
             borderTopWidth: 1,
+            height: 80 + insets.bottom,
             paddingTop: 8,
-            paddingBottom: Math.max(insets.bottom, 8),
+            paddingBottom: Math.max(insets.bottom, 24),
           },
           tabBarActiveTintColor: accentColor,
           tabBarInactiveTintColor: COLORS.muted,
@@ -285,10 +291,28 @@ function MainApp() {
 function AuthGate() {
   const { user, loading } = useAuth();
 
+  useEffect(() => {
+    if (!loading) {
+      SplashScreen.hideAsync().catch(() => {});
+    }
+  }, [loading]);
+
   if (loading) {
     return (
       <View style={{ flex: 1, backgroundColor: COLORS.black, alignItems: "center", justifyContent: "center" }}>
-        <ActivityIndicator size="large" color={COLORS.green} />
+        <Image
+          source={ASSETS.logo}
+          style={{ width: 120, height: 120, marginBottom: 24 }}
+          resizeMode="contain"
+        />
+        <Text style={{ color: COLORS.white, fontSize: 28, fontWeight: "900", letterSpacing: 0.5 }}>
+          <Text style={{ color: COLORS.green }}>Duck</Text>
+          <Text>Smart</Text>
+        </Text>
+        <Text style={{ color: COLORS.muted, fontSize: 13, fontWeight: "700", marginTop: 6 }}>
+          Hunt Smarter.
+        </Text>
+        <ActivityIndicator size="small" color={COLORS.green} style={{ marginTop: 28 }} />
       </View>
     );
   }
