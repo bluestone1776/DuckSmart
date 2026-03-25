@@ -237,6 +237,12 @@ export default function HuntLogDetailPage() {
               </p>
             )}
           </div>
+          {log.pinTitle && (
+            <div className="mt-4">
+              <p className="text-[#6D6D6D] font-bold text-xs uppercase mb-1">Spot</p>
+              <p className="text-[#D9A84C] font-black text-sm">📍 {log.pinTitle}</p>
+            </div>
+          )}
         </div>
       </Card>
 

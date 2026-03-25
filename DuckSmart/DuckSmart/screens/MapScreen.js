@@ -34,8 +34,10 @@ const FREE_PIN_LIMIT = 5; // Free users: max 5 pins, Pro: unlimited
 // ---------------------------------------------------------------------------
 // Regrid property lines — tile URL + local cache dir
 // ---------------------------------------------------------------------------
+// Custom styled layer — yellow lines (#FFD700), 1.5px width, 0.95 opacity
+const REGRID_LAYER_ID = "fe9fc754a5e5860aac7961ce18c7beffa8c1b0b0";
 const REGRID_TILE_URL = REGRID_TOKEN
-  ? `https://tiles.regrid.com/api/v1/parcels/{z}/{x}/{y}.png?token=${REGRID_TOKEN}`
+  ? `https://tiles.regrid.com/api/v1/sources/parcel/layers/${REGRID_LAYER_ID}/{z}/{x}/{y}.png?token=${REGRID_TOKEN}`
   : null;
 
 const PARCEL_CACHE_DIR = `${FileSystem.cacheDirectory}regrid_tiles/`;
@@ -345,7 +347,7 @@ export default function MapScreen({ pins, setPins }) {
             <UrlTile
               urlTemplate={REGRID_TILE_URL}
               zIndex={2}
-              opacity={0.65}
+              opacity={0.85}
               minimumZ={10}
               maximumZ={21}
               tileSize={256}

@@ -18,7 +18,7 @@ import * as Location from "expo-location";
 import * as ImagePicker from "expo-image-picker";
 
 import { sharedStyles as styles } from "../constants/styles";
-import { ENVIRONMENTS } from "../constants/theme";
+import { COLORS, ENVIRONMENTS, PIN_TYPES } from "../constants/theme";
 import { ASSETS } from "../constants/assets";
 import { SPREADS } from "../data/decoySpreadData";
 import { clamp } from "../utils/helpers";
@@ -33,7 +33,7 @@ import { useAuth } from "../context/AuthContext";
 import { showInterstitialAd } from "../services/ads";
 import { logHuntLogged } from "../services/analytics";
 
-export default function LogScreen({ addLog, onLogout }) {
+export default function LogScreen({ addLog, pins = [], onLogout }) {
   const { weather: liveWeather } = useWeather();
   const { isPro } = usePremium();
   const { user } = useAuth();
@@ -44,6 +44,7 @@ export default function LogScreen({ addLog, onLogout }) {
   const [ducksHarvested, setDucksHarvested] = useState(0);
   const [notes, setNotes] = useState("");
   const [photos, setPhotos] = useState([]);
+  const [selectedPinId, setSelectedPinId] = useState(null);
 
   const [locPerm, setLocPerm] = useState("unknown");
   const [location, setLocation] = useState(null);
@@ -92,6 +93,7 @@ export default function LogScreen({ addLog, onLogout }) {
     setDucksHarvested(0);
     setNotes("");
     setPhotos([]);
+    setSelectedPinId(null);
   }
 
   async function validateAndSave() {
@@ -105,6 +107,7 @@ export default function LogScreen({ addLog, onLogout }) {
     const safeNotes = (notes || "").trim().slice(0, 5000);
 
     const selectedSpread = SPREADS.find((sp) => sp.key === spread);
+    const linkedPin = selectedPinId ? pins.find((p) => p.id === selectedPinId) : null;
     const entry = {
       id: `hunt-${Date.now()}`,
       createdAt: Date.now(),
@@ -126,6 +129,8 @@ export default function LogScreen({ addLog, onLogout }) {
       notes: safeNotes,
       location,
       photos: photos.slice(0, 12),
+      pinId: linkedPin?.id || null,
+      pinTitle: linkedPin?.title || null,
     };
     addLog(entry);
     logHuntLogged(user?.uid, {
@@ -174,6 +179,63 @@ export default function LogScreen({ addLog, onLogout }) {
               </View>
             )}
           </Card>
+
+          {pins.length > 0 && (
+            <Card title="Spot">
+              <ScrollView horizontal showsHorizontalScrollIndicator={false}>
+                <View style={styles.chipRow}>
+                  <Pressable
+                    onPress={() => setSelectedPinId(null)}
+                    style={{
+                      paddingVertical: 8,
+                      paddingHorizontal: 14,
+                      borderRadius: 10,
+                      borderWidth: 1,
+                      borderColor: !selectedPinId ? COLORS.green : COLORS.border,
+                      backgroundColor: !selectedPinId ? COLORS.greenBg : COLORS.bgDeep,
+                    }}
+                  >
+                    <Text style={{ color: !selectedPinId ? COLORS.green : COLORS.muted, fontWeight: "800", fontSize: 13 }}>
+                      None
+                    </Text>
+                  </Pressable>
+                  {pins.map((pin) => {
+                    const selected = selectedPinId === pin.id;
+                    const pinType = PIN_TYPES.find((t) => t.key === pin.type);
+                    const dotColor = pinType?.color || COLORS.green;
+                    return (
+                      <Pressable
+                        key={pin.id}
+                        onPress={() => setSelectedPinId(selected ? null : pin.id)}
+                        style={{
+                          flexDirection: "row",
+                          alignItems: "center",
+                          gap: 6,
+                          paddingVertical: 8,
+                          paddingHorizontal: 14,
+                          borderRadius: 10,
+                          borderWidth: 1,
+                          borderColor: selected ? COLORS.green : COLORS.border,
+                          backgroundColor: selected ? COLORS.greenBg : COLORS.bgDeep,
+                        }}
+                      >
+                        <View style={{ width: 8, height: 8, borderRadius: 4, backgroundColor: dotColor }} />
+                        <Text
+                          style={{ color: selected ? COLORS.green : COLORS.white, fontWeight: "800", fontSize: 13 }}
+                          numberOfLines={1}
+                        >
+                          {pin.title}
+                        </Text>
+                      </Pressable>
+                    );
+                  })}
+                </View>
+              </ScrollView>
+              <Text style={{ color: COLORS.mutedDarker, fontSize: 11, fontWeight: "700", marginTop: 6 }}>
+                Link this hunt to one of your map pins (optional)
+              </Text>
+            </Card>
+          )}
 
           <Card title="Environment">
             <ScrollView horizontal showsHorizontalScrollIndicator={false}>

@@ -274,7 +274,7 @@ function MainApp() {
       >
         <Tab.Screen name="Today">{() => <TodayScreen onLogout={openSettings} />}</Tab.Screen>
         <Tab.Screen name="Map">{() => <MapScreen pins={pins} setPins={setPins} />}</Tab.Screen>
-        <Tab.Screen name="Log">{() => <LogScreen addLog={addLog} onLogout={openSettings} />}</Tab.Screen>
+        <Tab.Screen name="Log">{() => <LogScreen addLog={addLog} pins={pins} onLogout={openSettings} />}</Tab.Screen>
         <Tab.Screen name="History">{() => <HistoryScreen logs={logs} deleteLog={deleteLog} onLogout={openSettings} />}</Tab.Screen>
         <Tab.Screen name="Identify" component={IdentifyStackScreen} />
       </Tab.Navigator>

@@ -55,6 +55,8 @@ export interface HuntLog {
     width: number;
     height: number;
   }[];
+  pinId?: string | null;
+  pinTitle?: string | null;
   updatedAt?: number;
 }
 

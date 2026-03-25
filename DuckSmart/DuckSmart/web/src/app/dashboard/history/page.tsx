@@ -45,7 +45,8 @@ export default function HistoryPage() {
         (l) =>
           (l.notes || "").toLowerCase().includes(q) ||
           (l.environment || "").toLowerCase().includes(q) ||
-          (SPREAD_NAMES[l.spread] || l.spreadDetails?.name || "").toLowerCase().includes(q)
+          (SPREAD_NAMES[l.spread] || l.spreadDetails?.name || "").toLowerCase().includes(q) ||
+          (l.pinTitle || "").toLowerCase().includes(q)
       );
     }
 
@@ -237,7 +238,10 @@ function HuntLogCard({ log }: { log: HuntLog }) {
           )}
         </div>
 
-        <p className="text-[#8E8E8E] font-bold text-xs mb-3">{spreadName}</p>
+        <p className="text-[#8E8E8E] font-bold text-xs mb-1">{spreadName}</p>
+        {log.pinTitle && (
+          <p className="text-[#D9A84C] font-bold text-xs mb-2">📍 {log.pinTitle}</p>
+        )}
 
         <div className="flex items-center justify-between">
           <div className="flex items-center gap-4">

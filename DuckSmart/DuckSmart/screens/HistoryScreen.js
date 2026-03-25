@@ -175,7 +175,7 @@ export default function HistoryScreen({ logs, deleteLog, onLogout }) {
     return logs
       .filter((l) => {
         if (!q) return true;
-        const hay = [l.environment, l.spread, l.notes, new Date(l.dateTime).toLocaleString()].join(" | ").toLowerCase();
+        const hay = [l.environment, l.spread, l.notes, l.pinTitle, new Date(l.dateTime).toLocaleString()].join(" | ").toLowerCase();
         return hay.includes(q);
       })
       .sort((a, b) => b.createdAt - a.createdAt);
@@ -190,6 +190,7 @@ export default function HistoryScreen({ logs, deleteLog, onLogout }) {
       `Spread: ${log.spread}`,
       `Hunt Score: ${log.huntScore}/100`,
       ducks,
+      log.pinTitle ? `Spot: ${log.pinTitle}` : "",
       log.notes ? `\nNotes: ${log.notes}` : "",
       `\nLogged with DuckSmart`,
     ].filter(Boolean).join("\n");
@@ -260,7 +261,7 @@ export default function HistoryScreen({ logs, deleteLog, onLogout }) {
                     <View style={{ flex: 1 }}>
                       <Text style={styles.historyTitle}>{new Date(l.dateTime).toLocaleString()}</Text>
                       <Text style={styles.historySub}>
-                        {l.environment} • {l.spread} • Score {l.huntScore}{l.ducksHarvested != null ? ` • ${l.ducksHarvested} ducks` : ""}
+                        {l.environment} • {l.spread} • Score {l.huntScore}{l.ducksHarvested != null ? ` • ${l.ducksHarvested} ducks` : ""}{l.pinTitle ? ` • 📍 ${l.pinTitle}` : ""}
                       </Text>
                       {ASSETS.spreads[l.spread] ? (
                         <Image source={ASSETS.spreads[l.spread]} style={styles.spreadThumbSmall} resizeMode="cover" />
@@ -290,6 +291,11 @@ export default function HistoryScreen({ logs, deleteLog, onLogout }) {
               {selected.ducksHarvested != null ? (
                 <Text style={styles.detailLine}>
                   <Text style={styles.detailLabel}>Ducks Harvested:</Text> {selected.ducksHarvested}
+                </Text>
+              ) : null}
+              {selected.pinTitle ? (
+                <Text style={styles.detailLine}>
+                  <Text style={styles.detailLabel}>Spot:</Text> {selected.pinTitle}
                 </Text>
               ) : null}
 

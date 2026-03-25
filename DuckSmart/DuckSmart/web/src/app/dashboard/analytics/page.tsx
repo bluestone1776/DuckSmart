@@ -22,7 +22,7 @@ import {
   ResponsiveContainer,
   Legend,
 } from "recharts";
-import { Hash, Target, TrendingUp, Calendar } from "lucide-react";
+import { Hash, Target, TrendingUp, Calendar, MapPin } from "lucide-react";
 import { format } from "date-fns";
 
 const ENV_COLORS: Record<string, string> = {
@@ -143,6 +143,28 @@ export default function AnalyticsPage() {
       .map(([name, count]) => ({ name, count }))
       .sort((a, b) => b.count - a.count)
       .slice(0, 8);
+  }, [logs]);
+
+  // Chart 6: Harvest by Spot (linked pins)
+  const harvestBySpot = useMemo(() => {
+    const map = new Map<string, { hunts: number; ducks: number; avgScore: number; scores: number[] }>();
+    logs.forEach((l) => {
+      if (!l.pinTitle) return;
+      const existing = map.get(l.pinTitle) || { hunts: 0, ducks: 0, avgScore: 0, scores: [] };
+      existing.hunts += 1;
+      existing.ducks += l.ducksHarvested || 0;
+      existing.scores.push(l.huntScore || 0);
+      map.set(l.pinTitle, existing);
+    });
+    return Array.from(map.entries())
+      .map(([name, data]) => ({
+        name,
+        hunts: data.hunts,
+        ducks: data.ducks,
+        avgScore: Math.round(data.scores.reduce((s, v) => s + v, 0) / data.scores.length),
+      }))
+      .sort((a, b) => b.ducks - a.ducks)
+      .slice(0, 10);
   }, [logs]);
 
   if (loading) {
@@ -351,6 +373,38 @@ export default function AnalyticsPage() {
             </ResponsiveContainer>
           </div>
         </Card>
+
+        {/* Chart 6: Harvest by Spot */}
+        {harvestBySpot.length > 0 && (
+          <Card title="Harvest by Spot" className="lg:col-span-2">
+            <div className="h-72">
+              <ResponsiveContainer width="100%" height="100%">
+                <BarChart data={harvestBySpot} layout="vertical">
+                  <CartesianGrid stroke="#2C2C2C" strokeDasharray="3 3" />
+                  <XAxis
+                    type="number"
+                    tick={{ fill: "#8E8E8E", fontSize: 11 }}
+                    axisLine={{ stroke: "#3A3A3A" }}
+                    tickLine={{ stroke: "#3A3A3A" }}
+                    allowDecimals={false}
+                  />
+                  <YAxis
+                    type="category"
+                    dataKey="name"
+                    tick={{ fill: "#8E8E8E", fontSize: 11 }}
+                    axisLine={{ stroke: "#3A3A3A" }}
+                    tickLine={{ stroke: "#3A3A3A" }}
+                    width={140}
+                  />
+                  <Tooltip content={<CustomTooltip />} />
+                  <Legend />
+                  <Bar dataKey="ducks" name="Ducks Harvested" fill="#2ECC71" radius={[0, 4, 4, 0]} />
+                  <Bar dataKey="hunts" name="Hunts" fill="#D9A84C" radius={[0, 4, 4, 0]} />
+                </BarChart>
+              </ResponsiveContainer>
+            </div>
+          </Card>
+        )}
       </div>
     </div>
   );
