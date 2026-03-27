@@ -45,6 +45,7 @@ export interface HuntLog {
   } | null;
   huntScore: number; // 0-100
   ducksHarvested: number;
+  hunters?: number;
   notes: string;
   location: {
     latitude: number;

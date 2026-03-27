@@ -17,7 +17,7 @@ import { SafeAreaView } from "react-native-safe-area-context";
 import Svg, { Path, Circle, Line, Polygon, Text as SvgText } from "react-native-svg";
 import MapView, { UrlTile } from "react-native-maps";
 import { COLORS } from "../constants/theme";
-import { getRadarTileUrl, formatRadarAge } from "../services/radar";
+import { fetchRadarFrames, formatRadarAge } from "../services/radar";
 import { ASSETS } from "../constants/assets";
 import { clamp, formatWind } from "../utils/helpers";
 import { scoreHunt, scoreHuntToday } from "../utils/scoring";
@@ -437,18 +437,42 @@ export default function TodayScreen({ onLogout }) {
   // ---------------------------------------------------------------------------
   const [radarTileUrl, setRadarTileUrl] = useState(null);
   const [radarTimestamp, setRadarTimestamp] = useState(null);
+  const [radarFrames, setRadarFrames] = useState([]);
+  const [radarExpanded, setRadarExpanded] = useState(false);
+  const [radarFrameIndex, setRadarFrameIndex] = useState(0);
+  const [radarPlaying, setRadarPlaying] = useState(false);
 
   const loadRadar = useCallback(async () => {
-    const result = await getRadarTileUrl();
+    const result = await fetchRadarFrames();
     if (result) {
       setRadarTileUrl(result.tileUrl);
       setRadarTimestamp(result.timestamp);
+      setRadarFrames(result.frames || []);
     }
   }, []);
 
   useEffect(() => {
     loadRadar();
   }, [loadRadar]);
+
+  // Animate radar loop when expanded and playing
+  useEffect(() => {
+    if (!radarExpanded || !radarPlaying || radarFrames.length < 2) return;
+    const interval = setInterval(() => {
+      setRadarFrameIndex((prev) => (prev + 1) % radarFrames.length);
+    }, 700);
+    return () => clearInterval(interval);
+  }, [radarExpanded, radarPlaying, radarFrames.length]);
+
+  // Auto-play when expanded
+  useEffect(() => {
+    if (radarExpanded && radarFrames.length > 1) {
+      setRadarFrameIndex(0);
+      setRadarPlaying(true);
+    } else {
+      setRadarPlaying(false);
+    }
+  }, [radarExpanded]);
 
   const recommendation = useMemo(
     () =>
@@ -823,7 +847,7 @@ export default function TodayScreen({ onLogout }) {
           </Pressable>
         </TodayCard>
 
-        {/* Weather Radar — free: static snapshot, Pro: live + refresh */}
+        {/* Weather Radar — free: static snapshot, Pro: live + refresh + animated loop */}
         {coords && radarTileUrl && (
           <TodayCard
             title="Weather Radar"
@@ -839,32 +863,123 @@ export default function TodayScreen({ onLogout }) {
               )
             }
           >
-            <View style={s.radarWrap}>
-              <MapView
-                style={s.radarMap}
-                initialRegion={{
-                  latitude: coords.latitude,
-                  longitude: coords.longitude,
-                  latitudeDelta: 1.5,
-                  longitudeDelta: 1.5,
-                }}
-                mapType="standard"
-                pointerEvents="none"
-              >
-                <UrlTile
-                  urlTemplate={radarTileUrl}
-                  zIndex={1}
-                  opacity={0.7}
-                />
-              </MapView>
-            </View>
+            <Pressable
+              onPress={() => {
+                if (isPro && radarFrames.length > 1) {
+                  setRadarExpanded(true);
+                } else if (!isPro) {
+                  Alert.alert("Pro Feature", "Animated radar loop requires DuckSmart Pro.", [
+                    { text: "Not Now", style: "cancel" },
+                    { text: "Upgrade to Pro", onPress: () => {} },
+                  ]);
+                }
+              }}
+            >
+              <View style={s.radarWrap}>
+                <MapView
+                  style={s.radarMap}
+                  initialRegion={{
+                    latitude: coords.latitude,
+                    longitude: coords.longitude,
+                    latitudeDelta: 1.5,
+                    longitudeDelta: 1.5,
+                  }}
+                  mapType="standard"
+                  pointerEvents="none"
+                >
+                  <UrlTile
+                    urlTemplate={radarTileUrl}
+                    zIndex={1}
+                    opacity={0.7}
+                  />
+                </MapView>
+              </View>
+            </Pressable>
             <Text style={s.radarCaption}>
               {isPro
-                ? `Live radar • ${formatRadarAge(radarTimestamp)}`
+                ? `Live radar • ${formatRadarAge(radarTimestamp)} • Tap to expand`
                 : "Static radar • Upgrade to Pro for live refresh"}
             </Text>
           </TodayCard>
         )}
+
+        {/* Expanded Radar Loop Modal (Pro only) */}
+        <Modal visible={radarExpanded} transparent={false} animationType="slide" onRequestClose={() => setRadarExpanded(false)}>
+          <SafeAreaView style={{ flex: 1, backgroundColor: COLORS.black }}>
+            <View style={{ flexDirection: "row", alignItems: "center", justifyContent: "space-between", paddingHorizontal: 16, paddingVertical: 10 }}>
+              <View>
+                <Text style={{ color: COLORS.white, fontWeight: "900", fontSize: 17 }}>Weather Radar</Text>
+                {radarFrames[radarFrameIndex] && (
+                  <Text style={{ color: COLORS.mutedDark, fontWeight: "700", fontSize: 12, marginTop: 2 }}>
+                    {formatRadarAge(radarFrames[radarFrameIndex].timestamp)}
+                  </Text>
+                )}
+              </View>
+              <Pressable
+                onPress={() => setRadarExpanded(false)}
+                style={{ width: 42, height: 42, borderRadius: 12, borderWidth: 1, borderColor: COLORS.border, backgroundColor: COLORS.bg, alignItems: "center", justifyContent: "center" }}
+              >
+                <Text style={{ color: COLORS.white, fontSize: 18, fontWeight: "700" }}>✕</Text>
+              </Pressable>
+            </View>
+
+            <View style={{ flex: 1 }}>
+              {coords && radarFrames[radarFrameIndex] && (
+                <MapView
+                  style={{ flex: 1 }}
+                  initialRegion={{
+                    latitude: coords.latitude,
+                    longitude: coords.longitude,
+                    latitudeDelta: 2.5,
+                    longitudeDelta: 2.5,
+                  }}
+                  mapType="standard"
+                >
+                  <UrlTile
+                    urlTemplate={radarFrames[radarFrameIndex].tileUrl}
+                    zIndex={1}
+                    opacity={0.7}
+                  />
+                </MapView>
+              )}
+            </View>
+
+            {/* Playback controls */}
+            <View style={{ flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 16, paddingVertical: 14, paddingHorizontal: 16 }}>
+              <Pressable
+                onPress={() => {
+                  setRadarPlaying(false);
+                  setRadarFrameIndex((prev) => (prev - 1 + radarFrames.length) % radarFrames.length);
+                }}
+                style={{ width: 44, height: 44, borderRadius: 22, backgroundColor: COLORS.bgDeep, borderWidth: 1, borderColor: COLORS.border, alignItems: "center", justifyContent: "center" }}
+              >
+                <Text style={{ color: COLORS.white, fontWeight: "900", fontSize: 18 }}>◀</Text>
+              </Pressable>
+              <Pressable
+                onPress={() => setRadarPlaying((prev) => !prev)}
+                style={{ width: 56, height: 56, borderRadius: 28, backgroundColor: COLORS.greenBg, borderWidth: 1, borderColor: COLORS.green, alignItems: "center", justifyContent: "center" }}
+              >
+                <Text style={{ color: COLORS.green, fontWeight: "900", fontSize: 22 }}>{radarPlaying ? "⏸" : "▶"}</Text>
+              </Pressable>
+              <Pressable
+                onPress={() => {
+                  setRadarPlaying(false);
+                  setRadarFrameIndex((prev) => (prev + 1) % radarFrames.length);
+                }}
+                style={{ width: 44, height: 44, borderRadius: 22, backgroundColor: COLORS.bgDeep, borderWidth: 1, borderColor: COLORS.border, alignItems: "center", justifyContent: "center" }}
+              >
+                <Text style={{ color: COLORS.white, fontWeight: "900", fontSize: 18 }}>▶</Text>
+              </Pressable>
+            </View>
+
+            {/* Frame indicator */}
+            <View style={{ alignItems: "center", paddingBottom: 16 }}>
+              <Text style={{ color: COLORS.mutedDark, fontSize: 12, fontWeight: "700" }}>
+                Frame {radarFrameIndex + 1} of {radarFrames.length}
+              </Text>
+            </View>
+          </SafeAreaView>
+        </Modal>
 
         {/* Hourly quick look — free: 3 consecutive hrs, Pro: 5 consecutive hrs */}
         <TodayCard

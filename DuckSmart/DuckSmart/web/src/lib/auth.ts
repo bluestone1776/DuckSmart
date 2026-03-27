@@ -3,7 +3,9 @@ import {
   signInWithPopup,
   signOut,
   onAuthStateChanged,
+  sendEmailVerification,
   GoogleAuthProvider,
+  OAuthProvider,
   type User,
 } from "firebase/auth";
 import { auth } from "./firebase";
@@ -22,6 +24,28 @@ export async function loginWithEmail(
 export async function loginWithGoogle() {
   const provider = new GoogleAuthProvider();
   return signInWithPopup(auth, provider);
+}
+
+export async function loginWithApple() {
+  const provider = new OAuthProvider("apple.com");
+  provider.addScope("email");
+  provider.addScope("name");
+  return signInWithPopup(auth, provider);
+}
+
+// ---------------------------------------------------------------------------
+//  Email verification
+// ---------------------------------------------------------------------------
+
+export async function resendVerificationEmail() {
+  if (!auth.currentUser) return;
+  await sendEmailVerification(auth.currentUser);
+}
+
+export async function refreshCurrentUser() {
+  if (!auth.currentUser) return null;
+  await auth.currentUser.reload();
+  return auth.currentUser;
 }
 
 // ---------------------------------------------------------------------------

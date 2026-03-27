@@ -18,10 +18,15 @@ import {
 import { SafeAreaView } from "react-native-safe-area-context";
 import MapView, { Marker } from "react-native-maps";
 
+import Svg, { Path, Circle, Text as SvgText } from "react-native-svg";
+
 import { sharedStyles as styles } from "../constants/styles";
 import { COLORS } from "../constants/theme";
 import { ASSETS } from "../constants/assets";
+import { SPREADS } from "../data/decoySpreadData";
+import { clamp } from "../utils/helpers";
 import Card from "../components/Card";
+import Chip from "../components/Chip";
 import Header from "../components/Header";
 import ScreenBackground from "../components/ScreenBackground";
 
@@ -184,12 +189,16 @@ export default function HistoryScreen({ logs, deleteLog, onLogout }) {
   async function shareLog(log) {
     const date = new Date(log.dateTime).toLocaleDateString();
     const ducks = log.ducksHarvested != null ? `\nDucks Harvested: ${log.ducksHarvested}` : "";
+    const huntersLine = log.hunters > 1 ? `Hunters: ${log.hunters}` : "";
+    const avgLine = log.hunters > 1 && log.ducksHarvested > 0 ? `Avg per Hunter: ${(log.ducksHarvested / log.hunters).toFixed(1)}` : "";
     const message = [
       `DuckSmart Hunt Log — ${date}`,
       `Environment: ${log.environment}`,
       `Spread: ${log.spread}`,
       `Hunt Score: ${log.huntScore}/100`,
       ducks,
+      huntersLine,
+      avgLine,
       log.pinTitle ? `Spot: ${log.pinTitle}` : "",
       log.notes ? `\nNotes: ${log.notes}` : "",
       `\nLogged with DuckSmart`,
@@ -225,111 +234,225 @@ export default function HistoryScreen({ logs, deleteLog, onLogout }) {
 
       <KeyboardAvoidingView behavior={Platform.OS === "ios" ? "padding" : undefined} style={{ flex: 1 }}>
         <ScrollView contentContainerStyle={styles.container}>
-          <Header subtitle="Hunt History" onGearPress={onLogout} />
+          <Header subtitle={selected ? "Hunt Details" : "Hunt History"} onGearPress={onLogout} />
 
-          <Card title="Search">
-            <TextInput
-              value={query}
-              onChangeText={setQuery}
-              placeholder="Search notes, environment, spread, date..."
-              placeholderTextColor="#6D6D6D"
-              style={styles.input}
-            />
-          </Card>
+          {!selected && (
+            <>
+              <Card title="Search">
+                <TextInput
+                  value={query}
+                  onChangeText={setQuery}
+                  placeholder="Search notes, environment, spread, date..."
+                  placeholderTextColor="#6D6D6D"
+                  style={styles.input}
+                />
+              </Card>
 
-          <View style={{ marginTop: 14, padding: 14, borderRadius: 16, backgroundColor: "#0E1A12", borderWidth: 1, borderColor: "#2ECC71" }}>
-            <Text style={{ color: "#2ECC71", fontWeight: "900", fontSize: 13 }}>Upgrade to Pro</Text>
-            <Text style={{ color: "#BDBDBD", fontWeight: "800", fontSize: 13, marginTop: 6, lineHeight: 18 }}>
-              You can save up to 5 hunt logs for free. Upgrade to DuckSmart Pro for unlimited logs, cloud backup, and more.
-            </Text>
-          </View>
-
-          <Card title="Logs">
-            {filtered.length === 0 ? (
-              <View style={styles.noteBox}>
-                <Text style={styles.noteTextMuted}>No logs yet (or no matches). Create one in the Log tab.</Text>
+              <View style={{ marginTop: 14, padding: 14, borderRadius: 16, backgroundColor: "#0E1A12", borderWidth: 1, borderColor: "#2ECC71" }}>
+                <Text style={{ color: "#2ECC71", fontWeight: "900", fontSize: 13 }}>Upgrade to Pro</Text>
+                <Text style={{ color: "#BDBDBD", fontWeight: "800", fontSize: 13, marginTop: 6, lineHeight: 18 }}>
+                  You can save up to 5 hunt logs for free. Upgrade to DuckSmart Pro for unlimited logs, cloud backup, and more.
+                </Text>
               </View>
-            ) : (
-              filtered.map((l) => {
-                const isSelected = selectedId === l.id;
-                return (
-                  <Pressable
-                    key={l.id}
-                    onPress={() => setSelectedId(isSelected ? null : l.id)}
-                    style={[styles.historyRow, isSelected ? styles.historyRowSelected : null]}
-                  >
-                    <View style={{ flex: 1 }}>
-                      <Text style={styles.historyTitle}>{new Date(l.dateTime).toLocaleString()}</Text>
-                      <Text style={styles.historySub}>
-                        {l.environment} • {l.spread} • Score {l.huntScore}{l.ducksHarvested != null ? ` • ${l.ducksHarvested} ducks` : ""}{l.pinTitle ? ` • 📍 ${l.pinTitle}` : ""}
-                      </Text>
-                      {ASSETS.spreads[l.spread] ? (
-                        <Image source={ASSETS.spreads[l.spread]} style={styles.spreadThumbSmall} resizeMode="cover" />
-                      ) : null}
-                      {l.notes ? (
-                        <Text style={styles.historyNotes} numberOfLines={2}>
-                          {l.notes}
-                        </Text>
-                      ) : null}
-                    </View>
 
-                    <Pressable onPress={() => confirmDelete(l.id)} style={styles.trashBtn}>
-                      <Text style={styles.trashBtnText}>🗑</Text>
+              <Card title="Logs">
+                {filtered.length === 0 ? (
+                  <View style={styles.noteBox}>
+                    <Text style={styles.noteTextMuted}>No logs yet (or no matches). Create one in the Log tab.</Text>
+                  </View>
+                ) : (
+                  filtered.map((l) => (
+                    <Pressable
+                      key={l.id}
+                      onPress={() => setSelectedId(l.id)}
+                      style={styles.historyRow}
+                    >
+                      <View style={{ flex: 1 }}>
+                        <Text style={styles.historyTitle}>{new Date(l.dateTime).toLocaleString()}</Text>
+                        <Text style={styles.historySub}>
+                          {l.environment} • {l.spread} • Score {l.huntScore}{l.ducksHarvested != null ? ` • ${l.ducksHarvested} ducks` : ""}{l.hunters > 1 ? ` • ${l.hunters} hunters` : ""}{l.pinTitle ? ` • 📍 ${l.pinTitle}` : ""}
+                        </Text>
+                        {ASSETS.spreads[l.spread] ? (
+                          <Image source={ASSETS.spreads[l.spread]} style={styles.spreadThumbSmall} resizeMode="cover" />
+                        ) : null}
+                        {l.notes ? (
+                          <Text style={styles.historyNotes} numberOfLines={2}>
+                            {l.notes}
+                          </Text>
+                        ) : null}
+                      </View>
+
+                      <Pressable onPress={() => confirmDelete(l.id)} style={styles.trashBtn}>
+                        <Text style={styles.trashBtnText}>🗑</Text>
+                      </Pressable>
                     </Pressable>
-                  </Pressable>
-                );
-              })
-            )}
-          </Card>
+                  ))
+                )}
+              </Card>
+            </>
+          )}
 
           {selected ? (
-            <Card title="Details">
-              <Text style={styles.detailLine}>
-                <Text style={styles.detailLabel}>GPS:</Text>{" "}
-                {selected.location.latitude.toFixed(5)}, {selected.location.longitude.toFixed(5)}
-              </Text>
-              {selected.ducksHarvested != null ? (
-                <Text style={styles.detailLine}>
-                  <Text style={styles.detailLabel}>Ducks Harvested:</Text> {selected.ducksHarvested}
-                </Text>
-              ) : null}
+            <>
+              {/* Back button */}
+              <Pressable onPress={() => setSelectedId(null)} style={{ flexDirection: "row", alignItems: "center", marginTop: 8, marginBottom: 4 }}>
+                <Text style={{ color: COLORS.green, fontWeight: "900", fontSize: 14 }}>← Back to Logs</Text>
+              </Pressable>
+
+              {/* GPS Location Card */}
+              <Card title="GPS Location">
+                <View style={styles.miniMapWrap}>
+                  <MapView
+                    style={styles.miniMap}
+                    region={{
+                      latitude: selected.location.latitude,
+                      longitude: selected.location.longitude,
+                      latitudeDelta: 0.01,
+                      longitudeDelta: 0.01,
+                    }}
+                    pointerEvents="none"
+                  >
+                    <Marker coordinate={selected.location} />
+                  </MapView>
+                  <View style={styles.miniMapFooter}>
+                    <Text style={styles.miniMapText}>
+                      {selected.location.latitude.toFixed(5)}, {selected.location.longitude.toFixed(5)}
+                    </Text>
+                    <Text style={styles.miniMapMuted}>
+                      {new Date(selected.dateTime).toLocaleString()}
+                    </Text>
+                  </View>
+                </View>
+              </Card>
+
+              {/* Spot Card */}
               {selected.pinTitle ? (
-                <Text style={styles.detailLine}>
-                  <Text style={styles.detailLabel}>Spot:</Text> {selected.pinTitle}
-                </Text>
+                <Card title="Spot">
+                  <View style={{ flexDirection: "row", alignItems: "center", gap: 6 }}>
+                    <Text style={{ color: COLORS.yellow, fontWeight: "900", fontSize: 14 }}>📍 {selected.pinTitle}</Text>
+                  </View>
+                </Card>
               ) : null}
 
-              <View style={styles.detailMapWrap}>
-                <MapView
-                  style={styles.detailMap}
-                  region={{
-                    latitude: selected.location.latitude,
-                    longitude: selected.location.longitude,
-                    latitudeDelta: 0.01,
-                    longitudeDelta: 0.01,
-                  }}
-                  pointerEvents="none"
-                >
-                  <Marker coordinate={selected.location} />
-                </MapView>
-              </View>
+              {/* Environment Card */}
+              <Card title="Environment">
+                <Chip label={selected.environment} selected />
+              </Card>
 
-              <View style={styles.noteBox}>
-                <Text style={selected.notes ? styles.noteText : styles.noteTextMuted}>
-                  {selected.notes || "No notes for this hunt."}
-                </Text>
-              </View>
+              {/* Spread Card */}
+              <Card title="Spread Layout Used">
+                {(() => {
+                  const sp = SPREADS.find((s) => s.key === selected.spread);
+                  const img = ASSETS.decoys?.[selected.spread];
+                  return (
+                    <View>
+                      {img && (
+                        <Image source={img} style={styles.spreadThumb} resizeMode="cover" />
+                      )}
+                      <Text style={{ color: COLORS.white, fontWeight: "900", fontSize: 14, marginTop: img ? 10 : 0 }}>
+                        {sp?.name || selected.spreadDetails?.name || selected.spread}
+                      </Text>
+                      {sp?.type ? (
+                        <Text style={{ color: COLORS.mutedDark, fontWeight: "700", fontSize: 12, marginTop: 2 }}>{sp.type}</Text>
+                      ) : null}
+                      {selected.spreadDetails ? (
+                        <View style={{ marginTop: 10, gap: 4 }}>
+                          {selected.spreadDetails.decoyCount ? (
+                            <Text style={styles.detailLine}><Text style={styles.detailLabel}>Decoys:</Text> {selected.spreadDetails.decoyCount}</Text>
+                          ) : null}
+                          {selected.spreadDetails.calling ? (
+                            <Text style={styles.detailLine}><Text style={styles.detailLabel}>Calling:</Text> {selected.spreadDetails.calling}</Text>
+                          ) : null}
+                          {selected.spreadDetails.bestTime ? (
+                            <Text style={styles.detailLine}><Text style={styles.detailLabel}>Best Time:</Text> {selected.spreadDetails.bestTime}</Text>
+                          ) : null}
+                        </View>
+                      ) : null}
+                    </View>
+                  );
+                })()}
+              </Card>
 
-              {/* Easter egg — long journal entries */}
-              {selected.notes && selected.notes.length > 150 && (
-                <Text style={{ color: "#3A3A3A", fontSize: 11, fontWeight: "700", fontStyle: "italic", textAlign: "center", marginTop: 6, opacity: 0.5 }}>
-                  You'll read this again. Probably.
-                </Text>
-              )}
+              {/* Hunt Score Card */}
+              <Card title="Hunt Score">
+                {(() => {
+                  const size = 220;
+                  const stroke = 14;
+                  const radius = (size - stroke) / 2;
+                  const cx = size / 2;
+                  const cy = size / 2;
+                  const startX = cx - radius;
+                  const startY = cy;
+                  const endX = cx + radius;
+                  const endY = cy;
+                  const d = `M ${startX} ${startY} A ${radius} ${radius} 0 0 1 ${endX} ${endY}`;
+                  const score = selected.huntScore || 0;
+                  const p = clamp(score, 0, 100) / 100;
+                  const angle = Math.PI * (1 - p);
+                  const needleX = cx + radius * Math.cos(angle);
+                  const needleY = cy - radius * Math.sin(angle);
+                  const arcColor = score < 40 ? "#D94C4C" : score < 70 ? "#D9A84C" : "#4CD97B";
+                  return (
+                    <View style={{ alignItems: "center" }}>
+                      <Svg width={size} height={size * 0.62} viewBox={`0 0 ${size} ${size}`}>
+                        <Path d={d} stroke="#2A2A2A" strokeWidth={stroke} strokeLinecap="round" fill="none" />
+                        <Path d={d} stroke={arcColor} strokeWidth={stroke} strokeLinecap="round" fill="none" strokeDasharray={`${Math.PI * radius * p} ${Math.PI * radius}`} />
+                        <Circle cx={needleX} cy={needleY} r={9} fill="#FFFFFF" />
+                        <Circle cx={needleX} cy={needleY} r={5} fill="#0F0F0F" />
+                        <SvgText x={cx} y={cy - 10} fill="#FFFFFF" fontSize="34" fontWeight="700" textAnchor="middle">
+                          {Math.round(score)}
+                        </SvgText>
+                        <SvgText x={cx} y={cy + 18} fill="#BDBDBD" fontSize="12" textAnchor="middle">
+                          Hunt Score
+                        </SvgText>
+                      </Svg>
+                    </View>
+                  );
+                })()}
+              </Card>
 
+              {/* Ducks Harvested Card */}
+              <Card title="Ducks Harvested">
+                <View style={{ alignItems: "center" }}>
+                  <Text style={{ color: "#FFFFFF", fontSize: 44, fontWeight: "900" }}>{selected.ducksHarvested ?? 0}</Text>
+                  <Text style={{ color: "#BDBDBD", fontWeight: "900", marginTop: 6 }}>
+                    {(selected.ducksHarvested ?? 0) === 0 ? "Skunked" : (selected.ducksHarvested ?? 0) >= 6 ? "Limit!" : (selected.ducksHarvested ?? 0) >= 3 ? "Solid bag" : "A few"}
+                  </Text>
+                </View>
+              </Card>
+
+              {/* Hunters Card */}
+              <Card title="Hunters">
+                <View style={{ alignItems: "center" }}>
+                  <Text style={{ color: "#FFFFFF", fontSize: 44, fontWeight: "900" }}>{selected.hunters || 1}</Text>
+                  <Text style={{ color: "#BDBDBD", fontWeight: "900", marginTop: 6 }}>
+                    {(selected.hunters || 1) === 1 ? "Solo hunt" : `${selected.hunters} hunters`}
+                  </Text>
+                  {(selected.hunters || 1) > 1 && (selected.ducksHarvested || 0) > 0 && (
+                    <Text style={{ color: COLORS.green, fontWeight: "900", fontSize: 13, marginTop: 4 }}>
+                      {(selected.ducksHarvested / selected.hunters).toFixed(1)} ducks per hunter
+                    </Text>
+                  )}
+                </View>
+              </Card>
+
+              {/* Notes Card */}
+              <Card title="Notes">
+                <View style={styles.noteBox}>
+                  <Text style={selected.notes ? styles.noteText : styles.noteTextMuted}>
+                    {selected.notes || "No notes for this hunt."}
+                  </Text>
+                </View>
+                {selected.notes && selected.notes.length > 150 && (
+                  <Text style={{ color: "#3A3A3A", fontSize: 11, fontWeight: "700", fontStyle: "italic", textAlign: "center", marginTop: 6, opacity: 0.5 }}>
+                    You'll read this again. Probably.
+                  </Text>
+                )}
+              </Card>
+
+              {/* Photos Card */}
               {selected.photos?.length ? (
-                <>
-                  <Text style={[styles.inputLabel, { marginTop: 12 }]}>Photos</Text>
+                <Card title={`Photos (${selected.photos.length})`}>
                   <ScrollView horizontal showsHorizontalScrollIndicator={false}>
                     <View style={styles.photoRow}>
                       {selected.photos.map((p, i) => (
@@ -343,15 +466,19 @@ export default function HistoryScreen({ logs, deleteLog, onLogout }) {
                       ))}
                     </View>
                   </ScrollView>
-                </>
+                </Card>
               ) : null}
 
+              {/* Action buttons */}
               <View style={styles.sheetBtnRow}>
+                <Pressable style={styles.secondaryBtn} onPress={() => confirmDelete(selected.id)}>
+                  <Text style={styles.secondaryBtnText}>Delete</Text>
+                </Pressable>
                 <Pressable style={styles.primaryBtn} onPress={() => shareLog(selected)}>
                   <Text style={styles.primaryBtnText}>Share Hunt</Text>
                 </Pressable>
               </View>
-            </Card>
+            </>
           ) : null}
 
           <View style={{ height: 20 }} />

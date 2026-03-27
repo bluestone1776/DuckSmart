@@ -52,7 +52,7 @@ const SNAP_COLLAPSED = 0;
 const SNAP_PEEK = 1;
 const SNAP_EXPANDED = 2;
 
-export default function MapScreen({ pins, setPins }) {
+export default function MapScreen({ pins, setPins, logs = [] }) {
   const { isPro, purchase } = usePremium();
   const { user } = useAuth();
   const mapRef = useRef(null);
@@ -74,6 +74,20 @@ export default function MapScreen({ pins, setPins }) {
   const [showParcels, setShowParcels] = useState(false); // Property line overlay (Pro)
   const [selectedPinId, setSelectedPinId] = useState(null);
   const selectedPin = useMemo(() => pins.find((p) => p.id === selectedPinId) || null, [pins, selectedPinId]);
+
+  // Per-pin harvest stats computed from hunt logs
+  const pinStats = useMemo(() => {
+    if (!selectedPinId) return null;
+    const pinLogs = logs.filter((l) => l.pinId === selectedPinId);
+    if (pinLogs.length === 0) return null;
+    const totalDucks = pinLogs.reduce((s, l) => s + (l.ducksHarvested || 0), 0);
+    const totalHunters = pinLogs.reduce((s, l) => s + (l.hunters || 1), 0);
+    const scores = pinLogs.map((l) => l.huntScore || 0);
+    const avgScore = Math.round(scores.reduce((s, v) => s + v, 0) / scores.length);
+    const bestScore = Math.max(...scores);
+    const avgPerHunter = totalHunters > 0 ? +(totalDucks / totalHunters).toFixed(1) : 0;
+    return { hunts: pinLogs.length, totalDucks, totalHunters, avgScore, bestScore, avgPerHunter };
+  }, [selectedPinId, logs]);
 
   // --- Location ---
   useEffect(() => {
@@ -452,6 +466,35 @@ export default function MapScreen({ pins, setPins }) {
                   </Text>
                 </View>
 
+                {/* Harvest stats for this spot */}
+                {pinStats ? (
+                  <View style={localStyles.statsCard}>
+                    <Text style={localStyles.statsTitle}>Harvest Stats</Text>
+                    <View style={localStyles.statsGrid}>
+                      <View style={localStyles.statItem}>
+                        <Text style={localStyles.statValue}>{pinStats.hunts}</Text>
+                        <Text style={localStyles.statLabel}>Hunts</Text>
+                      </View>
+                      <View style={localStyles.statItem}>
+                        <Text style={[localStyles.statValue, { color: COLORS.green }]}>{pinStats.totalDucks}</Text>
+                        <Text style={localStyles.statLabel}>Ducks</Text>
+                      </View>
+                      <View style={localStyles.statItem}>
+                        <Text style={localStyles.statValue}>{pinStats.avgPerHunter}</Text>
+                        <Text style={localStyles.statLabel}>Per Hunter</Text>
+                      </View>
+                      <View style={localStyles.statItem}>
+                        <Text style={[localStyles.statValue, { color: "#D9A84C" }]}>{pinStats.avgScore}</Text>
+                        <Text style={localStyles.statLabel}>Avg Score</Text>
+                      </View>
+                    </View>
+                  </View>
+                ) : (
+                  <Text style={{ color: COLORS.mutedDarker, fontSize: 11, fontWeight: "700", textAlign: "center", marginTop: 8 }}>
+                    No hunts logged at this spot yet.
+                  </Text>
+                )}
+
                 {/* Easter egg — appears on "Spot" type pins */}
                 {selectedPin.type === "Spot" && (
                   <Text style={localStyles.eggHint}>At least 12 people know about this.</Text>
@@ -564,5 +607,39 @@ const localStyles = StyleSheet.create({
     textAlign: "center",
     marginTop: 6,
     opacity: 0.5,
+  },
+  statsCard: {
+    marginTop: 12,
+    padding: 14,
+    borderRadius: 14,
+    backgroundColor: COLORS.bgDeep,
+    borderWidth: 1,
+    borderColor: COLORS.borderSubtle,
+  },
+  statsTitle: {
+    color: COLORS.white,
+    fontSize: 13,
+    fontWeight: "900",
+    marginBottom: 10,
+  },
+  statsGrid: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+  },
+  statItem: {
+    alignItems: "center",
+    flex: 1,
+  },
+  statValue: {
+    color: COLORS.white,
+    fontSize: 20,
+    fontWeight: "900",
+  },
+  statLabel: {
+    color: COLORS.mutedDark,
+    fontSize: 10,
+    fontWeight: "800",
+    marginTop: 2,
+    textTransform: "uppercase",
   },
 });

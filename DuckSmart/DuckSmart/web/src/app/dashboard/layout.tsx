@@ -4,9 +4,10 @@ import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { useAuth } from "@/hooks/useAuth";
 import { useRole } from "@/hooks/useRole";
-import { logout } from "@/lib/auth";
+import { logout, resendVerificationEmail, refreshCurrentUser } from "@/lib/auth";
 import Sidebar from "@/components/layout/Sidebar";
-import { LogOut, Menu, X } from "lucide-react";
+import { LogOut, Menu, X, Mail } from "lucide-react";
+import type { User } from "firebase/auth";
 
 export default function DashboardLayout({
   children,
@@ -38,6 +39,12 @@ export default function DashboardLayout({
   }
 
   if (!user) return null;
+
+  // Email/password users must verify their email
+  const isEmailProvider = user.providerData?.some((p) => p.providerId === "password");
+  if (isEmailProvider && !user.emailVerified) {
+    return <VerifyEmailBanner user={user} onLogout={handleLogout} />;
+  }
 
   return (
     <div className="min-h-screen bg-[#0A0A0A]">
@@ -101,6 +108,98 @@ export default function DashboardLayout({
 
         {/* Page content */}
         <main className="p-6">{children}</main>
+      </div>
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+//  Email verification gate (blocks dashboard for unverified email/password users)
+// ---------------------------------------------------------------------------
+
+function VerifyEmailBanner({ user, onLogout }: { user: User; onLogout: () => void }) {
+  const [resent, setResent] = useState(false);
+  const [checking, setChecking] = useState(false);
+  const [error, setError] = useState("");
+  const router = useRouter();
+
+  async function handleResend() {
+    setError("");
+    setResent(false);
+    try {
+      await resendVerificationEmail();
+      setResent(true);
+    } catch (err: any) {
+      setError(err.code === "auth/too-many-requests"
+        ? "Verification email already sent. Please check your inbox or try again later."
+        : "Failed to send verification email. Please try again."
+      );
+    }
+  }
+
+  async function handleCheck() {
+    setChecking(true);
+    setError("");
+    try {
+      const refreshed = await refreshCurrentUser();
+      if (refreshed?.emailVerified) {
+        router.refresh();
+      } else {
+        setError("Email not verified yet. Please check your inbox and click the verification link.");
+      }
+    } catch {
+      setError("Failed to check verification status.");
+    } finally {
+      setChecking(false);
+    }
+  }
+
+  return (
+    <div className="flex min-h-screen items-center justify-center bg-[#0A0A0A] px-6">
+      <div className="max-w-md w-full text-center">
+        <div className="flex justify-center mb-6">
+          <div className="w-16 h-16 rounded-2xl bg-[#0E1A12] border border-[#2ECC71] flex items-center justify-center">
+            <Mail size={28} className="text-[#2ECC71]" />
+          </div>
+        </div>
+        <h1 className="text-white font-black text-2xl mb-2">Verify Your Email</h1>
+        <p className="text-[#8E8E8E] font-bold text-sm mb-2">We sent a verification link to:</p>
+        <p className="text-[#2ECC71] font-black text-base mb-6">{user.email}</p>
+        <p className="text-[#6D6D6D] font-bold text-sm mb-8 leading-relaxed">
+          Please check your inbox (and spam folder) and click the link to verify your email address.
+        </p>
+
+        {error && (
+          <div className="bg-[rgba(217,76,76,0.12)] border border-[#D94C4C] rounded-[14px] px-4 py-3 mb-4">
+            <p className="text-[#D94C4C] font-bold text-sm">{error}</p>
+          </div>
+        )}
+
+        {resent && (
+          <p className="text-[#2ECC71] font-bold text-sm mb-4">Verification email sent!</p>
+        )}
+
+        <button
+          onClick={handleCheck}
+          disabled={checking}
+          className="w-full py-3.5 rounded-[14px] bg-[#0E1A12] border border-[#2ECC71] text-[#2ECC71] font-black text-sm hover:brightness-125 transition-all cursor-pointer disabled:opacity-50 mb-3"
+        >
+          {checking ? "Checking..." : "I've Verified — Continue"}
+        </button>
+
+        <button
+          onClick={handleResend}
+          className="w-full py-3.5 rounded-[14px] bg-[#0E0E0E] border border-[#3A3A3A] text-white font-black text-sm hover:brightness-125 transition-all cursor-pointer mb-3"
+        >
+          Resend Verification Email
+        </button>
+
+        <button
+          onClick={onLogout}
+          className="text-[#8E8E8E] font-bold text-sm hover:text-white transition-colors cursor-pointer mt-2"
+        >
+          Sign Out
+        </button>
       </div>
     </div>
   );

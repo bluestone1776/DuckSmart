@@ -13,7 +13,7 @@ import Button from "@/components/ui/Button";
 import StatCard from "@/components/ui/StatCard";
 import Skeleton from "@/components/ui/Skeleton";
 import EmptyState from "@/components/ui/EmptyState";
-import { Target, TrendingUp, Award, Hash, Plus } from "lucide-react";
+import { Target, TrendingUp, Award, Hash, Plus, Users } from "lucide-react";
 import type { HuntLog } from "@/lib/types";
 
 type SortKey = "date-desc" | "date-asc" | "score-desc" | "score-asc" | "ducks-desc" | "ducks-asc";
@@ -26,12 +26,14 @@ export default function HistoryPage() {
 
   // Stats
   const stats = useMemo(() => {
-    if (!logs.length) return { total: 0, ducks: 0, avgScore: 0, bestScore: 0 };
+    if (!logs.length) return { total: 0, ducks: 0, avgScore: 0, bestScore: 0, avgPerHunter: 0 };
     const ducks = logs.reduce((s, l) => s + (l.ducksHarvested || 0), 0);
+    const totalHunters = logs.reduce((s, l) => s + (l.hunters || 1), 0);
     const scores = logs.map((l) => l.huntScore || 0);
     const avg = scores.reduce((s, v) => s + v, 0) / scores.length;
     const best = Math.max(...scores);
-    return { total: logs.length, ducks, avgScore: Math.round(avg), bestScore: best };
+    const avgPerHunter = totalHunters > 0 ? +(ducks / totalHunters).toFixed(1) : 0;
+    return { total: logs.length, ducks, avgScore: Math.round(avg), bestScore: best, avgPerHunter };
   }, [logs]);
 
   // Filtered + sorted logs
@@ -111,7 +113,7 @@ export default function HistoryPage() {
       </div>
 
       {/* Stats */}
-      <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
+      <div className="grid grid-cols-2 lg:grid-cols-5 gap-4">
         <StatCard
           label="Total Hunts"
           value={stats.total}
@@ -123,6 +125,12 @@ export default function HistoryPage() {
           value={stats.ducks}
           color="green"
           icon={<Target size={18} />}
+        />
+        <StatCard
+          label="Avg per Hunter"
+          value={stats.avgPerHunter}
+          color="green"
+          icon={<Users size={18} />}
         />
         <StatCard
           label="Avg Score"
@@ -257,6 +265,20 @@ function HuntLogCard({ log }: { log: HuntLog }) {
                 {log.ducksHarvested || 0}
               </p>
             </div>
+            {(log.hunters ?? 0) > 1 && (
+              <div>
+                <p className="text-[#6D6D6D] font-bold text-[10px] uppercase">Hunters</p>
+                <p className="text-white font-black text-lg">{log.hunters}</p>
+              </div>
+            )}
+            {(log.hunters ?? 0) > 1 && (log.ducksHarvested || 0) > 0 && (
+              <div>
+                <p className="text-[#6D6D6D] font-bold text-[10px] uppercase">Per Hunter</p>
+                <p className="text-[#2ECC71] font-black text-lg">
+                  {((log.ducksHarvested || 0) / log.hunters!).toFixed(1)}
+                </p>
+              </div>
+            )}
           </div>
           {log.photos && log.photos.length > 0 && (
             <p className="text-[#6D6D6D] font-bold text-xs">

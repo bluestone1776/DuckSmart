@@ -42,6 +42,7 @@ export default function LogScreen({ addLog, pins = [], onLogout }) {
   const [environment, setEnvironment] = useState("Marsh");
   const [spread, setSpread] = useState("j_hook");
   const [ducksHarvested, setDucksHarvested] = useState(0);
+  const [hunters, setHunters] = useState(1);
   const [notes, setNotes] = useState("");
   const [photos, setPhotos] = useState([]);
   const [selectedPinId, setSelectedPinId] = useState(null);
@@ -91,6 +92,7 @@ export default function LogScreen({ addLog, pins = [], onLogout }) {
     setEnvironment("Marsh");
     setSpread("j_hook");
     setDucksHarvested(0);
+    setHunters(1);
     setNotes("");
     setPhotos([]);
     setSelectedPinId(null);
@@ -104,6 +106,7 @@ export default function LogScreen({ addLog, pins = [], onLogout }) {
 
     // Input validation
     const safeHarvest = Math.max(0, Math.min(50, Math.round(ducksHarvested)));
+    const safeHunters = Math.max(1, Math.min(20, Math.round(hunters)));
     const safeNotes = (notes || "").trim().slice(0, 5000);
 
     const selectedSpread = SPREADS.find((sp) => sp.key === spread);
@@ -126,6 +129,7 @@ export default function LogScreen({ addLog, pins = [], onLogout }) {
         : null,
       huntScore,
       ducksHarvested: safeHarvest,
+      hunters: safeHunters,
       notes: safeNotes,
       location,
       photos: photos.slice(0, 12),
@@ -342,6 +346,31 @@ export default function LogScreen({ addLog, pins = [], onLogout }) {
                 <View style={[styles.sliderFill, { width: `${clamp((ducksHarvested / 12) * 100, 0, 100)}%` }]} />
               </View>
               <Pressable onPress={() => setDucksHarvested((prev) => clamp(prev + 1, 0, 50))} style={styles.stepBtn} accessibilityLabel="Increase ducks harvested" accessibilityRole="button">
+                <Text style={styles.stepBtnText}>+</Text>
+              </Pressable>
+            </View>
+          </Card>
+
+          <Card title="Hunters">
+            <View style={{ alignItems: "center" }}>
+              <Text style={{ color: "#FFFFFF", fontSize: 44, fontWeight: "900" }}>{hunters}</Text>
+              <Text style={{ color: "#BDBDBD", fontWeight: "900", marginTop: 6 }}>
+                {hunters === 1 ? "Solo hunt" : `${hunters} hunters`}
+              </Text>
+              {ducksHarvested > 0 && hunters > 0 && (
+                <Text style={{ color: COLORS.green, fontWeight: "900", fontSize: 13, marginTop: 4 }}>
+                  {(ducksHarvested / hunters).toFixed(1)} ducks per hunter
+                </Text>
+              )}
+            </View>
+            <View style={styles.sliderRow}>
+              <Pressable onPress={() => setHunters((prev) => clamp(prev - 1, 1, 20))} style={styles.stepBtn} accessibilityLabel="Decrease hunters" accessibilityRole="button">
+                <Text style={styles.stepBtnText}>–</Text>
+              </Pressable>
+              <View style={styles.sliderTrack}>
+                <View style={[styles.sliderFill, { width: `${clamp((hunters / 20) * 100, 0, 100)}%` }]} />
+              </View>
+              <Pressable onPress={() => setHunters((prev) => clamp(prev + 1, 1, 20))} style={styles.stepBtn} accessibilityLabel="Increase hunters" accessibilityRole="button">
                 <Text style={styles.stepBtnText}>+</Text>
               </Pressable>
             </View>

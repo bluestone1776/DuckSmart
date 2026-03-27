@@ -11,8 +11,18 @@ const RAINVIEWER_API = "https://api.rainviewer.com/public/weather-maps.json";
 // Cache to avoid re-fetching on every render
 let cachedTileUrl = null;
 let cachedTimestamp = null;
+let cachedFrames = null;
 let cachedAt = 0;
 const CACHE_TTL = 10 * 60 * 1000; // 10 minutes
+
+/**
+ * Build a tile URL from a RainViewer frame path.
+ * Color scheme 6 = "universal blue" (good contrast on dark map backgrounds)
+ * Smooth = 1 (anti-aliased edges), Snow = 1 (snow shown in separate color)
+ */
+function buildTileUrl(path) {
+  return `https://tilecache.rainviewer.com${path}/256/{z}/{x}/{y}/6/1_1.png`;
+}
 
 /**
  * Fetch the latest radar tile URL template from RainViewer.
@@ -25,9 +35,20 @@ const CACHE_TTL = 10 * 60 * 1000; // 10 minutes
  * @returns {Promise<{ tileUrl: string, timestamp: number } | null>}
  */
 export async function getRadarTileUrl() {
+  const result = await fetchRadarFrames();
+  if (!result) return null;
+  return { tileUrl: result.tileUrl, timestamp: result.timestamp };
+}
+
+/**
+ * Fetch all past radar frames from RainViewer for animated loop.
+ *
+ * @returns {Promise<{ tileUrl: string, timestamp: number, frames: { tileUrl: string, timestamp: number }[] } | null>}
+ */
+export async function fetchRadarFrames() {
   // Return cached result if still fresh
   if (cachedTileUrl && Date.now() - cachedAt < CACHE_TTL) {
-    return { tileUrl: cachedTileUrl, timestamp: cachedTimestamp };
+    return { tileUrl: cachedTileUrl, timestamp: cachedTimestamp, frames: cachedFrames };
   }
 
   try {
@@ -45,18 +66,21 @@ export async function getRadarTileUrl() {
     }
 
     const latestFrame = pastFrames[pastFrames.length - 1];
+    const tileUrl = buildTileUrl(latestFrame.path);
 
-    // Build the tile URL template
-    // Color scheme 6 = "universal blue" (good contrast on dark map backgrounds)
-    // Smooth = 1 (anti-aliased edges), Snow = 1 (snow shown in separate color)
-    const tileUrl = `https://tilecache.rainviewer.com${latestFrame.path}/256/{z}/{x}/{y}/6/1_1.png`;
+    // Build all frames for animation loop
+    const frames = pastFrames.map((frame) => ({
+      tileUrl: buildTileUrl(frame.path),
+      timestamp: frame.time,
+    }));
 
     // Cache the result
     cachedTileUrl = tileUrl;
     cachedTimestamp = latestFrame.time;
+    cachedFrames = frames;
     cachedAt = Date.now();
 
-    return { tileUrl, timestamp: latestFrame.time };
+    return { tileUrl, timestamp: latestFrame.time, frames };
   } catch (err) {
     console.error("DuckSmart radar fetch error:", err.message);
     return null;

@@ -30,6 +30,7 @@ export default function NewHuntLogPage() {
   const [spread, setSpread] = useState<string>(SPREAD_KEYS[0]);
   const [huntScore, setHuntScore] = useState("50");
   const [ducksHarvested, setDucksHarvested] = useState("0");
+  const [hunters, setHunters] = useState("1");
   const [notes, setNotes] = useState("");
   const [latitude, setLatitude] = useState("");
   const [longitude, setLongitude] = useState("");
@@ -71,6 +72,11 @@ export default function NewHuntLogPage() {
       setError("Ducks harvested must be 0 or more.");
       return;
     }
+    const hunterCount = parseInt(hunters);
+    if (isNaN(hunterCount) || hunterCount < 1 || hunterCount > 20) {
+      setError("Hunters must be between 1 and 20.");
+      return;
+    }
 
     setSaving(true);
     setError("");
@@ -89,6 +95,7 @@ export default function NewHuntLogPage() {
         spreadDetails: null,
         huntScore: score,
         ducksHarvested: ducks,
+        hunters: hunterCount,
         notes: notes.trim(),
         location:
           !isNaN(lat) && !isNaN(lng)
@@ -161,7 +168,7 @@ export default function NewHuntLogPage() {
 
       {/* Score & Ducks */}
       <Card title="Results">
-        <div className="grid grid-cols-2 gap-4">
+        <div className="grid grid-cols-3 gap-4">
           <div>
             <Input
               label="Hunt Score (0-100)"
@@ -186,6 +193,13 @@ export default function NewHuntLogPage() {
             value={ducksHarvested}
             onChange={(e) => setDucksHarvested(e.target.value)}
             placeholder="0"
+          />
+          <Input
+            label="Hunters"
+            type="number"
+            value={hunters}
+            onChange={(e) => setHunters(e.target.value)}
+            placeholder="1"
           />
         </div>
       </Card>

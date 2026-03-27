@@ -40,6 +40,7 @@ export default function HuntLogDetailPage() {
   const [editing, setEditing] = useState(false);
   const [editNotes, setEditNotes] = useState("");
   const [editDucks, setEditDucks] = useState("");
+  const [editHunters, setEditHunters] = useState("");
   const [saving, setSaving] = useState(false);
 
   // Delete state
@@ -58,6 +59,7 @@ export default function HuntLogDetailPage() {
       if (data) {
         setEditNotes(data.notes || "");
         setEditDucks(String(data.ducksHarvested || 0));
+        setEditHunters(String(data.hunters || 1));
       }
     } catch (err) {
       setError("Failed to load hunt log.");
@@ -74,13 +76,15 @@ export default function HuntLogDetailPage() {
     if (!user?.uid || !logId) return;
     setSaving(true);
     try {
+      const newHunters = Math.max(1, Math.min(20, parseInt(editHunters) || 1));
       await updateHuntLog(user.uid, logId, {
         notes: editNotes,
         ducksHarvested: parseInt(editDucks) || 0,
+        hunters: newHunters,
       });
       setLog((prev) =>
         prev
-          ? { ...prev, notes: editNotes, ducksHarvested: parseInt(editDucks) || 0 }
+          ? { ...prev, notes: editNotes, ducksHarvested: parseInt(editDucks) || 0, hunters: newHunters }
           : prev
       );
       setEditing(false);
@@ -179,6 +183,7 @@ export default function HuntLogDetailPage() {
                   setEditing(false);
                   setEditNotes(log.notes || "");
                   setEditDucks(String(log.ducksHarvested || 0));
+                  setEditHunters(String(log.hunters || 1));
                 }}
               >
                 <span className="flex items-center gap-2">
@@ -222,19 +227,44 @@ export default function HuntLogDetailPage() {
           </div>
         </div>
         <div className="mt-4 pt-4 border-t border-[#2C2C2C]">
-          <div>
-            <p className="text-[#6D6D6D] font-bold text-xs uppercase mb-1">Ducks Harvested</p>
-            {editing ? (
-              <Input
-                type="number"
-                value={editDucks}
-                onChange={(e) => setEditDucks(e.target.value)}
-                className="max-w-[120px]"
-              />
-            ) : (
-              <p className="text-[#2ECC71] font-black text-2xl">
-                {log.ducksHarvested || 0}
-              </p>
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-6">
+            <div>
+              <p className="text-[#6D6D6D] font-bold text-xs uppercase mb-1">Ducks Harvested</p>
+              {editing ? (
+                <Input
+                  type="number"
+                  value={editDucks}
+                  onChange={(e) => setEditDucks(e.target.value)}
+                  className="max-w-[120px]"
+                />
+              ) : (
+                <p className="text-[#2ECC71] font-black text-2xl">
+                  {log.ducksHarvested || 0}
+                </p>
+              )}
+            </div>
+            <div>
+              <p className="text-[#6D6D6D] font-bold text-xs uppercase mb-1">Hunters</p>
+              {editing ? (
+                <Input
+                  type="number"
+                  value={editHunters}
+                  onChange={(e) => setEditHunters(e.target.value)}
+                  className="max-w-[120px]"
+                />
+              ) : (
+                <p className="text-white font-black text-2xl">
+                  {log.hunters || 1}
+                </p>
+              )}
+            </div>
+            {(log.hunters ?? 0) > 1 && (log.ducksHarvested || 0) > 0 && !editing && (
+              <div>
+                <p className="text-[#6D6D6D] font-bold text-xs uppercase mb-1">Avg per Hunter</p>
+                <p className="text-[#2ECC71] font-black text-2xl">
+                  {((log.ducksHarvested || 0) / (log.hunters || 1)).toFixed(1)}
+                </p>
+              </div>
             )}
           </div>
           {log.pinTitle && (

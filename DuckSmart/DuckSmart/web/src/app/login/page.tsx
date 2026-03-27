@@ -3,7 +3,7 @@
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { useAuth } from "@/hooks/useAuth";
-import { loginWithEmail, loginWithGoogle, formatAuthError } from "@/lib/auth";
+import { loginWithEmail, loginWithGoogle, loginWithApple, formatAuthError } from "@/lib/auth";
 import Button from "@/components/ui/Button";
 import Input from "@/components/ui/Input";
 
@@ -41,6 +41,19 @@ export default function LoginPage() {
     setSubmitting(true);
     try {
       await loginWithGoogle();
+      router.push("/dashboard/history");
+    } catch (err: any) {
+      setError(formatAuthError(err?.code ?? ""));
+    } finally {
+      setSubmitting(false);
+    }
+  }
+
+  async function handleAppleLogin() {
+    setError("");
+    setSubmitting(true);
+    try {
+      await loginWithApple();
       router.push("/dashboard/history");
     } catch (err: any) {
       setError(formatAuthError(err?.code ?? ""));
@@ -138,6 +151,22 @@ export default function LoginPage() {
             />
           </svg>
           Sign in with Google
+        </Button>
+
+        {/* Apple sign-in */}
+        <Button
+          variant="secondary"
+          onClick={handleAppleLogin}
+          disabled={submitting}
+          className="w-full flex items-center justify-center gap-3 mt-3"
+        >
+          <svg width="18" height="18" viewBox="0 0 18 18" fill="none">
+            <path
+              d="M15.1 6.05c-.09.07-1.68.97-1.68 2.96 0 2.31 2.03 3.13 2.09 3.15-.01.05-.32 1.12-1.07 2.21-.65.95-1.33 1.9-2.4 1.9s-1.32-.62-2.53-.62c-1.18 0-1.6.64-2.58.64s-1.63-.88-2.4-1.96C3.36 12.58 2.5 10.33 2.5 8.21c0-3.4 2.21-5.2 4.38-5.2 1.15 0 2.12.76 2.84.76.7 0 1.78-.8 3.1-.8.5 0 2.3.05 3.28 1.08zM11.19 1.98c.48-.57.82-1.36.82-2.15 0-.11-.01-.22-.03-.31-.78.03-1.71.52-2.27 1.17-.44.5-.85 1.3-.85 2.1 0 .12.02.24.03.28.05.01.14.02.22.02.7 0 1.59-.47 2.08-1.11z"
+              fill="white"
+            />
+          </svg>
+          Sign in with Apple
         </Button>
       </div>
     </div>

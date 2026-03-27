@@ -273,7 +273,7 @@ function MainApp() {
         })}
       >
         <Tab.Screen name="Today">{() => <TodayScreen onLogout={openSettings} />}</Tab.Screen>
-        <Tab.Screen name="Map">{() => <MapScreen pins={pins} setPins={setPins} />}</Tab.Screen>
+        <Tab.Screen name="Map">{() => <MapScreen pins={pins} setPins={setPins} logs={logs} />}</Tab.Screen>
         <Tab.Screen name="Log">{() => <LogScreen addLog={addLog} pins={pins} onLogout={openSettings} />}</Tab.Screen>
         <Tab.Screen name="History">{() => <HistoryScreen logs={logs} deleteLog={deleteLog} onLogout={openSettings} />}</Tab.Screen>
         <Tab.Screen name="Identify" component={IdentifyStackScreen} />
@@ -286,7 +286,80 @@ function MainApp() {
   );
 }
 
-// --- Auth gate — shows loading / login / main app ---
+// --- Email verification screen — shown for unverified email/password users ---
+
+function VerifyEmailScreen() {
+  const { user, resendVerification, refreshUser, logout, error, clearError } = useAuth();
+  const [resent, setResent] = useState(false);
+  const [checking, setChecking] = useState(false);
+
+  async function handleResend() {
+    clearError();
+    setResent(false);
+    await resendVerification();
+    setResent(true);
+  }
+
+  async function handleCheckVerification() {
+    setChecking(true);
+    clearError();
+    await refreshUser();
+    setChecking(false);
+  }
+
+  return (
+    <View style={{ flex: 1, backgroundColor: COLORS.black, alignItems: "center", justifyContent: "center", padding: 32 }}>
+      <Image source={ASSETS.logo} style={{ width: 72, height: 72, borderRadius: 18, marginBottom: 20 }} resizeMode="contain" />
+      <Text style={{ color: COLORS.white, fontSize: 22, fontWeight: "900", marginBottom: 8 }}>Verify Your Email</Text>
+      <Text style={{ color: COLORS.muted, fontSize: 14, fontWeight: "700", textAlign: "center", lineHeight: 20, marginBottom: 8 }}>
+        We sent a verification link to:
+      </Text>
+      <Text style={{ color: COLORS.green, fontSize: 15, fontWeight: "900", marginBottom: 24 }}>
+        {user?.email}
+      </Text>
+      <Text style={{ color: COLORS.mutedDark, fontSize: 13, fontWeight: "700", textAlign: "center", lineHeight: 20, marginBottom: 28 }}>
+        Please check your inbox (and spam folder) and tap the link to verify your email address.
+      </Text>
+
+      {error ? (
+        <View style={{ padding: 12, borderRadius: 14, backgroundColor: "rgba(217, 76, 76, 0.12)", borderWidth: 1, borderColor: COLORS.red, marginBottom: 16, width: "100%" }}>
+          <Text style={{ color: COLORS.red, fontWeight: "800", fontSize: 13, textAlign: "center" }}>{error}</Text>
+        </View>
+      ) : null}
+
+      {resent ? (
+        <Text style={{ color: COLORS.green, fontWeight: "800", fontSize: 13, marginBottom: 16 }}>
+          Verification email sent!
+        </Text>
+      ) : null}
+
+      <Pressable
+        onPress={handleCheckVerification}
+        disabled={checking}
+        style={{ width: "100%", paddingVertical: 14, borderRadius: 14, backgroundColor: COLORS.greenBg, borderWidth: 1, borderColor: COLORS.green, alignItems: "center", marginBottom: 12, opacity: checking ? 0.6 : 1 }}
+      >
+        {checking ? (
+          <ActivityIndicator color={COLORS.green} />
+        ) : (
+          <Text style={{ color: COLORS.green, fontWeight: "900", fontSize: 15 }}>I've Verified — Continue</Text>
+        )}
+      </Pressable>
+
+      <Pressable
+        onPress={handleResend}
+        style={{ width: "100%", paddingVertical: 14, borderRadius: 14, backgroundColor: COLORS.bgDeep, borderWidth: 1, borderColor: COLORS.border, alignItems: "center", marginBottom: 12 }}
+      >
+        <Text style={{ color: COLORS.white, fontWeight: "900", fontSize: 15 }}>Resend Verification Email</Text>
+      </Pressable>
+
+      <Pressable onPress={logout} style={{ marginTop: 8 }}>
+        <Text style={{ color: COLORS.mutedDark, fontWeight: "800", fontSize: 13 }}>Sign out</Text>
+      </Pressable>
+    </View>
+  );
+}
+
+// --- Auth gate — shows loading / login / verification / main app ---
 
 function AuthGate() {
   const { user, loading } = useAuth();
@@ -317,7 +390,16 @@ function AuthGate() {
     );
   }
 
-  return user ? <MainApp /> : <AuthScreen />;
+  if (!user) return <AuthScreen />;
+
+  // Email/password users must verify their email before accessing the app.
+  // OAuth users (Google, Apple) are already verified by their provider.
+  const isEmailProvider = user.providerData?.some((p) => p.providerId === "password");
+  if (isEmailProvider && !user.emailVerified) {
+    return <VerifyEmailScreen />;
+  }
+
+  return <MainApp />;
 }
 
 // --- Root component ---

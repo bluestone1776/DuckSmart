@@ -22,7 +22,7 @@ import {
   ResponsiveContainer,
   Legend,
 } from "recharts";
-import { Hash, Target, TrendingUp, Calendar, MapPin } from "lucide-react";
+import { Hash, Target, TrendingUp, Calendar, MapPin, Users } from "lucide-react";
 import { format } from "date-fns";
 
 const ENV_COLORS: Record<string, string> = {
@@ -54,10 +54,12 @@ export default function AnalyticsPage() {
 
   // Computed stats
   const stats = useMemo(() => {
-    if (!logs.length) return { total: 0, ducks: 0, avgScore: 0, thisMonth: 0 };
+    if (!logs.length) return { total: 0, ducks: 0, avgScore: 0, thisMonth: 0, avgPerHunter: 0 };
     const ducks = logs.reduce((s, l) => s + (l.ducksHarvested || 0), 0);
+    const totalHunters = logs.reduce((s, l) => s + (l.hunters || 1), 0);
     const scores = logs.map((l) => l.huntScore || 0);
     const avg = Math.round(scores.reduce((s, v) => s + v, 0) / scores.length);
+    const avgPerHunter = totalHunters > 0 ? +(ducks / totalHunters).toFixed(1) : 0;
 
     const now = new Date();
     const thisMonth = logs.filter((l) => {
@@ -65,7 +67,7 @@ export default function AnalyticsPage() {
       return d.getMonth() === now.getMonth() && d.getFullYear() === now.getFullYear();
     }).length;
 
-    return { total: logs.length, ducks, avgScore: avg, thisMonth };
+    return { total: logs.length, ducks, avgScore: avg, thisMonth, avgPerHunter };
   }, [logs]);
 
   // Chart 1: Hunts over time (by month)
@@ -147,12 +149,13 @@ export default function AnalyticsPage() {
 
   // Chart 6: Harvest by Spot (linked pins)
   const harvestBySpot = useMemo(() => {
-    const map = new Map<string, { hunts: number; ducks: number; avgScore: number; scores: number[] }>();
+    const map = new Map<string, { hunts: number; ducks: number; hunters: number; scores: number[] }>();
     logs.forEach((l) => {
       if (!l.pinTitle) return;
-      const existing = map.get(l.pinTitle) || { hunts: 0, ducks: 0, avgScore: 0, scores: [] };
+      const existing = map.get(l.pinTitle) || { hunts: 0, ducks: 0, hunters: 0, scores: [] };
       existing.hunts += 1;
       existing.ducks += l.ducksHarvested || 0;
+      existing.hunters += l.hunters || 1;
       existing.scores.push(l.huntScore || 0);
       map.set(l.pinTitle, existing);
     });
@@ -161,6 +164,7 @@ export default function AnalyticsPage() {
         name,
         hunts: data.hunts,
         ducks: data.ducks,
+        avgPerHunter: data.hunters > 0 ? +(data.ducks / data.hunters).toFixed(1) : 0,
         avgScore: Math.round(data.scores.reduce((s, v) => s + v, 0) / data.scores.length),
       }))
       .sort((a, b) => b.ducks - a.ducks)
@@ -203,7 +207,7 @@ export default function AnalyticsPage() {
       <h1 className="text-white font-black text-2xl">Analytics</h1>
 
       {/* Stats row */}
-      <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
+      <div className="grid grid-cols-2 lg:grid-cols-5 gap-4">
         <StatCard
           label="Total Hunts"
           value={stats.total}
@@ -215,6 +219,12 @@ export default function AnalyticsPage() {
           value={stats.ducks}
           color="green"
           icon={<Target size={18} />}
+        />
+        <StatCard
+          label="Avg per Hunter"
+          value={stats.avgPerHunter}
+          color="green"
+          icon={<Users size={18} />}
         />
         <StatCard
           label="Avg Score"

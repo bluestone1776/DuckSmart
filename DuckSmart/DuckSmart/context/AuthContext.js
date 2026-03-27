@@ -10,6 +10,7 @@ import {
   onAuthStateChanged,
   signInWithEmailAndPassword,
   createUserWithEmailAndPassword,
+  sendEmailVerification,
   signOut,
   deleteUser,
   GoogleAuthProvider,
@@ -128,12 +129,32 @@ export function AuthProvider({ children }) {
     setLoading(true);
     try {
       const result = await createUserWithEmailAndPassword(auth, email, password);
+      await sendEmailVerification(result.user);
       logSignup(result.user.uid, "email");
     } catch (err) {
       console.error("Signup error:", err, err.code, err.message);
       setError(formatAuthError(err.code));
       setLoading(false);
     }
+  }, []);
+
+  const resendVerification = useCallback(async () => {
+    if (!auth.currentUser) return;
+    try {
+      await sendEmailVerification(auth.currentUser);
+    } catch (err) {
+      if (err.code === "auth/too-many-requests") {
+        setError("Verification email already sent. Please check your inbox or try again later.");
+      } else {
+        setError(formatAuthError(err.code));
+      }
+    }
+  }, []);
+
+  const refreshUser = useCallback(async () => {
+    if (!auth.currentUser) return;
+    await auth.currentUser.reload();
+    setUser({ ...auth.currentUser });
   }, []);
 
   // --------------- Google Sign-In ---------------
@@ -297,6 +318,8 @@ export function AuthProvider({ children }) {
         clearError,
         loginWithGoogle,
         loginWithApple,
+        resendVerification,
+        refreshUser,
         isGoogleAvailable,
         isAppleAvailable,
       }}
@@ -309,7 +332,8 @@ export function AuthProvider({ children }) {
 /**
  * Hook to access auth state from any screen.
  * Returns: { user, loading, error, login, signup, logout, clearError,
- *            loginWithGoogle, loginWithApple, isGoogleAvailable, isAppleAvailable }
+ *            loginWithGoogle, loginWithApple, resendVerification, refreshUser,
+ *            isGoogleAvailable, isAppleAvailable }
  */
 export function useAuth() {
   const ctx = useContext(AuthContext);
