@@ -10,3 +10,8 @@ __tests__
 *.md
 .vscode
 web
+
+ios/build
+android/build
+
+eas-archive/

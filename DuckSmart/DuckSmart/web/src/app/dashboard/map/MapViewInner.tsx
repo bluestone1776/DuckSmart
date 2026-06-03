@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect } from "react";
+import { useEffect, useState } from "react";
 import {
   MapContainer,
   TileLayer,
@@ -103,119 +103,168 @@ export default function MapViewInner({
   onMapClick,
   onPinClick,
 }: MapViewInnerProps) {
+  const [mapStyle, setMapStyle] = useState<"street" | "satellite">("street");
+
   const filteredPins =
     pinTypeFilters.length === 0
       ? pins
       : pins.filter((p) => pinTypeFilters.includes(p.type));
 
+  const isSatellite = mapStyle === "satellite";
+
   return (
-    <MapContainer
-      center={[39.8283, -98.5795]}
-      zoom={4}
-      className="w-full h-full"
-      style={{ background: "#0E0E0E" }}
-    >
-      <TileLayer
-        attribution='&copy; <a href="https://carto.com/">CARTO</a>'
-        url="https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png"
-      />
+    <div className="relative w-full h-full">
+      <div className="absolute bottom-3 right-3 z-[1000] flex rounded-[12px] border border-[#3A3A3A] bg-[#0E0E0E] overflow-hidden shadow-lg">
+        <button
+          type="button"
+          onClick={() => setMapStyle("street")}
+          className={`px-3 py-2 text-xs font-black transition-colors cursor-pointer ${
+            !isSatellite
+              ? "bg-[#0E1A12] text-[#2ECC71]"
+              : "bg-[#0E0E0E] text-[#8E8E8E] hover:text-white"
+          }`}
+        >
+          Map
+        </button>
+        <button
+          type="button"
+          onClick={() => setMapStyle("satellite")}
+          className={`px-3 py-2 text-xs font-black transition-colors cursor-pointer border-l border-[#3A3A3A] ${
+            isSatellite
+              ? "bg-[#0E1A12] text-[#2ECC71]"
+              : "bg-[#0E0E0E] text-[#8E8E8E] hover:text-white"
+          }`}
+        >
+          Satellite
+        </button>
+      </div>
 
-      <FitBounds logs={logs} pins={pins} showLogs={showLogs} showPins={showPins} />
+      <MapContainer
+        center={[39.8283, -98.5795]}
+        zoom={4}
+        className="w-full h-full"
+        style={{ background: "#0E0E0E" }}
+      >
+        {!isSatellite ? (
+          <TileLayer
+            attribution='&copy; <a href="https://carto.com/">CARTO</a>'
+            url="https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png"
+          />
+        ) : (
+          <TileLayer
+            attribution='Tiles &copy; Esri'
+            url="https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}"
+          />
+        )}
 
-      {/* Map click handler — active only when callback is provided */}
-      {onMapClick && <MapClickHandler onMapClick={onMapClick} />}
+        <FitBounds
+          logs={logs}
+          pins={pins}
+          showLogs={showLogs}
+          showPins={showPins}
+        />
 
-      {/* Hunt log markers */}
-      {showLogs &&
-        logs.map((log) => {
-          if (!log.location?.latitude || !log.location?.longitude) return null;
-          const color = getScoreColor(log.huntScore || 0);
-          return (
-            <CircleMarker
-              key={`log-${log.id}`}
-              center={[log.location.latitude, log.location.longitude]}
-              radius={8}
-              pathOptions={{
-                color,
-                fillColor: color,
-                fillOpacity: 0.7,
-                weight: 2,
-              }}
-            >
-              <Popup>
-                <div style={{ minWidth: 160, fontSize: 12 }}>
-                  <p style={{ fontWeight: 800, fontSize: 13, marginBottom: 4 }}>
-                    {log.dateTime
-                      ? formatDate(log.dateTime)
-                      : formatDate(log.createdAt)}
-                  </p>
-                  <p><strong>Environment:</strong> {log.environment}</p>
-                  <p><strong>Score:</strong> {log.huntScore || 0}</p>
-                  <p><strong>Ducks:</strong> {log.ducksHarvested || 0}</p>
-                </div>
-              </Popup>
-            </CircleMarker>
-          );
-        })}
+        {onMapClick && <MapClickHandler onMapClick={onMapClick} />}
 
-      {/* Pin markers */}
-      {showPins &&
-        filteredPins.map((pin) => {
-          if (!pin.coordinate?.latitude || !pin.coordinate?.longitude) return null;
-          const color = getPinColor(pin.type);
-          const pinType = PIN_TYPES.find((p) => p.key === pin.type);
-          const isSelected = selectedPinId === pin.id;
-          return (
-            <CircleMarker
-              key={`pin-${pin.id}`}
-              center={[pin.coordinate.latitude, pin.coordinate.longitude]}
-              radius={isSelected ? 10 : 7}
-              pathOptions={{
-                color: isSelected ? "#FFFFFF" : color,
-                fillColor: color,
-                fillOpacity: isSelected ? 1 : 0.8,
-                weight: isSelected ? 3 : 2,
-              }}
-              eventHandlers={{
-                click: (e) => {
-                  if (onPinClick) {
-                    L.DomEvent.stopPropagation(e.originalEvent);
-                    onPinClick(pin.id);
-                  }
-                },
-              }}
-            >
-              {!onPinClick && (
+        {showLogs &&
+          logs.map((log) => {
+            if (!log.location?.latitude || !log.location?.longitude) return null;
+            const color = getScoreColor(log.huntScore || 0);
+
+            return (
+              <CircleMarker
+                key={`log-${log.id}`}
+                center={[log.location.latitude, log.location.longitude]}
+                radius={8}
+                pathOptions={{
+                  color,
+                  fillColor: color,
+                  fillOpacity: 0.7,
+                  weight: 2,
+                }}
+              >
                 <Popup>
-                  <div style={{ minWidth: 140, fontSize: 12 }}>
+                  <div style={{ minWidth: 160, fontSize: 12 }}>
                     <p style={{ fontWeight: 800, fontSize: 13, marginBottom: 4 }}>
-                      {pin.title}
+                      {log.dateTime
+                        ? formatDate(log.dateTime)
+                        : formatDate(log.createdAt)}
                     </p>
-                    <p><strong>Type:</strong> {pinType?.label || pin.type}</p>
-                    {pin.notes && (
-                      <p style={{ marginTop: 4, color: "#666" }}>{pin.notes}</p>
-                    )}
+                    <p>
+                      <strong>Environment:</strong> {log.environment}
+                    </p>
+                    <p>
+                      <strong>Score:</strong> {log.huntScore || 0}
+                    </p>
+                    <p>
+                      <strong>Ducks:</strong> {log.ducksHarvested || 0}
+                    </p>
                   </div>
                 </Popup>
-              )}
-            </CircleMarker>
-          );
-        })}
+              </CircleMarker>
+            );
+          })}
 
-      {/* Draft pin marker (while placing a new pin) */}
-      {draftPosition && (
-        <CircleMarker
-          center={draftPosition}
-          radius={10}
-          pathOptions={{
-            color: "#FFFFFF",
-            fillColor: "#2ECC71",
-            fillOpacity: 0.9,
-            weight: 3,
-            dashArray: "5 5",
-          }}
-        />
-      )}
-    </MapContainer>
+        {showPins &&
+          filteredPins.map((pin) => {
+            if (!pin.coordinate?.latitude || !pin.coordinate?.longitude) return null;
+            const color = getPinColor(pin.type);
+            const pinType = PIN_TYPES.find((p) => p.key === pin.type);
+            const isSelected = selectedPinId === pin.id;
+
+            return (
+              <CircleMarker
+                key={`pin-${pin.id}`}
+                center={[pin.coordinate.latitude, pin.coordinate.longitude]}
+                radius={isSelected ? 10 : 7}
+                pathOptions={{
+                  color: isSelected ? "#FFFFFF" : color,
+                  fillColor: color,
+                  fillOpacity: isSelected ? 1 : 0.8,
+                  weight: isSelected ? 3 : 2,
+                }}
+                eventHandlers={{
+                  click: (e) => {
+                    if (onPinClick) {
+                      L.DomEvent.stopPropagation(e.originalEvent);
+                      onPinClick(pin.id);
+                    }
+                  },
+                }}
+              >
+                {!onPinClick && (
+                  <Popup>
+                    <div style={{ minWidth: 140, fontSize: 12 }}>
+                      <p style={{ fontWeight: 800, fontSize: 13, marginBottom: 4 }}>
+                        {pin.title}
+                      </p>
+                      <p>
+                        <strong>Type:</strong> {pinType?.label || pin.type}
+                      </p>
+                      {pin.notes && (
+                        <p style={{ marginTop: 4, color: "#666" }}>{pin.notes}</p>
+                      )}
+                    </div>
+                  </Popup>
+                )}
+              </CircleMarker>
+            );
+          })}
+
+        {draftPosition && (
+          <CircleMarker
+            center={draftPosition}
+            radius={10}
+            pathOptions={{
+              color: "#FFFFFF",
+              fillColor: "#2ECC71",
+              fillOpacity: 0.9,
+              weight: 3,
+              dashArray: "5 5",
+            }}
+          />
+        )}
+      </MapContainer>
+    </div>
   );
 }

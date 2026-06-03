@@ -47,6 +47,24 @@ export default function SettingsPage() {
     router.replace("/login");
   }
 
+  const locationLat =
+    profile?.lastKnownLocation &&
+    typeof (profile.lastKnownLocation as any).lat === "number"
+      ? (profile.lastKnownLocation as any).lat
+      : profile?.lastKnownLocation &&
+        typeof (profile.lastKnownLocation as any).latitude === "number"
+      ? (profile.lastKnownLocation as any).latitude
+      : null;
+
+  const locationLng =
+    profile?.lastKnownLocation &&
+    typeof (profile.lastKnownLocation as any).lng === "number"
+      ? (profile.lastKnownLocation as any).lng
+      : profile?.lastKnownLocation &&
+        typeof (profile.lastKnownLocation as any).longitude === "number"
+      ? (profile.lastKnownLocation as any).longitude
+      : null;
+
   if (loading) {
     return (
       <div className="space-y-6 max-w-2xl">
@@ -61,7 +79,6 @@ export default function SettingsPage() {
     <div className="space-y-6 max-w-2xl">
       <h1 className="text-white font-black text-2xl">Settings</h1>
 
-      {/* Account Card */}
       <Card title="Account">
         <div className="space-y-4">
           <div className="flex items-center gap-4">
@@ -94,7 +111,6 @@ export default function SettingsPage() {
         </div>
       </Card>
 
-      {/* Profile Details */}
       {profile && (
         <Card title="Profile Details">
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
@@ -118,15 +134,14 @@ export default function SettingsPage() {
               </p>
             </div>
 
-            {profile.lastKnownLocation && (
+            {locationLat !== null && locationLng !== null && (
               <div>
                 <p className="text-[#6D6D6D] font-bold text-xs uppercase mb-1 flex items-center gap-1">
                   <MapPin size={12} />
                   Last Known Location
                 </p>
                 <p className="text-[#BDBDBD] font-bold text-sm">
-                  {profile.lastKnownLocation.lat.toFixed(4)},{" "}
-                  {profile.lastKnownLocation.lng.toFixed(4)}
+                  {locationLat.toFixed(4)}, {locationLng.toFixed(4)}
                 </p>
               </div>
             )}
@@ -150,7 +165,6 @@ export default function SettingsPage() {
         </Card>
       )}
 
-      {/* Role */}
       <Card title="Role & Permissions">
         <div className="flex items-center gap-3">
           <Shield size={18} className="text-[#8E8E8E]" />
@@ -165,7 +179,6 @@ export default function SettingsPage() {
         </div>
       </Card>
 
-      {/* Subscription */}
       <Card title="Subscription">
         <div className="flex items-center justify-between">
           <div>
@@ -185,7 +198,6 @@ export default function SettingsPage() {
         </div>
       </Card>
 
-      {/* Actions */}
       <div className="flex items-center gap-3">
         <Button variant="secondary" onClick={handleLogout}>
           <span className="flex items-center gap-2">

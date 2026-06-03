@@ -1,9 +1,4 @@
-// DuckSmart — Dynamic Expo Config
-//
-// Loads API keys from .env so secrets stay out of version control.
-// Falls back to empty strings if .env is missing (e.g. fresh clone).
-
-require("dotenv").config();
+// /Users/gozyr/Development/ducksmart/DuckSmart/DuckSmart/app.config.js
 
 const IS_DEV = process.env.APP_VARIANT === "development";
 
@@ -11,7 +6,8 @@ module.exports = {
   expo: {
     name: IS_DEV ? "DuckSmart (Dev)" : "DuckSmart",
     slug: "ducksmart",
-    version: "1.1.0",
+    scheme: "ducksmart",
+    version: "1.2.8",
     orientation: "portrait",
     icon: "./assets/icon.png",
     userInterfaceStyle: "dark",
@@ -21,23 +17,28 @@ module.exports = {
       resizeMode: "contain",
       backgroundColor: "#000000",
     },
+
     ios: {
+      googleServicesFile:
+        process.env.GOOGLE_SERVICES_PLIST || "./firebase/GoogleService-Info.plist",
       supportsTablet: false,
       bundleIdentifier: "com.ducksmart.app",
-      buildNumber: "1",
+      buildNumber: "2",
       usesAppleSignIn: true,
-      googleServicesFile: process.env.GOOGLE_SERVICES_PLIST || "./GoogleService-Info.plist",
       infoPlist: {
         ITSAppUsesNonExemptEncryption: false,
         NSLocationWhenInUseUsageDescription:
           "DuckSmart uses your location to provide accurate local weather forecasts and to mark your hunting spots on the map. For example, we'll show you wind speed and temperature at your current location to help plan your hunt.",
-        NSCameraUsageDescription:
-          "DuckSmart uses the camera to let you photograph your hunting license for quick offline reference and to snap photos of ducks for AI-powered species identification. For example, you can take a picture of a duck in the field and DuckSmart will identify the species for you.",
         NSPhotoLibraryUsageDescription:
-          "DuckSmart accesses your photo library so you can select an existing photo of your hunting license to store for offline reference, or choose a duck photo for AI-powered species identification.",
+          "DuckSmart uses your photo library to attach photos to your hunt logs, update your profile photo, and analyze duck species using AI identification. For example, you can add photos of your harvest to a log entry or choose a profile image for in-app sharing.",
+        NSCameraUsageDescription:
+          "DuckSmart uses your camera so you can take photos for hunt logs, license storage, duck identification, and your profile photo.",
       },
     },
+
     android: {
+      googleServicesFile:
+        process.env.GOOGLE_SERVICES_JSON || "./firebase/google-services.json",
       supportsTablet: false,
       adaptiveIcon: {
         foregroundImage: "./assets/adaptive-icon.png",
@@ -45,45 +46,67 @@ module.exports = {
       },
       edgeToEdgeEnabled: false,
       package: "com.ducksmart.app",
-      versionCode: 1,
-      googleServicesFile: process.env.GOOGLE_SERVICES_JSON || "./google-services.json",
+      versionCode: 2,
       config: {
         googleMaps: {
-          apiKey: process.env.GOOGLE_MAPS_API_KEY || "",
+          apiKey:
+            process.env.GOOGLE_MAPS_ANDROID_API_KEY ||
+            "AIzaSyAwUD3DYSwQzceGAjQCuJDJ4gqOUIix0sg",
         },
       },
     },
+
     web: {
       favicon: "./assets/favicon.png",
     },
-    extra: {
-      // Secrets — loaded from .env (gitignored)
-      openWeatherMapApiKey: process.env.OWM_API_KEY || "",
-      regridToken: process.env.REGRID_TOKEN || "",
-      openaiApiKey: process.env.OPENAI_API_KEY || "",
-      ebirdApiKey: process.env.EBIRD_API_KEY || "",
 
-      // Firebase — client-side keys loaded from .env
-      // These are safe to ship in client bundles but should still
-      // live in .env so they aren't committed to public repos.
+    extra: {
+      functionsBaseUrl: "https://us-central1-ducksmart-9c80e.cloudfunctions.net",
+
       firebase: {
-        androidApiKey: process.env.FIREBASE_ANDROID_API_KEY || "",
-        iosApiKey: process.env.FIREBASE_IOS_API_KEY || "",
-        authDomain: process.env.FIREBASE_AUTH_DOMAIN || "",
-        projectId: process.env.FIREBASE_PROJECT_ID || "",
-        storageBucket: process.env.FIREBASE_STORAGE_BUCKET || "",
-        messagingSenderId: process.env.FIREBASE_MESSAGING_SENDER_ID || "",
-        androidAppId: process.env.FIREBASE_ANDROID_APP_ID || "",
-        iosAppId: process.env.FIREBASE_IOS_APP_ID || "",
-        googleWebClientId: process.env.FIREBASE_GOOGLE_WEB_CLIENT_ID || "",
+        androidApiKey:
+          process.env.FIREBASE_ANDROID_API_KEY ||
+          "AIzaSyBnwwwpGQv_-UfdxPmDWbQM1tR7Z6obH74",
+        iosApiKey:
+          process.env.FIREBASE_IOS_API_KEY ||
+          "AIzaSyAYuVXKtrMbp1D8pAy0EAFArONDrp6W-iY",
+        authDomain:
+          process.env.FIREBASE_AUTH_DOMAIN || "ducksmart-9c80e.firebaseapp.com",
+        projectId: process.env.FIREBASE_PROJECT_ID || "ducksmart-9c80e",
+        storageBucket:
+          process.env.FIREBASE_STORAGE_BUCKET ||
+          "ducksmart-9c80e.firebasestorage.app",
+        messagingSenderId:
+          process.env.FIREBASE_MESSAGING_SENDER_ID || "747578003996",
+        androidAppId:
+          process.env.FIREBASE_ANDROID_APP_ID ||
+          "1:747578003996:android:fa1b978454b9f99fca85d9",
+        iosAppId:
+          process.env.FIREBASE_IOS_APP_ID ||
+          "1:747578003996:ios:7bef85dda10811b4ca85d9",
+        googleWebClientId:
+          process.env.FIREBASE_GOOGLE_WEB_CLIENT_ID ||
+          "747578003996-1vuqq0capvfg22n607dj9l6icrpfor1f.apps.googleusercontent.com",
       },
+
       eas: {
         projectId: "1e281451-6f41-4ee8-a71e-363eff7ee6ee",
       },
     },
+
     plugins: [
-      "expo-splash-screen",
       "expo-font",
+      "@react-native-community/datetimepicker",
+      "@react-native-firebase/app",
+      [
+        "expo-build-properties",
+        {
+          ios: {
+            useFrameworks: "static",
+            forceStaticLinking: ["RNFBApp", "RNFBAnalytics"],
+          },
+        },
+      ],
       [
         "expo-notifications",
         {
@@ -94,7 +117,9 @@ module.exports = {
       [
         "@react-native-google-signin/google-signin",
         {
-          iosUrlScheme: process.env.GOOGLE_IOS_URL_SCHEME || "",
+          iosUrlScheme:
+            process.env.GOOGLE_IOS_URL_SCHEME ||
+            "com.googleusercontent.apps.747578003996-k5mnce6ejjg1vqgqq4bef8n85liu4eva",
         },
       ],
       [

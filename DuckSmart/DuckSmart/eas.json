@@ -5,21 +5,25 @@
   },
   "build": {
     "development": {
+      "environment": "development",
       "developmentClient": true,
       "distribution": "internal"
     },
     "preview": {
+      "environment": "preview",
       "distribution": "internal",
       "ios": {
         "simulator": false
       }
     },
     "simulator": {
+      "environment": "development",
       "ios": {
         "simulator": true
       }
     },
     "production": {
+      "environment": "production",
       "autoIncrement": true,
       "ios": {
         "distribution": "store"
@@ -29,6 +33,7 @@
       }
     },
     "apk": {
+      "environment": "development",
       "android": {
         "buildType": "apk"
       }

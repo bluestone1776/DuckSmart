@@ -1,6 +1,7 @@
+//services/analytics.js
 // DuckSmart — Analytics Service
 //
-// Logs user events to Firestore for analytics/insights.
+// Logs user events to Firestore for analytics/insights AND Firebase Analytics.
 // Fire-and-forget pattern — never blocks the UI or crashes the app.
 // Events are stored in a top-level "analytics" collection for easy querying.
 
@@ -8,6 +9,7 @@ import { db } from "./firebase";
 import { collection, addDoc } from "firebase/firestore";
 import { Platform } from "react-native";
 import Constants from "expo-constants";
+import analytics from "@react-native-firebase/analytics";
 
 // ---------------------------------------------------------------------------
 // Device info (gathered once at startup)
@@ -37,11 +39,72 @@ const deviceInfo = {
 const sessionId = `s-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
 
 // ---------------------------------------------------------------------------
+// Firebase Analytics safe formatting
+// ---------------------------------------------------------------------------
+
+function cleanEventName(eventName) {
+  const cleaned = String(eventName || "unknown_event")
+    .replace(/[^a-zA-Z0-9_]/g, "_")
+    .slice(0, 40);
+
+  return /^[a-zA-Z]/.test(cleaned) ? cleaned : `event_${cleaned}`;
+}
+
+function cleanParamName(key) {
+  const cleaned = String(key || "param")
+    .replace(/[^a-zA-Z0-9_]/g, "_")
+    .slice(0, 40);
+
+  return /^[a-zA-Z]/.test(cleaned) ? cleaned : `param_${cleaned}`;
+}
+
+function cleanParamValue(value) {
+  if (value === null || value === undefined) return null;
+
+  if (typeof value === "string") {
+    return value.slice(0, 100);
+  }
+
+  if (typeof value === "number") {
+    return Number.isFinite(value) ? value : null;
+  }
+
+  if (typeof value === "boolean") {
+    return value;
+  }
+
+  try {
+    return JSON.stringify(value).slice(0, 100);
+  } catch (_) {
+    return String(value).slice(0, 100);
+  }
+}
+
+function buildFirebaseAnalyticsParams(userId, metadata = {}) {
+  const params = {
+    userId: userId || "guest",
+    sessionId,
+    platform: Platform.OS,
+  };
+
+  Object.entries(metadata || {}).forEach(([key, value]) => {
+    const cleanKey = cleanParamName(key);
+    const cleanValue = cleanParamValue(value);
+
+    if (cleanValue !== null && cleanValue !== undefined) {
+      params[cleanKey] = cleanValue;
+    }
+  });
+
+  return Object.fromEntries(Object.entries(params).slice(0, 25));
+}
+
+// ---------------------------------------------------------------------------
 // Log an analytics event
 // ---------------------------------------------------------------------------
 
 /**
- * Log an analytics event to Firestore.
+ * Log an analytics event to Firestore and Firebase Analytics.
  * Safe to call from anywhere — silently no-ops on failure.
  *
  * @param {string} eventName  e.g. "hunt_logged", "login", "screen_view"
@@ -59,8 +122,20 @@ export async function logEvent(eventName, userId, metadata = {}) {
       metadata,
     });
   } catch (err) {
-    // Analytics should never block the user — swallow errors silently
-    console.warn("DuckSmart analytics:", err.message);
+    console.warn("DuckSmart Firestore analytics:", err.message);
+  }
+
+  try {
+    if (userId) {
+      await analytics().setUserId(userId);
+    }
+
+    await analytics().logEvent(
+      cleanEventName(eventName),
+      buildFirebaseAnalyticsParams(userId, metadata)
+    );
+  } catch (err) {
+    console.warn("DuckSmart Firebase Analytics:", err.message);
   }
 }
 

@@ -1,9 +1,14 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { FormEvent, useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { useAuth } from "@/hooks/useAuth";
-import { loginWithEmail, loginWithGoogle, loginWithApple, formatAuthError } from "@/lib/auth";
+import {
+  loginWithEmail,
+  loginWithGoogle,
+  loginWithApple,
+  getRawAuthErrorMessage,
+} from "@/lib/auth";
 import Button from "@/components/ui/Button";
 import Input from "@/components/ui/Input";
 
@@ -22,15 +27,17 @@ export default function LoginPage() {
     }
   }, [user, loading, router]);
 
-  async function handleEmailLogin(e: React.FormEvent) {
+  async function handleEmailLogin(e: FormEvent<HTMLFormElement>) {
     e.preventDefault();
+
     setError("");
     setSubmitting(true);
+
     try {
-      await loginWithEmail(email, password);
+      await loginWithEmail(email.trim(), password);
       router.push("/dashboard/history");
-    } catch (err: any) {
-      setError(formatAuthError(err?.code ?? ""));
+    } catch (err: unknown) {
+      setError(getRawAuthErrorMessage(err));
     } finally {
       setSubmitting(false);
     }
@@ -39,11 +46,12 @@ export default function LoginPage() {
   async function handleGoogleLogin() {
     setError("");
     setSubmitting(true);
+
     try {
       await loginWithGoogle();
       router.push("/dashboard/history");
-    } catch (err: any) {
-      setError(formatAuthError(err?.code ?? ""));
+    } catch (err: unknown) {
+      setError(getRawAuthErrorMessage(err));
     } finally {
       setSubmitting(false);
     }
@@ -52,11 +60,12 @@ export default function LoginPage() {
   async function handleAppleLogin() {
     setError("");
     setSubmitting(true);
+
     try {
       await loginWithApple();
       router.push("/dashboard/history");
-    } catch (err: any) {
-      setError(formatAuthError(err?.code ?? ""));
+    } catch (err: unknown) {
+      setError(getRawAuthErrorMessage(err));
     } finally {
       setSubmitting(false);
     }
@@ -65,33 +74,32 @@ export default function LoginPage() {
   if (loading || user) {
     return (
       <div className="flex min-h-screen items-center justify-center bg-[#0A0A0A]">
-        <div className="w-10 h-10 border-4 border-[#2ECC71] border-t-transparent rounded-full animate-spin" />
+        <div className="h-10 w-10 animate-spin rounded-full border-4 border-[#2ECC71] border-t-transparent" />
       </div>
     );
   }
 
   return (
     <div className="flex min-h-screen items-center justify-center bg-[#0A0A0A] px-4">
-      <div className="bg-[#141414] border border-[#3A3A3A] rounded-[18px] p-8 w-full max-w-md">
-        {/* Branding */}
-        <div className="text-center mb-8">
+      <div className="w-full max-w-md rounded-[18px] border border-[#3A3A3A] bg-[#141414] p-8">
+        <div className="mb-8 text-center">
           <h1 className="text-3xl font-black">
             <span className="text-white">Duck</span>
             <span className="text-[#2ECC71]">Smart</span>
           </h1>
-          <p className="text-[#7A7A7A] font-bold text-sm mt-2">
+          <p className="mt-2 text-sm font-bold text-[#7A7A7A]">
             Sign in to your hunting dashboard
           </p>
         </div>
 
-        {/* Error */}
         {error && (
-          <div className="bg-[rgba(217,76,76,0.12)] border border-[#D94C4C] rounded-[14px] px-4 py-3 mb-4">
-            <p className="text-[#D94C4C] font-bold text-sm">{error}</p>
+          <div className="mb-4 rounded-[14px] border border-[#D94C4C] bg-[rgba(217,76,76,0.12)] px-4 py-3">
+            <p className="whitespace-pre-wrap text-sm font-bold text-[#D94C4C]">
+              {error}
+            </p>
           </div>
         )}
 
-        {/* Email/password form */}
         <form onSubmit={handleEmailLogin} className="flex flex-col gap-4">
           <Input
             label="Email"
@@ -101,6 +109,7 @@ export default function LoginPage() {
             onChange={(e) => setEmail(e.target.value)}
             required
           />
+
           <Input
             label="Password"
             type="password"
@@ -109,28 +118,27 @@ export default function LoginPage() {
             onChange={(e) => setPassword(e.target.value)}
             required
           />
+
           <Button
             type="submit"
-            disabled={submitting || !email || !password}
-            className="w-full mt-2"
+            disabled={submitting || !email.trim() || !password}
+            className="mt-2 w-full"
           >
             {submitting ? "Signing in..." : "Sign In"}
           </Button>
         </form>
 
-        {/* Divider */}
-        <div className="flex items-center gap-3 my-6">
-          <div className="flex-1 h-px bg-[#3A3A3A]" />
-          <span className="text-[#6D6D6D] font-bold text-xs">OR</span>
-          <div className="flex-1 h-px bg-[#3A3A3A]" />
+        <div className="my-6 flex items-center gap-3">
+          <div className="h-px flex-1 bg-[#3A3A3A]" />
+          <span className="text-xs font-bold text-[#6D6D6D]">OR</span>
+          <div className="h-px flex-1 bg-[#3A3A3A]" />
         </div>
 
-        {/* Google sign-in */}
         <Button
           variant="secondary"
           onClick={handleGoogleLogin}
           disabled={submitting}
-          className="w-full flex items-center justify-center gap-3"
+          className="flex w-full items-center justify-center gap-3"
         >
           <svg width="18" height="18" viewBox="0 0 18 18" fill="none">
             <path
@@ -153,12 +161,11 @@ export default function LoginPage() {
           Sign in with Google
         </Button>
 
-        {/* Apple sign-in */}
         <Button
           variant="secondary"
           onClick={handleAppleLogin}
           disabled={submitting}
-          className="w-full flex items-center justify-center gap-3 mt-3"
+          className="mt-3 flex w-full items-center justify-center gap-3"
         >
           <svg width="18" height="18" viewBox="0 0 18 18" fill="none">
             <path

@@ -16,8 +16,15 @@ import {
   GoogleAuthProvider,
   OAuthProvider,
   signInWithCredential,
+  updateProfile,
 } from "firebase/auth";
-import { auth, isFirebaseConfigValid } from "../services/firebase";
+import {
+  doc,
+  getDoc,
+  serverTimestamp,
+  setDoc,
+} from "firebase/firestore";
+import { auth, db, isFirebaseConfigValid } from "../services/firebase";
 import { clearAllData } from "../services/storage";
 import { deleteAllUserData } from "../services/sync";
 import { logLogin, logSignup } from "../services/analytics";
@@ -73,6 +80,127 @@ if (isGoogleAvailable && GoogleSignin) {
 
 const AuthContext = createContext(null);
 
+function cleanString(value, maxLength = 120) {
+  if (value === undefined || value === null) return "";
+  return String(value).trim().slice(0, maxLength);
+}
+
+function cleanDuckId(value) {
+  return cleanString(value, 60)
+    .toLowerCase()
+    .replace(/[^a-z0-9._-]/g, "")
+    .replace(/^[._-]+|[._-]+$/g, "");
+}
+
+function buildFallbackName(firebaseUser, fallbackName = "") {
+  const suppliedName = cleanString(fallbackName, 80);
+  if (suppliedName) return suppliedName;
+
+  const authName = cleanString(firebaseUser?.displayName, 80);
+  if (authName) return authName;
+
+  const emailPrefix = cleanString(firebaseUser?.email?.split("@")?.[0], 80);
+  if (emailPrefix) return emailPrefix;
+
+  return "DuckSmart User";
+}
+
+function buildFallbackDuckId(firebaseUser, displayName = "") {
+  const emailBase = cleanString(firebaseUser?.email?.split("@")?.[0], 40);
+  const nameBase = cleanString(displayName, 40);
+  const base = cleanDuckId(emailBase || nameBase || "ducksmart");
+  const uidSuffix = cleanString(firebaseUser?.uid, 6).toLowerCase();
+
+  return cleanDuckId(`${base || "ducksmart"}-${uidSuffix}`);
+}
+
+function formatAppleFullName(fullName) {
+  if (!fullName) return "";
+
+  return [
+    fullName.givenName,
+    fullName.middleName,
+    fullName.familyName,
+  ]
+    .filter(Boolean)
+    .join(" ")
+    .trim();
+}
+
+async function saveUserProfile(firebaseUser, provider = "unknown", profile = {}) {
+  if (!firebaseUser?.uid || !isFirebaseConfigValid) return;
+
+  try {
+    const uid = firebaseUser.uid;
+    const publicRef = doc(db, "users_public", uid);
+    const privateRef = doc(db, "users", uid, "profile", "private");
+
+    const existingPublicSnap = await getDoc(publicRef);
+    const existingPublic = existingPublicSnap.exists() ? existingPublicSnap.data() : {};
+
+    const displayName = buildFallbackName(
+      firebaseUser,
+      profile.displayName || existingPublic.displayName
+    );
+
+    const photoURL =
+      cleanString(profile.photoURL || firebaseUser.photoURL || existingPublic.photoURL || "", 1000) ||
+      null;
+
+    const email = cleanString(firebaseUser.email || profile.email || "", 200);
+    const emailLower = email.toLowerCase();
+
+    const duckIdLower =
+      cleanDuckId(existingPublic.duckIdLower || profile.duckId || "") ||
+      buildFallbackDuckId(firebaseUser, displayName);
+
+    const publicPayload = {
+      uid,
+      displayName,
+      displayNameLower: displayName.toLowerCase(),
+      photoURL,
+      emailLower,
+      duckIdLower,
+      searchableText: [
+        displayName,
+        emailLower,
+        duckIdLower,
+      ]
+        .filter(Boolean)
+        .join(" ")
+        .toLowerCase(),
+      provider,
+      updatedAt: Date.now(),
+      updatedAtServer: serverTimestamp(),
+    };
+
+    if (!existingPublicSnap.exists()) {
+      publicPayload.createdAt = Date.now();
+      publicPayload.createdAtServer = serverTimestamp();
+    }
+
+    await setDoc(publicRef, publicPayload, { merge: true });
+
+    await setDoc(
+      privateRef,
+      {
+        uid,
+        email,
+        emailLower,
+        displayName,
+        photoURL,
+        duckIdLower,
+        provider,
+        updatedAt: Date.now(),
+        updatedAtServer: serverTimestamp(),
+      },
+      { merge: true }
+    );
+  } catch (err) {
+    console.log("DuckSmart profile save failed:", err?.message || err);
+  }
+}
+
 export function AuthProvider({ children }) {
   const [user, setUser] = useState(null);
   const [loading, setLoading] = useState(true);
@@ -90,6 +218,10 @@ export function AuthProvider({ children }) {
     const unsubscribe = onAuthStateChanged(auth, (firebaseUser) => {
       setUser(firebaseUser);
       setLoading(false);
+
+      if (firebaseUser?.uid) {
+        saveUserProfile(firebaseUser, "session");
+      }
     });
 
     // Safety timeout: if onAuthStateChanged never fires (e.g. network issue,
@@ -117,6 +249,7 @@ export function AuthProvider({ children }) {
     setLoading(true);
     try {
       const result = await signInWithEmailAndPassword(auth, email, password);
+      await saveUserProfile(result.user, "email");
       logLogin(result.user.uid, "email");
     } catch (err) {
       setError(formatAuthError(err.code));
@@ -124,11 +257,24 @@ export function AuthProvider({ children }) {
     }
   }, []);
 
-  const signup = useCallback(async (email, password) => {
+  const signup = useCallback(async (email, password, profile = {}) => {
     setError(null);
     setLoading(true);
     try {
       const result = await createUserWithEmailAndPassword(auth, email, password);
+
+      const displayName = cleanString(profile.displayName, 80);
+
+      if (displayName) {
+        await updateProfile(result.user, {
+          displayName,
+        });
+      }
+
+      await saveUserProfile(result.user, "email", {
+        displayName,
+      });
+
       await sendEmailVerification(result.user);
       logSignup(result.user.uid, "email");
     } catch (err) {
@@ -174,11 +320,35 @@ export function AuthProvider({ children }) {
       await GoogleSignin.hasPlayServices({ showPlayServicesUpdateDialog: true });
       const response = await GoogleSignin.signIn();
       const idToken = response?.data?.idToken ?? response?.idToken;
+      const googleUser = response?.data?.user || response?.user || null;
+
       if (!idToken) {
         throw new Error("No ID token returned from Google Sign-In.");
       }
+
       const credential = GoogleAuthProvider.credential(idToken);
       const result = await signInWithCredential(auth, credential);
+
+      const displayName =
+        cleanString(result.user.displayName, 80) ||
+        cleanString(googleUser?.name, 80);
+
+      const photoURL =
+        cleanString(result.user.photoURL, 1000) ||
+        cleanString(googleUser?.photo, 1000);
+
+      if (displayName || photoURL) {
+        await updateProfile(result.user, {
+          displayName: displayName || result.user.displayName || undefined,
+          photoURL: photoURL || result.user.photoURL || undefined,
+        });
+      }
+
+      await saveUserProfile(result.user, "google", {
+        displayName,
+        photoURL,
+      });
+
       logLogin(result.user.uid, "google");
     } catch (err) {
       console.error("Google sign-in error:", err?.code, err?.message, err);
@@ -234,7 +404,22 @@ export function AuthProvider({ children }) {
         idToken: identityToken,
         rawNonce: rawNonce,
       });
+
       const result = await signInWithCredential(auth, credential);
+
+      const appleDisplayName = formatAppleFullName(appleCredential.fullName);
+
+      if (appleDisplayName && !result.user.displayName) {
+        await updateProfile(result.user, {
+          displayName: appleDisplayName,
+        });
+      }
+
+      await saveUserProfile(result.user, "apple", {
+        displayName: appleDisplayName,
+        email: appleCredential.email || result.user.email || "",
+      });
+
       logLogin(result.user.uid, "apple");
     } catch (err) {
       console.error("Apple sign-in error:", err);

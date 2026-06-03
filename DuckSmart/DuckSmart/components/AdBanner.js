@@ -34,21 +34,42 @@ if (!isExpoGo) {
   }
 }
 
-// Replace with your real banner ad unit IDs
-const BANNER_AD_UNIT = {
-  ios: TestIds?.BANNER || "ca-app-pub-1495369158025732/5998809708",
-  android: TestIds?.BANNER || "ca-app-pub-1495369158025732/6294827756",
+// ---------------------------------------------------------------------------
+// Banner Ad Unit IDs
+// Dev builds use Google test IDs.
+// Production/TestFlight/Play builds use real AdMob IDs.
+// ---------------------------------------------------------------------------
+const REAL_BANNER_AD_UNIT = {
+  ios: "ca-app-pub-1495369158025732/5998809708",
+  android: "ca-app-pub-1495369158025732/6294827756",
 };
+
+const TEST_BANNER_AD_UNIT = {
+  ios: TestIds?.BANNER || "ca-app-pub-3940256099942544/2934735716",
+  android: TestIds?.BANNER || "ca-app-pub-3940256099942544/6300978111",
+};
+
+function getBannerAdUnitId() {
+  if (__DEV__) {
+    return Platform.OS === "ios" ? TEST_BANNER_AD_UNIT.ios : TEST_BANNER_AD_UNIT.android;
+  }
+
+  return Platform.OS === "ios" ? REAL_BANNER_AD_UNIT.ios : REAL_BANNER_AD_UNIT.android;
+}
 
 // ---------------------------------------------------------------------------
 // Sponsor config — update this when you land a sponsor
 // ---------------------------------------------------------------------------
-const SPONSOR_EMAIL = "sales@mallardworks.io"; // your email for sponsor inquiries
+const SPONSOR_EMAIL = "sales@mallardworks.io";
 const SPONSOR_SUBJECT = "Request for Sponsorship";
 const SPONSOR_BODY = "I'd like to learn more about sponsorship on the DuckSmart app.";
 
 // Set this to a sponsor object when you have one, or null to show the placeholder
-const ACTIVE_SPONSOR = { name: "Mallard Works", tagline: "Proud sponsor of DuckSmart", url: "https://mallardworks.io" };
+const ACTIVE_SPONSOR = {
+  name: "Mallard Works",
+  tagline: "Proud sponsor of DuckSmart",
+  url: "https://mallardworks.io",
+};
 
 /**
  * AdBanner — shows ad + sponsor section.
@@ -63,6 +84,7 @@ export default function AdBanner() {
     if (isPro || !isAdMobAvailable || !mobileAds) return;
 
     let cancelled = false;
+
     (async () => {
       try {
         await mobileAds().initialize();
@@ -71,11 +93,17 @@ export default function AdBanner() {
         console.warn("DuckSmart: AdMob banner init failed:", err.message);
       }
     })();
-    return () => { cancelled = true; };
+
+    return () => {
+      cancelled = true;
+    };
   }, [isPro]);
 
   function openSponsorEmail() {
-    const url = `mailto:${SPONSOR_EMAIL}?subject=${encodeURIComponent(SPONSOR_SUBJECT)}&body=${encodeURIComponent(SPONSOR_BODY)}`;
+    const url = `mailto:${SPONSOR_EMAIL}?subject=${encodeURIComponent(
+      SPONSOR_SUBJECT
+    )}&body=${encodeURIComponent(SPONSOR_BODY)}`;
+
     Linking.openURL(url).catch(() => {
       // If mail app isn't available, just silently fail
     });
@@ -89,18 +117,22 @@ export default function AdBanner() {
       {/* --- Sponsor CTA (always visible, all users) --- */}
       <View style={styles.sponsorSection}>
         {ACTIVE_SPONSOR ? (
-          <Pressable onPress={() => ACTIVE_SPONSOR.url && Linking.openURL(ACTIVE_SPONSOR.url).catch(() => {})}>
+          <Pressable
+            onPress={() => {
+              if (ACTIVE_SPONSOR.url) {
+                Linking.openURL(ACTIVE_SPONSOR.url).catch(() => {});
+              }
+            }}
+          >
             <Text style={styles.sponsorText}>
-              Sponsored by{" "}
-              <Text style={styles.sponsorName}>{ACTIVE_SPONSOR.name}</Text>
+              Sponsored by <Text style={styles.sponsorName}>{ACTIVE_SPONSOR.name}</Text>
               {ACTIVE_SPONSOR.tagline ? ` — ${ACTIVE_SPONSOR.tagline}` : ""}
             </Text>
           </Pressable>
         ) : (
-          <Text style={styles.sponsorText}>
-            Want your brand here?
-          </Text>
+          <Text style={styles.sponsorText}>Want your brand here?</Text>
         )}
+
         <Pressable style={styles.sponsorBtn} onPress={openSponsorEmail}>
           <Text style={styles.sponsorBtnText}>Become a Sponsor</Text>
         </Pressable>
@@ -113,16 +145,12 @@ export default function AdBanner() {
 // Ad rendering (extracted so Pro users skip it entirely)
 // ---------------------------------------------------------------------------
 function renderAd(purchase, adReady) {
-  // Production build with AdMob linked + initialized: show real banner
+  // Production build with AdMob linked + initialized: show banner
   if (isAdMobAvailable && BannerAd && adReady) {
-    const adUnitId = Platform.OS === "ios"
-      ? BANNER_AD_UNIT.ios
-      : BANNER_AD_UNIT.android;
-
     return (
       <View style={styles.bannerWrap}>
         <BannerAd
-          unitId={adUnitId}
+          unitId={getBannerAdUnitId()}
           size={BannerAdSize.ANCHORED_ADAPTIVE_BANNER}
           requestOptions={{ requestNonPersonalizedAdsOnly: true }}
           onAdFailedToLoad={(error) => {
@@ -133,7 +161,7 @@ function renderAd(purchase, adReady) {
     );
   }
 
-  // Expo Go / dev: show placeholder with upgrade CTA
+  // Expo Go / unavailable native module: show placeholder with upgrade CTA
   return (
     <Pressable style={styles.placeholder} onPress={purchase}>
       <Text style={styles.placeholderText}>Ad Space</Text>

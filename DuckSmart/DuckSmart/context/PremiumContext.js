@@ -1,27 +1,15 @@
+// /context/PremiumContext.js
 // DuckSmart — Premium Context
 //
 // Manages the user's subscription state (free vs. Pro) using RevenueCat.
-// Provides isPro, loading, purchase, and restore functions to all screens.
-//
-// RevenueCat handles both Apple App Store and Google Play subscriptions,
-// receipt validation, and trial periods from a single SDK.
-//
-// Setup required:
-//   1. Create a RevenueCat account at https://www.revenuecat.com
-//   2. Add your App Store / Play Store apps in the RevenueCat dashboard
-//   3. Create an Offering with a "DuckSmart Pro" subscription product
-//   4. Replace REVENUECAT_API_KEYS below with your real keys
-//   5. Install: npx expo install react-native-purchases
+// Uses RevenueCat Offerings / Packages so Android base plans work correctly.
 
-import React, { createContext, useContext, useEffect, useState, useCallback } from "react";
-import { Platform, Alert } from "react-native";
+import React, { createContext, useCallback, useContext, useEffect, useState } from "react";
+import { Alert, Platform } from "react-native";
 import Constants from "expo-constants";
 import { auth } from "../services/firebase";
 import { logProUpgrade } from "../services/analytics";
 
-// ---------------------------------------------------------------------------
-// RevenueCat — lazy-loaded so app doesn't crash in Expo Go
-// ---------------------------------------------------------------------------
 const isExpoGo = Constants.appOwnership === "expo";
 
 let Purchases = null;
@@ -33,50 +21,183 @@ if (!isExpoGo) {
     Purchases = rcModule.default || rcModule.Purchases;
     isRevenueCatAvailable = true;
   } catch (_) {
-    /* react-native-purchases not linked — fallback to free */
+    // react-native-purchases not linked — fallback to free
   }
 }
 
-// ---------------------------------------------------------------------------
-// RevenueCat API keys — replace with your real keys from the RC dashboard
-// ---------------------------------------------------------------------------
 const REVENUECAT_API_KEYS = {
   ios: "appl_mtRPtHyfBkCUdQpHPmncfwiVNOR",
   android: "goog_jJcLFzpPdRQNEqRgQOvMkMAVVvb",
 };
 
-// The entitlement identifier you set up in RevenueCat dashboard
 const PRO_ENTITLEMENT = "pro";
 
-// Fallback prices shown when RevenueCat offerings haven't loaded yet
-const FALLBACK_MONTHLY_PRICE = "$4.99";
-const FALLBACK_ANNUAL_PRICE = "$39.99";
+const PRODUCT_IDS = {
+  monthly: "ducksmart_pro_monthly",
+  yearly: "ducksmart_pro_yearly",
+};
 
-// ── Dev override: set to true to simulate Pro during development ──
-const DEV_FORCE_PRO = __DEV__ && false; // flip to true to test Pro features
+const FALLBACK_MONTHLY_PRICE = "$9.99";
+const FALLBACK_YEARLY_PRICE = "$39.99";
+
+const DEV_FORCE_PRO = __DEV__ && false;
 
 const PremiumContext = createContext(null);
+
+function getProductId(item) {
+  if (!item) return null;
+
+  return (
+    item.product?.identifier ||
+    item.product?.productIdentifier ||
+    item.product?.productId ||
+    item.product?.id ||
+    item.identifier ||
+    item.productIdentifier ||
+    item.productId ||
+    item.id ||
+    null
+  );
+}
+
+function getPriceString(item, fallback) {
+  if (!item) return fallback;
+
+  return (
+    item.product?.priceString ||
+    item.product?.localizedPriceString ||
+    item.priceString ||
+    item.localizedPriceString ||
+    fallback
+  );
+}
+
+function hasPro(customerInfo) {
+  return customerInfo?.entitlements?.active?.[PRO_ENTITLEMENT] !== undefined;
+}
+
+function normalizeText(value) {
+  return String(value || "").toLowerCase();
+}
+
+function isMonthlyPackage(pkg) {
+  const packageType = normalizeText(pkg?.packageType);
+  const identifier = normalizeText(pkg?.identifier);
+  const productId = normalizeText(getProductId(pkg));
+
+  return (
+    packageType === "monthly" ||
+    identifier.includes("monthly") ||
+    identifier.includes("$rc_monthly") ||
+    productId.includes(PRODUCT_IDS.monthly)
+  );
+}
+
+function isYearlyPackage(pkg) {
+  const packageType = normalizeText(pkg?.packageType);
+  const identifier = normalizeText(pkg?.identifier);
+  const productId = normalizeText(getProductId(pkg));
+
+  return (
+    packageType === "annual" ||
+    packageType === "yearly" ||
+    identifier.includes("annual") ||
+    identifier.includes("yearly") ||
+    identifier.includes("$rc_annual") ||
+    productId.includes(PRODUCT_IDS.yearly)
+  );
+}
+
+function isSupportedPackageOrProduct(item) {
+  const productId = normalizeText(getProductId(item));
+
+  return (
+    productId.includes(PRODUCT_IDS.monthly) ||
+    productId.includes(PRODUCT_IDS.yearly)
+  );
+}
 
 export function PremiumProvider({ children }) {
   const [isPro, setIsPro] = useState(DEV_FORCE_PRO);
   const [loading, setLoading] = useState(true);
-  const [offerings, setOfferings] = useState(null);
+  const [monthlyPackage, setMonthlyPackage] = useState(null);
+  const [yearlyPackage, setYearlyPackage] = useState(null);
 
-  // ---------------------------------------------------------------------------
-  // Initialize RevenueCat on mount
-  // ---------------------------------------------------------------------------
+  const checkSubscription = useCallback(async () => {
+    if (!isRevenueCatAvailable || !Purchases) return false;
+
+    try {
+      const customerInfo = await Purchases.getCustomerInfo();
+      const active = hasPro(customerInfo);
+      setIsPro(DEV_FORCE_PRO || active);
+      return active;
+    } catch (err) {
+      console.error("DuckSmart: Failed to check subscription:", err.message);
+      return false;
+    }
+  }, []);
+
+  const loadOfferings = useCallback(async () => {
+    if (!isRevenueCatAvailable || !Purchases) return;
+
+    try {
+      if (typeof Purchases.getOfferings !== "function") {
+        console.warn("DuckSmart: Purchases.getOfferings is not available.");
+        return;
+      }
+
+      const offerings = await Purchases.getOfferings();
+      const packages = offerings?.current?.availablePackages || [];
+
+      console.log(
+        "DuckSmart RevenueCat packages:",
+        packages.map((pkg) => ({
+          identifier: pkg?.identifier,
+          packageType: pkg?.packageType,
+          productId: getProductId(pkg),
+          price: getPriceString(pkg, "unknown"),
+        }))
+      );
+
+      const monthly =
+        packages.find(isMonthlyPackage) ||
+        packages.find((pkg) => normalizeText(getProductId(pkg)).includes("monthly")) ||
+        null;
+
+      const yearly =
+        packages.find(isYearlyPackage) ||
+        packages.find((pkg) => normalizeText(getProductId(pkg)).includes("yearly")) ||
+        null;
+
+      setMonthlyPackage(monthly);
+      setYearlyPackage(yearly);
+
+      if (!monthly) {
+        console.warn("DuckSmart: Monthly RevenueCat package not found.");
+      }
+
+      if (!yearly) {
+        console.warn("DuckSmart: Yearly RevenueCat package not found.");
+      }
+    } catch (err) {
+      console.warn("DuckSmart: Failed to load RevenueCat offerings:", err.message);
+      setMonthlyPackage(null);
+      setYearlyPackage(null);
+    }
+  }, []);
+
   useEffect(() => {
-    async function init() {
+    async function initRevenueCat() {
       if (!isRevenueCatAvailable || !Purchases) {
-        // RevenueCat not available (Expo Go or not installed) — default to free
         setLoading(false);
         return;
       }
 
       try {
-        const apiKey = Platform.OS === "ios"
-          ? REVENUECAT_API_KEYS.ios
-          : REVENUECAT_API_KEYS.android;
+        const apiKey =
+          Platform.OS === "ios"
+            ? REVENUECAT_API_KEYS.ios
+            : REVENUECAT_API_KEYS.android;
 
         if (!apiKey) {
           console.warn("DuckSmart: No RevenueCat API key for this platform.");
@@ -84,26 +205,17 @@ export function PremiumProvider({ children }) {
           return;
         }
 
-        // Configure RevenueCat (only call once)
         await Purchases.configure({ apiKey });
 
-        // Check current entitlements — wrapped separately so a failure
-        // here doesn't prevent the rest of startup
-        try {
-          await checkSubscription();
-        } catch (subErr) {
-          console.warn("DuckSmart: Subscription check failed:", subErr.message);
+        if (typeof Purchases.addCustomerInfoUpdateListener === "function") {
+          Purchases.addCustomerInfoUpdateListener((customerInfo) => {
+            const active = hasPro(customerInfo);
+            setIsPro(DEV_FORCE_PRO || active);
+          });
         }
 
-        // Pre-fetch offerings for the paywall
-        try {
-          const offers = await Purchases.getOfferings();
-          if (offers.current) {
-            setOfferings(offers.current);
-          }
-        } catch (offerErr) {
-          console.warn("DuckSmart: Failed to fetch offerings:", offerErr.message);
-        }
+        await checkSubscription();
+        await loadOfferings();
       } catch (err) {
         console.error("DuckSmart: RevenueCat init error:", err.message);
       } finally {
@@ -111,115 +223,167 @@ export function PremiumProvider({ children }) {
       }
     }
 
-    init();
-  }, []);
+    initRevenueCat();
+  }, [checkSubscription, loadOfferings]);
 
-  // ---------------------------------------------------------------------------
-  // Check if user has Pro entitlement
-  // ---------------------------------------------------------------------------
-  const checkSubscription = useCallback(async () => {
-    if (!isRevenueCatAvailable || !Purchases) return;
-
-    try {
-      const customerInfo = await Purchases.getCustomerInfo();
-      const hasPro = customerInfo.entitlements.active[PRO_ENTITLEMENT] !== undefined;
-      setIsPro(hasPro);
-    } catch (err) {
-      console.error("DuckSmart: Failed to check subscription:", err.message);
-    }
-  }, []);
-
-  // ---------------------------------------------------------------------------
-  // Find monthly & yearly packages from the current offering
-  // ---------------------------------------------------------------------------
-  const monthlyPackage = offerings?.availablePackages?.find(
-    (p) => p.packageType === "MONTHLY" || p.identifier === "$rc_monthly"
-  ) || null;
-
-  const annualPackage = offerings?.availablePackages?.find(
-    (p) => p.packageType === "ANNUAL" || p.identifier === "$rc_annual"
-  ) || null;
-
-  // ---------------------------------------------------------------------------
-  // Purchase Pro subscription — accepts a specific package
-  // ---------------------------------------------------------------------------
-  const purchase = useCallback(async (pkg) => {
-    if (!isRevenueCatAvailable || !Purchases) {
-      Alert.alert(
-        "Not Available",
-        "In-app purchases require a production build. Subscriptions are not available in Expo Go."
-      );
-      return false;
-    }
-
-    // If no package passed, fall back to first available
-    const targetPkg = pkg || monthlyPackage || annualPackage
-      || (offerings?.availablePackages?.[0] ?? null);
-
-    if (!targetPkg) {
-      Alert.alert("Error", "No subscription packages available. Please try again later.");
-      return false;
-    }
-
-    try {
-      const { customerInfo } = await Purchases.purchasePackage(targetPkg);
-      const hasPro = customerInfo.entitlements.active[PRO_ENTITLEMENT] !== undefined;
-      setIsPro(hasPro);
-
-      if (hasPro) {
-        logProUpgrade(auth.currentUser?.uid);
-        Alert.alert("Welcome to Pro!", "You now have access to all DuckSmart features. Happy hunting!");
+  const purchase = useCallback(
+    async (packageOrProduct) => {
+      if (!isRevenueCatAvailable || !Purchases) {
+        Alert.alert(
+          "Not Available",
+          "In-app purchases require a production build. Subscriptions are not available in Expo Go."
+        );
+        return false;
       }
-      return hasPro;
-    } catch (err) {
-      // User cancelled the purchase
-      if (err.userCancelled) return false;
-      console.error("DuckSmart: Purchase error:", err.message);
-      Alert.alert("Purchase Failed", "Could not complete the purchase. Please try again.");
-      return false;
-    }
-  }, [offerings, monthlyPackage, annualPackage]);
 
-  // ---------------------------------------------------------------------------
-  // Restore previous purchases (required by App Store guidelines)
-  // ---------------------------------------------------------------------------
+      if (!packageOrProduct) {
+        Alert.alert(
+          "Subscription Loading",
+          "Subscriptions are still loading. Please wait a few seconds and try again."
+        );
+
+        await loadOfferings();
+        return false;
+      }
+
+      if (!isSupportedPackageOrProduct(packageOrProduct)) {
+        Alert.alert(
+          "Subscription Error",
+          "This subscription product is not supported in this build."
+        );
+        return false;
+      }
+
+      try {
+        let result;
+
+        if (packageOrProduct?.product && typeof Purchases.purchasePackage === "function") {
+          result = await Purchases.purchasePackage(packageOrProduct);
+        } else if (typeof Purchases.purchaseStoreProduct === "function") {
+          result = await Purchases.purchaseStoreProduct(packageOrProduct);
+        } else {
+          Alert.alert(
+            "Purchase Unavailable",
+            "Could not start the purchase right now. Please try again."
+          );
+          return false;
+        }
+
+        const customerInfo = result?.customerInfo || result;
+        const active = hasPro(customerInfo);
+
+        setIsPro(DEV_FORCE_PRO || active);
+
+        if (active) {
+          logProUpgrade(auth.currentUser?.uid);
+          Alert.alert(
+            "Welcome to Pro!",
+            "You now have access to all DuckSmart features. Happy hunting!"
+          );
+        } else {
+          await checkSubscription();
+        }
+
+        return active;
+      } catch (err) {
+        if (err?.userCancelled) return false;
+
+        console.error("DuckSmart: Purchase error:", err.message);
+        Alert.alert(
+          "Purchase Failed",
+          err.message || "Could not complete the purchase. Please try again."
+        );
+        return false;
+      }
+    },
+    [checkSubscription, loadOfferings]
+  );
+
   const restore = useCallback(async () => {
     if (!isRevenueCatAvailable || !Purchases) {
       Alert.alert(
         "Not Available",
         "Purchase restoration requires a production build."
       );
-      return;
+      return false;
     }
 
     try {
       const customerInfo = await Purchases.restorePurchases();
-      const hasPro = customerInfo.entitlements.active[PRO_ENTITLEMENT] !== undefined;
-      setIsPro(hasPro);
+      const active = hasPro(customerInfo);
 
-      if (hasPro) {
+      setIsPro(DEV_FORCE_PRO || active);
+
+      if (active) {
         Alert.alert("Restored!", "Your Pro subscription has been restored.");
       } else {
-        Alert.alert("No Subscription Found", "We couldn't find an active Pro subscription for this account.");
+        Alert.alert(
+          "No Subscription Found",
+          "We couldn't find an active Pro subscription for this account."
+        );
       }
+
+      return active;
     } catch (err) {
       console.error("DuckSmart: Restore error:", err.message);
       Alert.alert("Restore Failed", "Could not restore purchases. Please try again.");
+      return false;
     }
   }, []);
 
-  // ---------------------------------------------------------------------------
-  // Get price strings for display on paywalls
-  // ---------------------------------------------------------------------------
+  const redeemOfferCode = useCallback(async () => {
+    if (Platform.OS !== "ios") {
+      Alert.alert(
+        "iOS Only",
+        "Offer code redemption is only available through the iOS App Store."
+      );
+      return false;
+    }
+
+    if (
+      !isRevenueCatAvailable ||
+      !Purchases ||
+      typeof Purchases.presentCodeRedemptionSheet !== "function"
+    ) {
+      Alert.alert(
+        "Not Available",
+        "Offer code redemption requires an iOS TestFlight or App Store build."
+      );
+      return false;
+    }
+
+    try {
+      await Purchases.presentCodeRedemptionSheet();
+
+      setTimeout(() => {
+        checkSubscription().catch(() => {});
+      }, 1500);
+
+      Alert.alert(
+        "Offer Code Submitted",
+        "If your code was accepted by Apple, DuckSmart Pro should activate shortly. If it does not, tap Restore Purchase."
+      );
+
+      return true;
+    } catch (err) {
+      console.error("DuckSmart: Offer code redemption error:", err.message);
+      Alert.alert(
+        "Offer Code Error",
+        "Could not open the Apple offer code screen. Please try again."
+      );
+      return false;
+    }
+  }, [checkSubscription]);
+
   const getMonthlyPrice = useCallback(() => {
-    return monthlyPackage?.product?.priceString || FALLBACK_MONTHLY_PRICE;
+    return getPriceString(monthlyPackage, FALLBACK_MONTHLY_PRICE);
   }, [monthlyPackage]);
 
   const getAnnualPrice = useCallback(() => {
-    return annualPackage?.product?.priceString || FALLBACK_ANNUAL_PRICE;
-  }, [annualPackage]);
+    return getPriceString(yearlyPackage, FALLBACK_YEARLY_PRICE);
+  }, [yearlyPackage]);
 
-  // Keep backward-compat alias
+  const getYearlyPrice = getAnnualPrice;
   const getProPrice = getMonthlyPrice;
 
   return (
@@ -229,12 +393,16 @@ export function PremiumProvider({ children }) {
         loading,
         purchase,
         restore,
+        redeemOfferCode,
         getProPrice,
         getMonthlyPrice,
         getAnnualPrice,
+        getYearlyPrice,
         monthlyPackage,
-        annualPackage,
+        yearlyPackage,
+        annualPackage: yearlyPackage,
         checkSubscription,
+        reloadOfferings: loadOfferings,
       }}
     >
       {children}
@@ -242,14 +410,13 @@ export function PremiumProvider({ children }) {
   );
 }
 
-/**
- * Hook to access premium state from any screen.
- * Returns: { isPro, loading, purchase, restore, getProPrice, getMonthlyPrice, getAnnualPrice, monthlyPackage, annualPackage, checkSubscription }
- */
 export function usePremium() {
   const ctx = useContext(PremiumContext);
+
   if (!ctx) {
     throw new Error("usePremium must be used inside <PremiumProvider>");
   }
+
   return ctx;
 }
+

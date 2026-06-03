@@ -16,7 +16,13 @@ import EmptyState from "@/components/ui/EmptyState";
 import { Target, TrendingUp, Award, Hash, Plus, Users } from "lucide-react";
 import type { HuntLog } from "@/lib/types";
 
-type SortKey = "date-desc" | "date-asc" | "score-desc" | "score-asc" | "ducks-desc" | "ducks-asc";
+type SortKey =
+  | "date-desc"
+  | "date-asc"
+  | "score-desc"
+  | "score-asc"
+  | "ducks-desc"
+  | "ducks-asc";
 
 export default function HistoryPage() {
   const { logs, loading, error } = useHuntLogs();
@@ -24,40 +30,54 @@ export default function HistoryPage() {
   const [envFilter, setEnvFilter] = useState<string>("All");
   const [sortBy, setSortBy] = useState<SortKey>("date-desc");
 
-  // Stats
   const stats = useMemo(() => {
-    if (!logs.length) return { total: 0, ducks: 0, avgScore: 0, bestScore: 0, avgPerHunter: 0 };
+    if (!logs.length) {
+      return {
+        total: 0,
+        ducks: 0,
+        avgScore: 0,
+        bestScore: 0,
+        avgPerHunter: 0,
+      };
+    }
+
     const ducks = logs.reduce((s, l) => s + (l.ducksHarvested || 0), 0);
     const totalHunters = logs.reduce((s, l) => s + (l.hunters || 1), 0);
     const scores = logs.map((l) => l.huntScore || 0);
     const avg = scores.reduce((s, v) => s + v, 0) / scores.length;
     const best = Math.max(...scores);
-    const avgPerHunter = totalHunters > 0 ? +(ducks / totalHunters).toFixed(1) : 0;
-    return { total: logs.length, ducks, avgScore: Math.round(avg), bestScore: best, avgPerHunter };
+    const avgPerHunter =
+      totalHunters > 0 ? +(ducks / totalHunters).toFixed(1) : 0;
+
+    return {
+      total: logs.length,
+      ducks,
+      avgScore: Math.round(avg),
+      bestScore: best,
+      avgPerHunter,
+    };
   }, [logs]);
 
-  // Filtered + sorted logs
   const filteredLogs = useMemo(() => {
     let result = [...logs];
 
-    // Search
     if (search.trim()) {
       const q = search.toLowerCase();
       result = result.filter(
         (l) =>
           (l.notes || "").toLowerCase().includes(q) ||
           (l.environment || "").toLowerCase().includes(q) ||
-          (SPREAD_NAMES[l.spread] || l.spreadDetails?.name || "").toLowerCase().includes(q) ||
+          (SPREAD_NAMES[l.spread] || l.spreadDetails?.name || "")
+            .toLowerCase()
+            .includes(q) ||
           (l.pinTitle || "").toLowerCase().includes(q)
       );
     }
 
-    // Environment filter
     if (envFilter !== "All") {
       result = result.filter((l) => l.environment === envFilter);
     }
 
-    // Sort
     result.sort((a, b) => {
       switch (sortBy) {
         case "date-desc":
@@ -84,14 +104,16 @@ export default function HistoryPage() {
     return (
       <div className="space-y-6">
         <h1 className="text-white font-black text-2xl">Hunt History</h1>
-        <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
-          {[...Array(4)].map((_, i) => (
+
+        <div className="grid grid-cols-2 lg:grid-cols-5 gap-4">
+          {[...Array(5)].map((_, i) => (
             <Skeleton key={i} className="h-24" />
           ))}
         </div>
+
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
           {[...Array(6)].map((_, i) => (
-            <Skeleton key={i} className="h-40" />
+            <Skeleton key={i} className="h-56" />
           ))}
         </div>
       </div>
@@ -112,7 +134,6 @@ export default function HistoryPage() {
         </Link>
       </div>
 
-      {/* Stats */}
       <div className="grid grid-cols-2 lg:grid-cols-5 gap-4">
         <StatCard
           label="Total Hunts"
@@ -146,7 +167,6 @@ export default function HistoryPage() {
         />
       </div>
 
-      {/* Filters */}
       <div className="space-y-4">
         <div className="flex flex-col sm:flex-row gap-4">
           <div className="flex-1">
@@ -156,6 +176,7 @@ export default function HistoryPage() {
               onChange={(e) => setSearch(e.target.value)}
             />
           </div>
+
           <select
             value={sortBy}
             onChange={(e) => setSortBy(e.target.value as SortKey)}
@@ -187,7 +208,6 @@ export default function HistoryPage() {
         </div>
       </div>
 
-      {/* Results */}
       {error && (
         <div className="bg-[rgba(217,76,76,0.12)] border border-[#D94C4C] rounded-[14px] px-4 py-3">
           <p className="text-[#D94C4C] font-bold text-sm">{error}</p>
@@ -216,79 +236,82 @@ export default function HistoryPage() {
 }
 
 function HuntLogCard({ log }: { log: HuntLog }) {
-  const spreadName = SPREAD_NAMES[log.spread] || log.spreadDetails?.name || "Unknown";
+  const spreadName =
+    SPREAD_NAMES[log.spread] || log.spreadDetails?.name || "Unknown";
   const scoreColor = getScoreColor(log.huntScore || 0);
+  const hunters = log.hunters || 1;
+  const ducks = log.ducksHarvested || 0;
+  const avgPerHunter = hunters > 0 ? +(ducks / hunters).toFixed(1) : 0;
+
   const badgeColor =
     log.environment === "Marsh" || log.environment === "Timber"
       ? "green"
       : log.environment === "Field"
-      ? "yellow"
-      : "red";
+        ? "yellow"
+        : "red";
 
   return (
     <Link href={`/dashboard/history/${log.id}`}>
       <Card className="hover:border-[#2ECC71] transition-colors cursor-pointer h-full">
-        <div className="flex justify-between items-start mb-3">
-          <div>
+        <div className="flex justify-between items-start mb-3 gap-3">
+          <div className="min-w-0">
             <p className="text-white font-black text-sm">
               {log.dateTime ? formatDate(log.dateTime) : formatDate(log.createdAt)}
             </p>
-            <div className="flex items-center gap-2 mt-1">
+            <div className="flex items-center gap-2 mt-1 flex-wrap">
               <Badge label={log.environment || "Unknown"} color={badgeColor} />
             </div>
           </div>
+
           {log.photos && log.photos.length > 0 && (
             <img
               src={log.photos[0].uri}
               alt="Hunt photo"
-              className="w-14 h-14 rounded-[10px] object-cover border border-[#3A3A3A]"
+              className="w-14 h-14 rounded-[10px] object-cover border border-[#3A3A3A] flex-shrink-0"
             />
           )}
         </div>
 
         <p className="text-[#8E8E8E] font-bold text-xs mb-1">{spreadName}</p>
+
         {log.pinTitle && (
-          <p className="text-[#D9A84C] font-bold text-xs mb-2">📍 {log.pinTitle}</p>
+          <p className="text-[#D9A84C] font-bold text-xs mb-3">📍 {log.pinTitle}</p>
         )}
 
-        <div className="flex items-center justify-between">
-          <div className="flex items-center gap-4">
-            <div>
-              <p className="text-[#6D6D6D] font-bold text-[10px] uppercase">Score</p>
-              <p className="font-black text-lg" style={{ color: scoreColor }}>
-                {log.huntScore || 0}
-              </p>
-            </div>
-            <div>
-              <p className="text-[#6D6D6D] font-bold text-[10px] uppercase">Ducks</p>
-              <p className="text-white font-black text-lg">
-                {log.ducksHarvested || 0}
-              </p>
-            </div>
-            {(log.hunters ?? 0) > 1 && (
-              <div>
-                <p className="text-[#6D6D6D] font-bold text-[10px] uppercase">Hunters</p>
-                <p className="text-white font-black text-lg">{log.hunters}</p>
-              </div>
-            )}
-            {(log.hunters ?? 0) > 1 && (log.ducksHarvested || 0) > 0 && (
-              <div>
-                <p className="text-[#6D6D6D] font-bold text-[10px] uppercase">Per Hunter</p>
-                <p className="text-[#2ECC71] font-black text-lg">
-                  {((log.ducksHarvested || 0) / log.hunters!).toFixed(1)}
-                </p>
-              </div>
-            )}
-          </div>
-          {log.photos && log.photos.length > 0 && (
-            <p className="text-[#6D6D6D] font-bold text-xs">
-              {log.photos.length} photo{log.photos.length !== 1 ? "s" : ""}
+        <div className="grid grid-cols-2 gap-3 mb-3">
+          <div className="rounded-[12px] border border-[#2C2C2C] bg-[#111111] px-3 py-2">
+            <p className="text-[#6D6D6D] font-bold text-[10px] uppercase">
+              Score
             </p>
-          )}
+            <p className="font-black text-lg" style={{ color: scoreColor }}>
+              {log.huntScore || 0}
+            </p>
+          </div>
+
+          <div className="rounded-[12px] border border-[#2C2C2C] bg-[#111111] px-3 py-2">
+            <p className="text-[#6D6D6D] font-bold text-[10px] uppercase">
+              Ducks
+            </p>
+            <p className="text-[#2ECC71] font-black text-lg">{ducks}</p>
+          </div>
+
+          <div className="rounded-[12px] border border-[#2C2C2C] bg-[#111111] px-3 py-2">
+            <p className="text-[#6D6D6D] font-bold text-[10px] uppercase">
+              Hunters
+            </p>
+            <p className="text-white font-black text-lg">{hunters}</p>
+          </div>
+
+          <div className="rounded-[12px] border border-[#2C2C2C] bg-[#111111] px-3 py-2">
+            <p className="text-[#6D6D6D] font-bold text-[10px] uppercase">
+              Avg / Hunter
+            </p>
+            <p className="text-white font-black text-lg">{avgPerHunter}</p>
+          </div>
         </div>
 
         {log.notes && (
-          <p className="text-[#7A7A7A] font-bold text-xs mt-3 line-clamp-2">
+          <p className="text-[#8E8E8E] font-bold text-xs leading-5 line-clamp-2">
             {log.notes}
           </p>
         )}

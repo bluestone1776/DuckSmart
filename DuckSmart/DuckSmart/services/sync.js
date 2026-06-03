@@ -1,3 +1,5 @@
+// DuckSmart/services/sync.js
+
 // DuckSmart — Firestore + Storage Sync Service
 //
 // Local-first cloud sync for ALL users. All functions are safe to

@@ -1,4 +1,6 @@
-import React, { useMemo, useState, useCallback, useEffect } from "react";
+//screens/TodayScreen.js
+
+import React, { useMemo, useState, useCallback, useEffect, useRef } from "react";
 import {
   View,
   Text,
@@ -12,10 +14,12 @@ import {
   Modal,
   Image,
   Dimensions,
+  Platform,
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import Svg, { Path, Circle, Line, Polygon, Text as SvgText } from "react-native-svg";
 import MapView, { UrlTile } from "react-native-maps";
+
 import { COLORS } from "../constants/theme";
 import { fetchRadarFrames, formatRadarAge } from "../services/radar";
 import { ASSETS } from "../constants/assets";
@@ -23,84 +27,188 @@ import { clamp, formatWind } from "../utils/helpers";
 import { scoreHunt, scoreHuntToday } from "../utils/scoring";
 import { getMoonPhase } from "../utils/solunar";
 import { useWeather } from "../context/WeatherContext";
-import { scheduleHuntAlerts, cancelHuntAlerts } from "../services/notifications";
 import {
-  WATER_TYPES,
-  WEATHER_OPTIONS,
-  SEASON_OPTIONS,
-  PRESSURE_OPTIONS,
-  SPECIES_OPTIONS,
-  recommendSpread,
-} from "../data/decoySpreadData";
-import * as ImagePicker from "expo-image-picker";
-import AdBanner from "../components/AdBanner";
+  scheduleHuntAlerts, cancelHuntAlerts,
+  saveWeatherLocationForNotifications
+} from "../services/notifications";
 import ProUpgradePrompt from "../components/ProUpgradePrompt";
 import ScreenBackground from "../components/ScreenBackground";
 import { usePremium } from "../context/PremiumContext";
-import { analyzeSpread as aiAnalyzeSpread, isAIAvailable } from "../services/ai";
+import { useAuth } from "../context/AuthContext";
+import { logEvent, logScreenView } from "../services/analytics";
+import InAppSponsorAd from "../components/InAppSponsorAd";
+import InAppNotificationsModal from "../components/InAppNotificationsModal";
+import {
+  loadUnreadInAppNotifications,
+  markInAppNotificationRead,
+} from "../services/in_app_notifications";
 
 const SCREEN_WIDTH = Dimensions.get("window").width;
+const GOLD = "#D9A84C";
+const GOLD_SOFT = "rgba(217,168,76,0.14)";
+const DARK_CARD = "rgba(3, 6, 7, 0.93)";
+const DARK_CARD_SOFT = "rgba(10, 14, 15, 0.94)";
+const RADAR_REGION_DELTA = 3.0;
+const RADAR_MAX_ZOOM = 7;
+const RADAR_FRAME_INTERVAL_MS = 1800;
 
-// --- Today-specific sub-components ---
+const FREE_HOURLY_LIMIT = 3;
+const FREE_DAILY_LIMIT = 3;
+const PRO_HOURLY_LIMIT = 5;
+const PRO_DAILY_LIMIT = 5;
 
-function TodayCard({ title, right, children }) {
+function analyticsNumber(value, decimals = 0) {
+  const n = Number(value);
+  if (!Number.isFinite(n)) return null;
+  return decimals > 0 ? Number(n.toFixed(decimals)) : Math.round(n);
+}
+
+function analyticsScoreBand(score) {
+  const n = Number(score);
+  if (!Number.isFinite(n)) return "unknown";
+  if (n >= 70) return "prime";
+  if (n >= 45) return "fair";
+  return "low";
+}
+
+function buildTodayAnalyticsMeta({
+  weather,
+  hunt,
+  isPro,
+  coords,
+  radarTileUrl,
+  radarFrames,
+  radarExpanded,
+  radarPlaying,
+  alertsOn,
+  hourlyCount,
+  dailyCount,
+  trendCount,
+}) {
+  return {
+    screen: "TodayScreen",
+    isPro: !!isPro,
+    isDev: !!__DEV__,
+    alertsOn: !!alertsOn,
+    locationName: weather?.locationName || null,
+    hasCoords: !!coords,
+    approxLatitude: coords?.latitude != null ? analyticsNumber(coords.latitude, 2) : null,
+    approxLongitude: coords?.longitude != null ? analyticsNumber(coords.longitude, 2) : null,
+    tempF: analyticsNumber(weather?.tempF),
+    feelsLikeF: analyticsNumber(weather?.feelsLikeF),
+    windMph: analyticsNumber(weather?.windMph),
+    windDeg: analyticsNumber(weather?.windDeg),
+    windDirection: formatWind(weather?.windDeg),
+    pressureInHg: analyticsNumber(weather?.pressureInHg, 2),
+    precipChance: analyticsNumber(weather?.precipChance),
+    cloudPct: analyticsNumber(weather?.cloudPct),
+    sunriseAvailable: !!weather?.sunrise,
+    sunsetAvailable: !!weather?.sunset,
+    huntScore: analyticsNumber(hunt?.score),
+    huntScoreBand: analyticsScoreBand(hunt?.score),
+    huntWhyCount: Array.isArray(hunt?.why) ? hunt.why.length : 0,
+    hourlyCount: hourlyCount || 0,
+    dailyCount: dailyCount || 0,
+    trendCount: trendCount || 0,
+    hasMigration: !!weather?.migration,
+    migrationTrending: weather?.migration?.trending || null,
+    migrationChangePercent: analyticsNumber(weather?.migration?.changePercent),
+    migrationTopSpeciesCount: Array.isArray(weather?.migration?.topSpecies) ? weather.migration.topSpecies.length : 0,
+    hasRadar: !!radarTileUrl,
+    radarFrameCount: Array.isArray(radarFrames) ? radarFrames.length : 0,
+    radarExpanded: !!radarExpanded,
+    radarPlaying: !!radarPlaying,
+    platform: Platform.OS,
+  };
+}
+
+function openWeatherIconUrl(icon) {
+  if (!icon) return null;
+  return `https://openweathermap.org/img/wn/${icon}@2x.png`;
+}
+
+function getWeatherEmojiFromData(item = {}) {
+  const icon = String(item.icon || "");
+
+  if (icon.startsWith("01")) return "☀️";
+  if (icon.startsWith("02")) return "🌤️";
+  if (icon.startsWith("03") || icon.startsWith("04")) return "☁️";
+  if (icon.startsWith("09") || icon.startsWith("10")) return "🌧️";
+  if (icon.startsWith("11")) return "⛈️";
+  if (icon.startsWith("13")) return "❄️";
+  if (icon.startsWith("50")) return "🌫️";
+
+  const precip = Number(item.precip ?? item.precipChance ?? 0);
+  const cloudPct = Number(item.cloudPct ?? 0);
+  const temp = Number(item.temp ?? item.tempF ?? item.highF ?? 0);
+
+  if (precip >= 65) return "🌧️";
+  if (precip >= 35) return "🌦️";
+  if (temp <= 32 && precip >= 25) return "❄️";
+  if (cloudPct >= 70) return "☁️";
+  if (cloudPct >= 35) return "🌤️";
+  return "☀️";
+}
+
+function WeatherIcon({ item, size = 28 }) {
+  const iconUrl = openWeatherIconUrl(item?.icon);
+
+  if (iconUrl) {
+    return <Image source={{ uri: iconUrl }} style={{ width: size, height: size }} resizeMode="contain" />;
+  }
+
+  return <Text style={[s.weatherEmoji, { fontSize: size - 4 }]}>{getWeatherEmojiFromData(item)}</Text>;
+}
+
+function SectionCard({ title, eyebrow, right, children, style }) {
   return (
-    <View style={s.card}>
+    <View style={[s.card, style]}>
       <View style={s.cardHeader}>
-        <Text style={s.cardTitle}>{title}</Text>
+        <View style={{ flex: 1 }}>
+          {eyebrow ? <Text style={s.cardEyebrow}>{eyebrow}</Text> : null}
+          <Text style={s.cardTitle}>{title}</Text>
+        </View>
         {right ? <View>{right}</View> : null}
       </View>
-      <View style={{ marginTop: 10 }}>{children}</View>
+      <View style={s.cardBody}>{children}</View>
     </View>
   );
 }
 
-function TodayChip({ label, selected, onPress }) {
+function SmallMetric({ label, value, icon, accent }) {
   return (
-    <Pressable
-      onPress={onPress}
-      style={[s.chip, selected ? s.chipSelected : s.chipUnselected]}
-    >
-      <Text style={[s.chipText, selected ? s.chipTextSelected : null]}>
-        {label}
+    <View style={s.smallMetric}>
+      <View style={s.smallMetricTop}>
+        <Text style={s.smallMetricIcon}>{icon}</Text>
+        <Text style={s.smallMetricLabel}>{label}</Text>
+      </View>
+      <Text style={[s.smallMetricValue, accent ? { color: accent } : null]} numberOfLines={1}>
+        {value}
       </Text>
-    </Pressable>
-  );
-}
-
-function TodayMetricPill({ label, value }) {
-  return (
-    <View style={s.metricPill}>
-      <Text style={s.metricLabel}>{label}</Text>
-      <Text style={s.metricValue}>{value}</Text>
     </View>
   );
 }
 
-function TodayHalfGauge({ value, size = 220 }) {
-  const stroke = 14;
+function HeroGauge({ value, size = 208 }) {
+  const stroke = 17;
   const radius = (size - stroke) / 2;
   const cx = size / 2;
   const cy = size / 2;
-
   const startX = cx - radius;
   const startY = cy;
   const endX = cx + radius;
   const endY = cy;
-
   const d = `M ${startX} ${startY} A ${radius} ${radius} 0 0 1 ${endX} ${endY}`;
-
   const p = clamp(value, 0, 100) / 100;
   const angle = Math.PI * (1 - p);
   const needleX = cx + radius * Math.cos(angle);
   const needleY = cy - radius * Math.sin(angle);
-
-  const arcColor = value < 40 ? "#D94C4C" : value < 70 ? "#D9A84C" : "#4CD97B";
+  const arcColor = value < 40 ? COLORS.red : value < 70 ? GOLD : COLORS.green;
 
   return (
-    <View style={{ alignItems: "center" }}>
-      <Svg width={size} height={size * 0.62} viewBox={`0 0 ${size} ${size}`}>
-        <Path d={d} stroke="#2A2A2A" strokeWidth={stroke} strokeLinecap="round" fill="none" />
+    <View style={s.gaugeWrap}>
+      <Svg width={size} height={size * 0.52} viewBox={`0 0 ${size} ${size}`}>
+        <Path d={d} stroke="rgba(255,255,255,0.12)" strokeWidth={stroke} strokeLinecap="round" fill="none" />
         <Path
           d={d}
           stroke={arcColor}
@@ -109,131 +217,75 @@ function TodayHalfGauge({ value, size = 220 }) {
           fill="none"
           strokeDasharray={`${Math.PI * radius * p} ${Math.PI * radius}`}
         />
-        <Circle cx={needleX} cy={needleY} r={9} fill="#FFFFFF" />
-        <Circle cx={needleX} cy={needleY} r={5} fill="#0F0F0F" />
+        <Circle cx={needleX} cy={needleY} r={10} fill="#FFFFFF" />
+        <Circle cx={needleX} cy={needleY} r={5} fill="#0C0F10" />
 
-        <SvgText x={cx} y={cy - 10} fill="#FFFFFF" fontSize="34" fontWeight="700" textAnchor="middle">
+        <SvgText x={cx} y={cy - 20} fill="#FFFFFF" fontSize="46" fontWeight="900" textAnchor="middle">
           {Math.round(value)}
         </SvgText>
-        <SvgText x={cx} y={cy + 18} fill="#BDBDBD" fontSize="12" textAnchor="middle">
-          Hunt Probability
+        <SvgText x={cx} y={cy + 13} fill={arcColor} fontSize="13" fontWeight="900" textAnchor="middle">
+          {value >= 70 ? "VERY HIGH" : value >= 45 ? "FAIR" : "TOUGH"}
         </SvgText>
       </Svg>
-
     </View>
   );
 }
 
-// ---------------------------------------------------------------------------
-// 48-Hour Trend Sparkline — mini SVG line chart
-// ---------------------------------------------------------------------------
-function TrendSparkline({ data, color, width = 280, height = 60, suffix = "" }) {
+function TrendSparkline({ data, color, width = 280, height = 64, suffix = "" }) {
   if (!data || data.length < 2) return null;
 
-  const pad = 4;
+  const pad = 6;
   const minV = Math.min(...data);
   const maxV = Math.max(...data);
   const range = maxV - minV || 1;
 
-  // Calculate x,y for each data point
   const pts = data.map((v, i) => ({
     x: pad + (i / (data.length - 1)) * (width - pad * 2),
     y: pad + (1 - (v - minV) / range) * (height - pad * 2),
   }));
 
-  // Build SVG path
   const linePath = pts.map((p, i) => `${i === 0 ? "M" : "L"} ${p.x} ${p.y}`).join(" ");
   const areaPath = `${linePath} L ${pts[pts.length - 1].x} ${height} L ${pts[0].x} ${height} Z`;
 
   const first = data[0];
   const last = data[data.length - 1];
   const trendArrow = last > first ? "▲" : last < first ? "▼" : "—";
-  const trendColor = last > first ? COLORS.red : last < first ? "#3498DB" : COLORS.muted;
+  const trendColor = last > first ? COLORS.red : last < first ? "#4DA3FF" : COLORS.muted;
 
   return (
-    <View>
+    <View style={s.trendChartWrap}>
       <Svg width={width} height={height}>
-        <Path d={areaPath} fill={color} opacity={0.1} />
-        <Path d={linePath} stroke={color} strokeWidth={2} fill="none" />
-        <Circle cx={pts[0].x} cy={pts[0].y} r={3} fill={color} />
-        <Circle cx={pts[pts.length - 1].x} cy={pts[pts.length - 1].y} r={3} fill={color} />
+        <Path d={areaPath} fill={color} opacity={0.12} />
+        <Path d={linePath} stroke={color} strokeWidth={2.5} fill="none" />
+        <Circle cx={pts[0].x} cy={pts[0].y} r={3.5} fill={color} />
+        <Circle cx={pts[pts.length - 1].x} cy={pts[pts.length - 1].y} r={3.5} fill={color} />
       </Svg>
       <View style={s.trendMeta}>
         <Text style={[s.trendArrow, { color: trendColor }]}>{trendArrow}</Text>
         <Text style={s.trendRange}>
-          {minV}{suffix} – {maxV}{suffix}
+          {minV}
+          {suffix} – {maxV}
+          {suffix}
         </Text>
       </View>
     </View>
   );
 }
 
-// ---------------------------------------------------------------------------
-// 5-Day Forecast Bar Chart
-// ---------------------------------------------------------------------------
-function ForecastBarChart({ days }) {
-  if (!days || days.length === 0) return null;
-
-  const bestIdx = days.reduce((bi, d, i, arr) => (d.score > arr[bi].score ? i : bi), 0);
-  const BAR_MAX_H = 80;
-
-  return (
-    <View>
-      <View style={s.fcRow}>
-        {days.map((day, i) => {
-          const barH = Math.max((day.score / 100) * BAR_MAX_H, 6);
-          const color = day.score >= 70 ? COLORS.green : day.score >= 40 ? COLORS.yellow : COLORS.red;
-          const isBest = i === bestIdx && day.label !== "Today";
-
-          return (
-            <View key={i} style={s.fcCol}>
-              <Text style={[s.fcLabel, isBest && { color: COLORS.green }]}>{day.label}</Text>
-              <View style={s.fcBarTrack}>
-                <View
-                  style={[
-                    s.fcBar,
-                    { height: barH, backgroundColor: color },
-                    isBest && s.fcBarBest,
-                  ]}
-                />
-              </View>
-              <Text style={[s.fcScore, isBest && { color: COLORS.green }]}>{day.score}</Text>
-            </View>
-          );
-        })}
-      </View>
-
-      {/* Best-day callout */}
-      {days[bestIdx] && days[bestIdx].label !== "Today" && (
-        <View style={s.fcCallout}>
-          <Text style={s.fcCalloutText}>
-            {days[bestIdx].label} looks like the best day — score {days[bestIdx].score}
-          </Text>
-        </View>
-      )}
-    </View>
-  );
-}
-
-// ---------------------------------------------------------------------------
-// Wind Compass — SVG compass showing wind direction
-// ---------------------------------------------------------------------------
-function WindCompass({ deg, speed, size = 80 }) {
+function WindCompass({ deg, speed, size = 84 }) {
+  const safeDeg = Number.isFinite(Number(deg)) ? Number(deg) : 0;
   const cx = size / 2;
   const cy = size / 2;
   const r = size / 2 - 8;
   const arrowLen = r - 6;
 
-  // Wind degrees indicate where wind is coming FROM
-  // Arrow points in the direction wind blows TO (add 180°)
   const toRad = (d) => (d * Math.PI) / 180;
-  const blowTo = deg + 180;
+  const blowTo = safeDeg + 180;
   const tipX = cx + arrowLen * Math.sin(toRad(blowTo));
   const tipY = cy - arrowLen * Math.cos(toRad(blowTo));
-  const tailX = cx - (arrowLen * 0.35) * Math.sin(toRad(blowTo));
-  const tailY = cy + (arrowLen * 0.35) * Math.cos(toRad(blowTo));
+  const tailX = cx - arrowLen * 0.35 * Math.sin(toRad(blowTo));
+  const tailY = cy + arrowLen * 0.35 * Math.cos(toRad(blowTo));
 
-  // Arrow head wings
   const wingSpread = 8;
   const wingBack = 12;
   const wing1X = tipX - wingSpread * Math.cos(toRad(blowTo)) - wingBack * Math.sin(toRad(blowTo));
@@ -249,21 +301,18 @@ function WindCompass({ deg, speed, size = 80 }) {
   ];
 
   return (
-    <View style={{ alignItems: "center" }}>
+    <View style={s.compassWrap}>
       <Svg width={size} height={size}>
-        {/* Outer ring */}
-        <Circle cx={cx} cy={cy} r={r} stroke={COLORS.border} strokeWidth={1.5} fill={COLORS.bgDeep} />
-
-        {/* Cardinal tick marks and labels */}
+        <Circle cx={cx} cy={cy} r={r} stroke="rgba(217,168,76,0.55)" strokeWidth={1.5} fill="rgba(0,0,0,0.35)" />
         {cardinals.map((c) => {
-          const lx = cx + (r - 2) * Math.sin(toRad(c.angle));
-          const ly = cy - (r - 2) * Math.cos(toRad(c.angle));
+          const lx = cx + (r - 3) * Math.sin(toRad(c.angle));
+          const ly = cy - (r - 3) * Math.cos(toRad(c.angle));
           return (
             <SvgText
               key={c.label}
               x={lx}
               y={ly + 4}
-              fill={c.label === "N" ? COLORS.green : COLORS.mutedDark}
+              fill={c.label === "N" ? GOLD : "rgba(255,255,255,0.5)"}
               fontSize={9}
               fontWeight="900"
               textAnchor="middle"
@@ -272,169 +321,184 @@ function WindCompass({ deg, speed, size = 80 }) {
             </SvgText>
           );
         })}
-
-        {/* Arrow shaft */}
-        <Line x1={tailX} y1={tailY} x2={tipX} y2={tipY} stroke={COLORS.green} strokeWidth={2.5} />
-
-        {/* Arrow head */}
-        <Polygon
-          points={`${tipX},${tipY} ${wing1X},${wing1Y} ${wing2X},${wing2Y}`}
-          fill={COLORS.green}
-        />
-
-        {/* Center dot */}
-        <Circle cx={cx} cy={cy} r={4} fill={COLORS.bgDeep} stroke={COLORS.border} strokeWidth={1} />
+        <Line x1={tailX} y1={tailY} x2={tipX} y2={tipY} stroke={GOLD} strokeWidth={2.5} />
+        <Polygon points={`${tipX},${tipY} ${wing1X},${wing1Y} ${wing2X},${wing2Y}`} fill={GOLD} />
+        <Circle cx={cx} cy={cy} r={4} fill="#0B0F10" stroke="rgba(255,255,255,0.3)" strokeWidth={1} />
       </Svg>
-      {speed !== undefined && (
-        <Text style={s.compassSpeed}>{speed} mph</Text>
-      )}
+      {speed !== undefined ? <Text style={s.compassSpeed}>{speed} mph</Text> : null}
     </View>
   );
 }
 
-// ---------------------------------------------------------------------------
-// Picker row — horizontal scrollable chips acting as a single-select
-// ---------------------------------------------------------------------------
-function PickerRow({ label, options, value, onChange }) {
+function MiniForecastBlock({ title, subtitle, children }) {
   return (
-    <View style={s.pickerSection}>
-      <Text style={s.pickerLabel}>{label}</Text>
-      <ScrollView horizontal showsHorizontalScrollIndicator={false}>
-        <View style={s.chipRow}>
-          {options.map((opt) => (
-            <TodayChip
-              key={opt}
-              label={opt}
-              selected={opt === value}
-              onPress={() => onChange(opt)}
-            />
-          ))}
+    <View style={s.miniForecastBlock}>
+      <View style={s.miniForecastHeader}>
+        <Text style={s.miniForecastTitle}>{title}</Text>
+        {subtitle ? <Text style={s.miniForecastSub}>{subtitle}</Text> : null}
+      </View>
+      {children}
+    </View>
+  );
+}
+
+function HourlyWeatherRow({ hourly, limit = PRO_HOURLY_LIMIT }) {
+  const hoursToShow = hourly.slice(0, limit);
+
+  if (!hoursToShow.length) {
+    return (
+      <View style={s.emptyForecastBox}>
+        <Text style={s.emptyForecastText}>Hourly forecast unavailable right now.</Text>
+      </View>
+    );
+  }
+
+  return (
+    <View style={s.fiveCardRow}>
+      {hoursToShow.map((h, index) => (
+        <View key={`${h.t}-${index}`} style={s.forecastMiniCard}>
+          <Text style={s.forecastMiniTime}>{h.t}</Text>
+          <WeatherIcon item={h} size={29} />
+          <Text style={s.forecastMiniTemp}>{h.temp}°</Text>
+          <Text style={s.forecastMiniSmall}>{h.precip}%</Text>
         </View>
-      </ScrollView>
+      ))}
     </View>
   );
 }
 
-// ---------------------------------------------------------------------------
-// Spread image popup modal
-// ---------------------------------------------------------------------------
-function SpreadImageModal({ visible, onClose, spread }) {
-  if (!spread) return null;
-  const img = ASSETS.decoys[spread.key];
+function DailyWeatherRow({ days, limit = PRO_DAILY_LIMIT }) {
+  const daysToShow = days.slice(0, limit);
+
+  if (!daysToShow.length) {
+    return (
+      <View style={s.emptyForecastBox}>
+        <Text style={s.emptyForecastText}>5-day forecast unavailable right now.</Text>
+      </View>
+    );
+  }
 
   return (
-    <Modal visible={visible} transparent={false} animationType="slide" onRequestClose={onClose}>
-      <SafeAreaView style={s.modalSafe}>
-        <ScrollView contentContainerStyle={s.modalScroll}>
-          {/* Close bar */}
-          <View style={s.modalTopBar}>
+    <View style={s.fiveCardRow}>
+      {daysToShow.map((day, index) => (
+        <View key={`${day.label}-${index}`} style={s.forecastMiniCard}>
+          <Text style={s.forecastMiniTime}>{day.label}</Text>
+          <WeatherIcon item={day} size={29} />
+          <Text style={s.forecastMiniTemp}>
+            {day.highF != null && day.lowF != null ? `${day.highF}°` : day.score != null ? `${day.score}` : "--"}
+          </Text>
+          <Text style={s.forecastMiniSmall}>
+            {day.lowF != null ? `L ${day.lowF}°` : day.score != null ? "Score" : ""}
+          </Text>
+        </View>
+      ))}
+    </View>
+  );
+}
+
+function WhyScoreModal({ visible, onClose, hunt }) {
+  return (
+    <Modal visible={visible} transparent animationType="fade" onRequestClose={onClose}>
+      <View style={s.modalBackdrop}>
+        <View style={s.whyModalCard}>
+          <View style={s.whyModalHeader}>
             <View style={{ flex: 1 }}>
-              <Text style={s.modalTitle}>{spread.name}</Text>
-              <Text style={s.modalSubtitle}>{spread.type}</Text>
+              <Text style={s.modalEyebrow}>PREDICTION DETAILS</Text>
+              <Text style={s.whyModalTitle}>Why this score</Text>
             </View>
-            <Pressable style={s.modalXBtn} onPress={onClose}>
-              <Text style={s.modalXBtnText}>✕</Text>
+
+            <Pressable style={s.modalCloseBtn} onPress={onClose}>
+              <Text style={s.modalCloseText}>✕</Text>
             </Pressable>
           </View>
 
-          {/* Full-width image */}
-          {img ? (
-            <Image
-              source={img}
-              style={s.modalImage}
-              resizeMode="contain"
-            />
-          ) : (
-            <View style={s.modalImagePlaceholder}>
-              <Text style={s.modalImagePlaceholderText}>Image not available</Text>
-            </View>
-          )}
-
-          <View style={s.modalInfoRow}>
-            <View style={s.modalInfoPill}>
-              <Text style={s.modalInfoLabel}>Decoys</Text>
-              <Text style={s.modalInfoValue}>{spread.decoyCount}</Text>
-            </View>
-            <View style={s.modalInfoPill}>
-              <Text style={s.modalInfoLabel}>Calling</Text>
-              <Text style={s.modalInfoValue}>{spread.calling}</Text>
-            </View>
-            <View style={s.modalInfoPill}>
-              <Text style={s.modalInfoLabel}>Best Time</Text>
-              <Text style={s.modalInfoValue}>{spread.bestTime}</Text>
-            </View>
+          <View style={s.modalScoreRow}>
+            <Text style={s.modalScoreNumber}>{Math.round(hunt.score)}</Text>
+            <Text style={s.modalScoreText}>
+              {hunt.score >= 70 ? "Very High" : hunt.score >= 45 ? "Fair" : "Tough"} hunt conditions
+            </Text>
           </View>
 
-          <Text style={s.modalNotes}>{spread.notes}</Text>
-
-          <View style={s.modalMistakeBox}>
-            <Text style={s.modalMistakeLabel}>Common Mistake</Text>
-            <Text style={s.modalMistakeText}>{spread.mistakes}</Text>
+          <View style={s.whyModalList}>
+            {hunt.why.length === 0 ? (
+              <Text style={s.whyText}>Add more signals to explain this.</Text>
+            ) : (
+              hunt.why.map((item, idx) => (
+                <View key={idx} style={s.whyRow}>
+                  <Text style={s.whyBullet}>{item.type === "up" ? "▲" : "▼"}</Text>
+                  <Text style={s.whyText}>{item.text}</Text>
+                </View>
+              ))
+            )}
           </View>
 
-          <Pressable style={s.modalCloseBtn} onPress={onClose}>
-            <Text style={s.modalCloseBtnText}>Close</Text>
+          <Pressable style={s.modalDoneBtn} onPress={onClose}>
+            <Text style={s.modalDoneText}>Got it</Text>
           </Pressable>
-
-          <View style={{ height: 30 }} />
-        </ScrollView>
-      </SafeAreaView>
+        </View>
+      </View>
     </Modal>
   );
 }
 
-// --- Main screen ---
-
-// ---------------------------------------------------------------------------
-// Freemium gating limits
-// ---------------------------------------------------------------------------
-const FREE_HOURLY_LIMIT = 3;   // Free users see 3 consecutive hours
-const PRO_HOURLY_LIMIT = 5;    // Pro users see 5 consecutive hours
-const FREE_SPREAD_LIMIT = 2;   // Free users see 2 spreads; Pro sees all
-
-export default function TodayScreen({ onLogout }) {
+export default function TodayScreen({ onLogout, openGroupScreen }) {
   const { weather, loading, refresh, coords } = useWeather();
-  const { isPro } = usePremium();
+  const { isPro, purchase } = usePremium();
+  const { user } = useAuth();
+  const userId = user?.uid || null;
+
   const [refreshing, setRefreshing] = useState(false);
   const [alertsOn, setAlertsOn] = useState(false);
   const [refreshCount, setRefreshCount] = useState(0);
+  const [whyModalVisible, setWhyModalVisible] = useState(false);
+
+  const [inAppNotifications, setInAppNotifications] = useState([]);
+  const [inAppNotificationsVisible, setInAppNotificationsVisible] = useState(false);
+
+  const weatherAnalyticsSignatureRef = useRef(null);
+  const proTrendsAnalyticsSignatureRef = useRef(null);
 
   const hunt = useMemo(() => scoreHuntToday(weather), [weather]);
 
-  // 5-Day Hunt Forecast: today (live score) + next 4 days from forecast
   const forecast = useMemo(() => {
     const days = [{ label: "Today", score: scoreHunt(weather).score }];
-    if (weather.forecast5Day) {
+
+    if (Array.isArray(weather?.forecast5Day)) {
       weather.forecast5Day.forEach((day) => {
         const date = day.dateUnix ? new Date(day.dateUnix * 1000) : undefined;
         days.push({ label: day.label, score: scoreHunt(day, date).score });
       });
     }
+
     return days.slice(0, 5);
   }, [weather]);
 
-  // Moon phase for today
+  const dailyWeatherCards = useMemo(() => {
+    const daily = Array.isArray(weather?.dailyWeather5Day)
+      ? weather.dailyWeather5Day.slice(0, PRO_DAILY_LIMIT)
+      : [];
+
+    if (daily.length > 0) {
+      return daily.map((day, index) => ({
+        ...day,
+        score: forecast[index]?.score ?? null,
+      }));
+    }
+
+    return forecast.map((day) => ({
+      label: day.label,
+      score: day.score,
+      icon: null,
+      highF: null,
+      lowF: null,
+      precipChance: null,
+      windMph: null,
+      cloudPct: null,
+    }));
+  }, [weather, forecast]);
+
   const moonPhase = useMemo(() => getMoonPhase(), []);
 
-  // ---------------------------------------------------------------------------
-  // Decoy Spread Advisor state
-  // ---------------------------------------------------------------------------
-  const [dWater, setDWater] = useState(WATER_TYPES[0]);
-  const [dWeather, setDWeather] = useState(WEATHER_OPTIONS[0]);
-  const [dSeason, setDSeason] = useState(SEASON_OPTIONS[0]);
-  const [dPressure, setDPressure] = useState(PRESSURE_OPTIONS[0]);
-  const [dSpecies, setDSpecies] = useState(SPECIES_OPTIONS[0]);
-  const [spreadModal, setSpreadModal] = useState(null); // spread object or null
-
-  // AI Spread Analyzer state
-  const [aiSpreadPhoto, setAiSpreadPhoto] = useState(null);
-  const [aiSpreadResult, setAiSpreadResult] = useState(null);
-  const [aiSpreadLoading, setAiSpreadLoading] = useState(false);
-  const [aiSpreadModalVisible, setAiSpreadModalVisible] = useState(false);
-
-  // ---------------------------------------------------------------------------
-  // Weather Radar — RainViewer live radar tiles
-  // ---------------------------------------------------------------------------
   const [radarTileUrl, setRadarTileUrl] = useState(null);
   const [radarTimestamp, setRadarTimestamp] = useState(null);
   const [radarFrames, setRadarFrames] = useState([]);
@@ -442,29 +506,182 @@ export default function TodayScreen({ onLogout }) {
   const [radarFrameIndex, setRadarFrameIndex] = useState(0);
   const [radarPlaying, setRadarPlaying] = useState(false);
 
+  const hourly = Array.isArray(weather?.hourly) ? weather.hourly : [];
+  const hourlyForecastLimit = isPro ? PRO_HOURLY_LIMIT : FREE_HOURLY_LIMIT;
+  const dailyForecastLimit = isPro ? PRO_DAILY_LIMIT : FREE_DAILY_LIMIT;
+  const trendWidth = Math.max(SCREEN_WIDTH - 64, 240);
+
+  const todayAnalyticsMeta = useMemo(
+    () =>
+      buildTodayAnalyticsMeta({
+        weather,
+        hunt,
+        isPro,
+        coords,
+        radarTileUrl,
+        radarFrames,
+        radarExpanded,
+        radarPlaying,
+        alertsOn,
+        hourlyCount: hourly.length,
+        dailyCount: dailyWeatherCards.length,
+        trendCount: Array.isArray(weather?.trends48h) ? weather.trends48h.length : 0,
+      }),
+    [
+      weather,
+      hunt,
+      isPro,
+      coords,
+      radarTileUrl,
+      radarFrames,
+      radarExpanded,
+      radarPlaying,
+      alertsOn,
+      hourly.length,
+      dailyWeatherCards.length,
+    ]
+  );
+
+  useEffect(() => {
+    if (!userId) {
+      setInAppNotifications([]);
+      setInAppNotificationsVisible(false);
+      return;
+    }
+
+    let mounted = true;
+
+    async function loadUnreadNotifications() {
+      try {
+        const unread = await loadUnreadInAppNotifications(userId);
+
+        if (!mounted) return;
+
+        setInAppNotifications(Array.isArray(unread) ? unread : []);
+
+        if (Array.isArray(unread) && unread.length > 0) {
+          setInAppNotificationsVisible(true);
+
+          logEvent("today_in_app_notifications_popup_shown", userId, {
+            screen: "TodayScreen",
+            unreadCount: unread.length,
+            notificationTypes: unread.map((item) => item.type).filter(Boolean),
+          });
+        }
+      } catch (err) {
+        console.log("DuckSmart in-app notification load error:", err?.message || err);
+      }
+    }
+
+    loadUnreadNotifications();
+
+    return () => {
+      mounted = false;
+    };
+  }, [userId]);
+
+  useEffect(() => {
+    const lat = coords?.latitude ?? coords?.lat;
+    const lon = coords?.longitude ?? coords?.lon ?? coords?.lng;
+
+    if (lat == null || lon == null) return;
+
+    saveWeatherLocationForNotifications({
+      lat,
+      lon,
+      locationName: weather?.locationName || null,
+    });
+  }, [
+    coords?.latitude,
+    coords?.longitude,
+    coords?.lat,
+    coords?.lon,
+    coords?.lng,
+    weather?.locationName,
+  ]);
+
   const loadRadar = useCallback(async () => {
+    logEvent("today_radar_load_requested", userId, {
+      screen: "TodayScreen",
+      isPro: !!isPro,
+      isDev: !!__DEV__,
+    });
+
     const result = await fetchRadarFrames();
+    console.log("DuckSmart TodayScreen radar result", result);
+
+    logEvent("today_radar_load_result", userId, {
+      screen: "TodayScreen",
+      isPro: !!isPro,
+      hasRadar: !!result?.tileUrl,
+      radarFrameCount: Array.isArray(result?.frames) ? result.frames.length : 0,
+      radarTimestamp: result?.timestamp || null,
+    });
+
     if (result) {
       setRadarTileUrl(result.tileUrl);
       setRadarTimestamp(result.timestamp);
       setRadarFrames(result.frames || []);
     }
-  }, []);
+  }, [isPro, userId]);
+
+  useEffect(() => {
+    logScreenView(userId, "TodayScreen");
+    logEvent("today_screen_view", userId, todayAnalyticsMeta);
+  }, [userId]);
+
+  useEffect(() => {
+    if (!weather?.tempF && !weather?.locationName) return;
+
+    const signature = JSON.stringify({
+      refreshCount,
+      tempF: weather?.tempF ?? null,
+      feelsLikeF: weather?.feelsLikeF ?? null,
+      windMph: weather?.windMph ?? null,
+      pressureInHg: weather?.pressureInHg ?? null,
+      precipChance: weather?.precipChance ?? null,
+      cloudPct: weather?.cloudPct ?? null,
+      huntScore: analyticsNumber(hunt?.score),
+      locationName: weather?.locationName || null,
+    });
+
+    if (weatherAnalyticsSignatureRef.current === signature) return;
+    weatherAnalyticsSignatureRef.current = signature;
+
+    logEvent("today_weather_snapshot", userId, {
+      ...todayAnalyticsMeta,
+      refreshCount,
+    });
+  }, [weather, hunt, refreshCount, todayAnalyticsMeta, userId]);
+
+  useEffect(() => {
+    const trendCount = Array.isArray(weather?.trends48h) ? weather.trends48h.length : 0;
+    if (trendCount <= 2) return;
+
+    const signature = `${userId || "guest"}-${isPro ? "pro" : "free"}-${trendCount}`;
+    if (proTrendsAnalyticsSignatureRef.current === signature) return;
+    proTrendsAnalyticsSignatureRef.current = signature;
+
+    logEvent(isPro ? "today_48h_trends_visible" : "today_48h_trends_paywall_visible", userId, {
+      ...todayAnalyticsMeta,
+      trendCount,
+    });
+  }, [weather?.trends48h, isPro, todayAnalyticsMeta, userId]);
 
   useEffect(() => {
     loadRadar();
   }, [loadRadar]);
 
-  // Animate radar loop when expanded and playing
   useEffect(() => {
     if (!radarExpanded || !radarPlaying || radarFrames.length < 2) return;
+
     const interval = setInterval(() => {
       setRadarFrameIndex((prev) => (prev + 1) % radarFrames.length);
-    }, 700);
+    }, RADAR_FRAME_INTERVAL_MS);
+
     return () => clearInterval(interval);
   }, [radarExpanded, radarPlaying, radarFrames.length]);
 
-  // Auto-play when expanded
   useEffect(() => {
     if (radarExpanded && radarFrames.length > 1) {
       setRadarFrameIndex(0);
@@ -472,1276 +689,1421 @@ export default function TodayScreen({ onLogout }) {
     } else {
       setRadarPlaying(false);
     }
-  }, [radarExpanded]);
-
-  const recommendation = useMemo(
-    () =>
-      recommendSpread({
-        waterType: dWater,
-        weather: dWeather,
-        season: dSeason,
-        pressure: dPressure,
-        species: dSpecies,
-      }),
-    [dWater, dWeather, dSeason, dPressure, dSpecies]
-  );
-
-  // ---------------------------------------------------------------------------
-  // AI Spread Analyzer
-  // ---------------------------------------------------------------------------
-  async function handleAISpreadAnalyzer(useCamera) {
-    if (!isPro) {
-      Alert.alert("Pro Feature", "AI Spread Analyzer requires DuckSmart Pro.", [
-        { text: "Not Now", style: "cancel" },
-        { text: "Upgrade to Pro", onPress: () => {} },
-      ]);
-      return;
-    }
-    if (!isAIAvailable()) {
-      Alert.alert("Not Configured", "AI features require an OpenAI API key. Add it in app.json → extra → openaiApiKey.");
-      return;
-    }
-
-    try {
-      let result;
-      if (useCamera) {
-        const perm = await ImagePicker.requestCameraPermissionsAsync();
-        if (!perm.granted) { Alert.alert("Permission Needed", "Camera access is required."); return; }
-        result = await ImagePicker.launchCameraAsync({ quality: 0.7, allowsEditing: true });
-      } else {
-        const perm = await ImagePicker.requestMediaLibraryPermissionsAsync();
-        if (!perm.granted) { Alert.alert("Permission Needed", "Photo library access is required."); return; }
-        result = await ImagePicker.launchImageLibraryAsync({ quality: 0.7, allowsEditing: true });
-      }
-      if (result.canceled || !result.assets?.length) return;
-
-      const uri = result.assets[0].uri;
-      setAiSpreadPhoto(uri);
-      setAiSpreadResult(null);
-      setAiSpreadLoading(true);
-      setAiSpreadModalVisible(true);
-
-      const weatherCtx = weather ? {
-        windDir: formatWind(weather.windDeg),
-        windMph: weather.windMph,
-        tempF: weather.tempF,
-        condition: `${weather.cloudPct}% clouds, ${weather.precipChance}% precip chance`,
-      } : null;
-
-      const analysis = await aiAnalyzeSpread(uri, weatherCtx);
-      setAiSpreadResult(analysis);
-    } catch (err) {
-      Alert.alert("AI Error", err.message || "Could not analyze the spread. Please try again.");
-      setAiSpreadModalVisible(false);
-    } finally {
-      setAiSpreadLoading(false);
-    }
-  }
-
-  function promptAISpreadAnalyzer() {
-    Alert.alert("AI Spread Analyzer", "Take a photo of your decoy spread or choose from gallery.", [
-      { text: "Camera", onPress: () => handleAISpreadAnalyzer(true) },
-      { text: "Gallery", onPress: () => handleAISpreadAnalyzer(false) },
-      { text: "Cancel", style: "cancel" },
-    ]);
-  }
+  }, [radarExpanded, radarFrames.length]);
 
   const onRefresh = useCallback(async () => {
+    logEvent("today_pull_to_refresh_started", userId, todayAnalyticsMeta);
     setRefreshing(true);
     await Promise.all([refresh(), loadRadar()]);
     setRefreshing(false);
     setRefreshCount((c) => c + 1);
-  }, [refresh, loadRadar]);
+    logEvent("today_pull_to_refresh_completed", userId, todayAnalyticsMeta);
+  }, [refresh, loadRadar, todayAnalyticsMeta, userId]);
 
   const toggleHuntAlerts = useCallback(async () => {
+    logEvent("today_hunt_alerts_toggle_pressed", userId, {
+      ...todayAnalyticsMeta,
+      previousAlertsOn: !!alertsOn,
+    });
+
     if (alertsOn) {
       await cancelHuntAlerts();
       setAlertsOn(false);
+      logEvent("today_hunt_alerts_cancelled", userId, todayAnalyticsMeta);
       Alert.alert("Alerts Off", "Sunrise and sunset alerts have been cancelled.");
     } else {
       const success = await scheduleHuntAlerts(weather.sunrise, weather.sunset);
+
       if (success) {
         setAlertsOn(true);
+        logEvent("today_hunt_alerts_scheduled", userId, todayAnalyticsMeta);
         Alert.alert("Alerts Set!", "You'll be notified 30 min before sunrise and at sunset.");
       } else {
+        logEvent("today_hunt_alerts_permission_needed", userId, todayAnalyticsMeta);
         Alert.alert("Permission Needed", "Enable notifications in your device settings to use hunt alerts.");
       }
     }
-  }, [alertsOn, weather.sunrise, weather.sunset]);
+  }, [alertsOn, weather.sunrise, weather.sunset, todayAnalyticsMeta, userId]);
 
-  if (loading && !weather.tempF) {
+  async function handleMarkInAppNotificationRead(item) {
+    if (!userId || !item?.id) return;
+
+    try {
+      await markInAppNotificationRead(userId, item.id);
+
+      setInAppNotifications((prev) => {
+        const next = prev.filter((notification) => notification.id !== item.id);
+
+        if (next.length === 0) {
+          setInAppNotificationsVisible(false);
+        }
+
+        return next;
+      });
+
+      logEvent("today_in_app_notification_marked_read", userId, {
+        screen: "TodayScreen",
+        notificationId: item.id,
+        notificationType: item.type || null,
+      });
+    } catch (err) {
+      console.log("DuckSmart mark notification read error:", err?.message || err);
+      Alert.alert("Notification Error", "Could not mark this notification as read.");
+    }
+  }
+
+  function handleViewAllInAppNotifications() {
+    setInAppNotificationsVisible(false);
+
+    logEvent("today_in_app_notifications_view_all_pressed", userId, {
+      screen: "TodayScreen",
+      unreadCount: inAppNotifications.length,
+    });
+
+    if (typeof openGroupScreen === "function") {
+      openGroupScreen();
+      return;
+    }
+
+    Alert.alert(
+      "Notifications",
+      "Open Groups / Shared Logs to view your DuckSmart notifications."
+    );
+  }
+
+  if (loading && !weather?.tempF) {
     return (
       <ScreenBackground style={s.safe} bg={ASSETS.backgrounds.today}>
-        <SafeAreaView style={{ flex: 1 }}>
-        <StatusBar barStyle="light-content" />
-        <View style={{ flex: 1, alignItems: "center", justifyContent: "center" }}>
-          <ActivityIndicator size="large" color={COLORS.green} />
-          <Text style={{ color: COLORS.muted, marginTop: 14, fontWeight: "800" }}>Loading weather...</Text>
-        </View>
+        <View pointerEvents="none" style={s.darkScrim} />
+        <SafeAreaView edges={["top", "left", "right"]} style={{ flex: 1 }}>
+          <StatusBar barStyle="light-content" />
+          <View style={s.loadingWrap}>
+            <ActivityIndicator size="large" color={GOLD} />
+            <Text style={s.loadingTitle}>Loading weather...</Text>
+            <Text style={s.loadingSub}>Building your hunt picture.</Text>
+          </View>
+
+          <InAppNotificationsModal
+            visible={inAppNotificationsVisible}
+            notifications={inAppNotifications}
+            onClose={() => setInAppNotificationsVisible(false)}
+            onViewAll={handleViewAllInAppNotifications}
+            onMarkRead={handleMarkInAppNotificationRead}
+          />
         </SafeAreaView>
       </ScreenBackground>
     );
   }
 
-  const primary = recommendation.primary;
-  const addon = recommendation.addon;
-
   return (
     <ScreenBackground style={s.safe} bg={ASSETS.backgrounds.today}>
-      <SafeAreaView style={{ flex: 1 }}>
-      <StatusBar barStyle="light-content" />
+      <View pointerEvents="none" style={s.darkScrim} />
 
-      {/* Spread image popup */}
-      <SpreadImageModal
-        visible={!!spreadModal}
-        onClose={() => setSpreadModal(null)}
-        spread={spreadModal}
-      />
+      <SafeAreaView edges={["top", "left", "right"]} style={{ flex: 1 }}>
+        <StatusBar barStyle="light-content" />
 
-      {/* AI Spread Analyzer result modal */}
-      <Modal visible={aiSpreadModalVisible} transparent={false} animationType="slide" onRequestClose={() => setAiSpreadModalVisible(false)}>
-        <SafeAreaView style={[s.safe, { backgroundColor: "#000" }]}>
-          <ScrollView contentContainerStyle={s.container}>
-            <View style={{ flexDirection: "row", alignItems: "center", marginBottom: 12 }}>
-              <Pressable style={s.gearButton} onPress={() => setAiSpreadModalVisible(false)}>
-                <Text style={s.gearText}>‹</Text>
-              </Pressable>
-              <View style={{ flex: 1, marginLeft: 12 }}>
-                <Text style={{ color: COLORS.white, fontSize: 22, fontWeight: "900" }}>AI Spread Analyzer</Text>
-                <Text style={{ color: COLORS.muted, fontSize: 12, fontWeight: "700", marginTop: 2 }}>Powered by DuckSmart AI</Text>
-              </View>
-            </View>
+        <WhyScoreModal
+          visible={whyModalVisible}
+          onClose={() => {
+            logEvent("today_score_details_closed", userId, todayAnalyticsMeta);
+            setWhyModalVisible(false);
+          }}
+          hunt={hunt}
+        />
 
-            {aiSpreadPhoto && (
-              <Image source={{ uri: aiSpreadPhoto }} style={s.aiSpreadPhoto} resizeMode="cover" />
-            )}
+        <InAppNotificationsModal
+          visible={inAppNotificationsVisible}
+          notifications={inAppNotifications}
+          onClose={() => setInAppNotificationsVisible(false)}
+          onViewAll={handleViewAllInAppNotifications}
+          onMarkRead={handleMarkInAppNotificationRead}
+        />
 
-            {aiSpreadLoading && (
-              <View style={s.aiSpreadLoadingBox}>
-                <ActivityIndicator size="large" color={COLORS.green} />
-                <Text style={s.aiSpreadLoadingText}>Analyzing your spread...</Text>
-              </View>
-            )}
-
-            {aiSpreadResult && (
-              <>
-                {/* Overall Score */}
-                <TodayCard title="Overall Score">
-                  <View style={{ alignItems: "center" }}>
-                    <TodayHalfGauge value={aiSpreadResult.overallScore} />
-                  </View>
-                  {aiSpreadResult.spreadType && (
-                    <Text style={s.aiSpreadType}>Detected: {aiSpreadResult.spreadType}</Text>
-                  )}
-                  {aiSpreadResult.summary && (
-                    <Text style={s.aiSpreadSummary}>{aiSpreadResult.summary}</Text>
-                  )}
-                </TodayCard>
-
-                {/* Category Scores */}
-                <TodayCard title="Breakdown">
-                  {[
-                    { key: "windAlignment", label: "Wind Alignment", icon: "💨" },
-                    { key: "spacing", label: "Spacing", icon: "↔️" },
-                    { key: "realism", label: "Realism", icon: "🦆" },
-                    { key: "landingZone", label: "Landing Zone", icon: "🎯" },
-                  ].map((cat) => {
-                    const data = aiSpreadResult.scores?.[cat.key];
-                    if (!data) return null;
-                    const barColor = data.score >= 70 ? COLORS.green : data.score >= 40 ? COLORS.yellow : COLORS.red;
-                    return (
-                      <View key={cat.key} style={s.aiScoreCatRow}>
-                        <View style={s.aiScoreCatHeader}>
-                          <Text style={s.aiScoreCatIcon}>{cat.icon}</Text>
-                          <Text style={s.aiScoreCatLabel}>{cat.label}</Text>
-                          <Text style={[s.aiScoreCatValue, { color: barColor }]}>{data.score}</Text>
-                        </View>
-                        <View style={s.aiScoreBarBg}>
-                          <View style={[s.aiScoreBarFill, { width: `${data.score}%`, backgroundColor: barColor }]} />
-                        </View>
-                        {data.note ? <Text style={s.aiScoreCatNote}>{data.note}</Text> : null}
-                      </View>
-                    );
-                  })}
-                </TodayCard>
-
-                {/* Improvements */}
-                {aiSpreadResult.improvements?.length > 0 && (
-                  <TodayCard title="Improvements">
-                    {aiSpreadResult.improvements.map((tip, i) => (
-                      <View key={i} style={s.aiImprovRow}>
-                        <Text style={s.aiImprovBullet}>{i + 1}</Text>
-                        <Text style={s.aiImprovText}>{tip}</Text>
-                      </View>
-                    ))}
-                  </TodayCard>
-                )}
-
-                <Pressable style={s.aiSpreadDoneBtn} onPress={() => setAiSpreadModalVisible(false)}>
-                  <Text style={s.aiSpreadDoneBtnText}>Done</Text>
-                </Pressable>
-              </>
-            )}
-            <View style={{ height: 30 }} />
-          </ScrollView>
-        </SafeAreaView>
-      </Modal>
-
-      <ScrollView
-        contentContainerStyle={s.container}
-        refreshControl={
-          <RefreshControl
-            refreshing={refreshing}
-            onRefresh={onRefresh}
-            tintColor={COLORS.green}
-            colors={[COLORS.green]}
-          />
-        }
-      >
-        {/* Header */}
-        <View style={s.headerRow}>
-          <View style={{ flexDirection: "row", alignItems: "center", gap: 12 }}>
-            <Image source={ASSETS.logo} style={s.logoSmall} resizeMode="contain" />
-            <View>
-              <Text style={s.brand}>
-                <Text style={s.brandDuck}>Duck</Text>
-                <Text style={s.brandSmart}>Smart</Text>
-              </Text>
-              <Text style={s.brandDuck}>
-                Today • {weather.locationName}
-              </Text>
-            </View>
-          </View>
-
-          <Pressable style={s.gearButton} onPress={onLogout || (() => {})} accessibilityLabel="Settings" accessibilityRole="button">
-            <Text style={s.gearText}>⚙︎</Text>
-          </Pressable>
-        </View>
-
-        {/* Easter egg — appears on every 4th pull-to-refresh */}
-        {refreshCount > 0 && refreshCount % 4 === 0 && (
-          <Text style={s.easterEggLine}>Same weather. Different hopes.</Text>
-        )}
-
-        {/* Hunt probability */}
-        <TodayCard
-          title="Hunt Probability"
-          right={
-            <View style={s.scorePill}>
-              <Text style={s.scorePillText}>
-                {hunt.score >= 70 ? "Prime" : hunt.score >= 45 ? "Fair" : "Tough"}
-              </Text>
-            </View>
-          }
-        >
-          <TodayHalfGauge value={hunt.score} />
-
-          <View style={s.whyBox}>
-            <Text style={s.whyTitle}>Why this score</Text>
-            {hunt.why.length === 0 ? (
-              <Text style={s.whyText}>Add more signals to explain this.</Text>
-            ) : (
-              hunt.why.map((item, idx) => (
-                <View key={idx} style={s.whyRow}>
-                  <Text style={s.whyBullet}>
-                    {item.type === "up" ? "▲" : "▼"}
-                  </Text>
-                  <Text style={s.whyText}>{item.text}</Text>
-                </View>
-              ))
-            )}
-          </View>
-        </TodayCard>
-
-        {/* 5-Day Hunt Forecast */}
-        {forecast.length > 1 && (
-          <TodayCard title="5-Day Hunt Forecast">
-            <ForecastBarChart days={forecast} />
-          </TodayCard>
-        )}
-
-        {/* Migration Intel — eBird live data */}
-        {weather.migration && (
-          <TodayCard title="Migration Intel">
-            <Text style={s.migSummary}>{weather.migration.summary}</Text>
-
-            {weather.migration.topSpecies?.length > 0 && (
-              <View style={s.migSpeciesList}>
-                {weather.migration.topSpecies.map((sp, i) => (
-                  <View key={i} style={s.migSpeciesRow}>
-                    <Text style={s.migSpeciesName}>{sp.name}</Text>
-                    <Text style={s.migSpeciesCount}>{sp.count} sighted</Text>
-                  </View>
-                ))}
-              </View>
-            )}
-
-            <View style={s.migFooter}>
-              <View style={[s.migTrendPill, {
-                backgroundColor: weather.migration.trending === "up" ? "#2ECC7122" : weather.migration.trending === "down" ? "#D94C4C22" : "#88888822",
-              }]}>
-                <Text style={[s.migTrendText, {
-                  color: weather.migration.trending === "up" ? COLORS.green : weather.migration.trending === "down" ? COLORS.red : COLORS.muted,
-                }]}>
-                  {weather.migration.trending === "up" ? "▲" : weather.migration.trending === "down" ? "▼" : "—"}{" "}
-                  {weather.migration.changePercent > 0 ? "+" : ""}{weather.migration.changePercent}% vs last week
-                </Text>
-              </View>
-              <Text style={s.migSource}>via eBird</Text>
-            </View>
-          </TodayCard>
-        )}
-
-        {/* Real-time Weather */}
-        <TodayCard title="Real-Time Weather">
-          <View style={s.metricRow}>
-            <TodayMetricPill label="Temp" value={`${weather.tempF}°F`} />
-            <TodayMetricPill label="Feels" value={`${weather.feelsLikeF}°F`} />
-            <TodayMetricPill label="Precip" value={`${weather.precipChance}%`} />
-          </View>
-
-          <View style={s.metricRow}>
-            <TodayMetricPill label="Pressure" value={`${weather.pressureInHg}`} />
-            <TodayMetricPill label="Clouds" value={`${weather.cloudPct}%`} />
-            <TodayMetricPill
-              label="Wind"
-              value={`${weather.windMph} mph ${formatWind(weather.windDeg)}`}
+        <ScrollView
+          style={s.scrollSurface}
+          contentContainerStyle={s.container}
+          contentInsetAdjustmentBehavior="never"
+          automaticallyAdjustContentInsets={false}
+          automaticallyAdjustsScrollIndicatorInsets={false}
+          refreshControl={
+            <RefreshControl
+              refreshing={refreshing}
+              onRefresh={onRefresh}
+              tintColor={GOLD}
+              colors={[GOLD]}
             />
-          </View>
-
-          {/* Wind compass + Sun times */}
-          <View style={s.windCompassRow}>
-            <WindCompass deg={weather.windDeg} speed={weather.windMph} size={80} />
-            <View style={{ flex: 1, marginLeft: 12 }}>
-              <Text style={s.windFromLabel}>
-                Wind from <Text style={{ color: COLORS.green }}>{formatWind(weather.windDeg)}</Text>
-              </Text>
-              <View style={s.sunRow}>
-                <View style={s.sunPill}>
-                  <Text style={s.sunLabel}>Sunrise</Text>
-                  <Text style={s.sunValue}>{weather.sunrise}</Text>
-                </View>
-                <View style={s.sunPill}>
-                  <Text style={s.sunLabel}>Sunset</Text>
-                  <Text style={s.sunValue}>{weather.sunset}</Text>
-                </View>
-              </View>
-            </View>
-          </View>
-
-          {/* Moon phase */}
-          <View style={s.moonRow}>
-            <Text style={s.moonEmoji}>{moonPhase.emoji}</Text>
-            <View style={{ flex: 1 }}>
-              <Text style={s.moonName}>{moonPhase.name}</Text>
-              <Text style={s.moonDetail}>
-                {Math.round(moonPhase.illumination * 100)}% illuminated • Solunar {moonPhase.illumination < 0.15 || moonPhase.illumination > 0.85 ? "peak" : moonPhase.illumination > 0.35 && moonPhase.illumination < 0.65 ? "low" : "moderate"}
-              </Text>
-            </View>
-          </View>
-
-          <Pressable style={[s.alertBtn, alertsOn ? s.alertBtnActive : null]} onPress={toggleHuntAlerts} accessibilityLabel={alertsOn ? "Turn off hunt alerts" : "Set sunrise and sunset alerts"} accessibilityRole="button">
-            <Text style={[s.alertBtnText, alertsOn ? s.alertBtnTextActive : null]}>
-              {alertsOn ? "🔔  Alerts On" : "🔕  Set Shoot-Time Alerts"}
-            </Text>
-          </Pressable>
-        </TodayCard>
-
-        {/* Weather Radar — free: static snapshot, Pro: live + refresh + animated loop */}
-        {coords && radarTileUrl && (
-          <TodayCard
-            title="Weather Radar"
-            right={
-              isPro ? (
-                <Pressable style={s.radarRefreshBtn} onPress={loadRadar} accessibilityLabel="Refresh radar" accessibilityRole="button">
-                  <Text style={s.radarRefreshText}>↻</Text>
-                </Pressable>
-              ) : (
-                <View style={s.proTagPill}>
-                  <Text style={s.proTagText}>Static</Text>
-                </View>
-              )
-            }
-          >
-            <Pressable
-              onPress={() => {
-                if (isPro && radarFrames.length > 1) {
-                  setRadarExpanded(true);
-                } else if (!isPro) {
-                  Alert.alert("Pro Feature", "Animated radar loop requires DuckSmart Pro.", [
-                    { text: "Not Now", style: "cancel" },
-                    { text: "Upgrade to Pro", onPress: () => {} },
-                  ]);
-                }
-              }}
-            >
-              <View style={s.radarWrap}>
-                <MapView
-                  style={s.radarMap}
-                  initialRegion={{
-                    latitude: coords.latitude,
-                    longitude: coords.longitude,
-                    latitudeDelta: 1.5,
-                    longitudeDelta: 1.5,
-                  }}
-                  mapType="standard"
-                  pointerEvents="none"
-                >
-                  <UrlTile
-                    urlTemplate={radarTileUrl}
-                    zIndex={1}
-                    opacity={0.7}
-                  />
-                </MapView>
-              </View>
-            </Pressable>
-            <Text style={s.radarCaption}>
-              {isPro
-                ? `Live radar • ${formatRadarAge(radarTimestamp)} • Tap to expand`
-                : "Static radar • Upgrade to Pro for live refresh"}
-            </Text>
-          </TodayCard>
-        )}
-
-        {/* Expanded Radar Loop Modal (Pro only) */}
-        <Modal visible={radarExpanded} transparent={false} animationType="slide" onRequestClose={() => setRadarExpanded(false)}>
-          <SafeAreaView style={{ flex: 1, backgroundColor: COLORS.black }}>
-            <View style={{ flexDirection: "row", alignItems: "center", justifyContent: "space-between", paddingHorizontal: 16, paddingVertical: 10 }}>
-              <View>
-                <Text style={{ color: COLORS.white, fontWeight: "900", fontSize: 17 }}>Weather Radar</Text>
-                {radarFrames[radarFrameIndex] && (
-                  <Text style={{ color: COLORS.mutedDark, fontWeight: "700", fontSize: 12, marginTop: 2 }}>
-                    {formatRadarAge(radarFrames[radarFrameIndex].timestamp)}
-                  </Text>
-                )}
-              </View>
-              <Pressable
-                onPress={() => setRadarExpanded(false)}
-                style={{ width: 42, height: 42, borderRadius: 12, borderWidth: 1, borderColor: COLORS.border, backgroundColor: COLORS.bg, alignItems: "center", justifyContent: "center" }}
-              >
-                <Text style={{ color: COLORS.white, fontSize: 18, fontWeight: "700" }}>✕</Text>
-              </Pressable>
-            </View>
-
-            <View style={{ flex: 1 }}>
-              {coords && radarFrames[radarFrameIndex] && (
-                <MapView
-                  style={{ flex: 1 }}
-                  initialRegion={{
-                    latitude: coords.latitude,
-                    longitude: coords.longitude,
-                    latitudeDelta: 2.5,
-                    longitudeDelta: 2.5,
-                  }}
-                  mapType="standard"
-                >
-                  <UrlTile
-                    urlTemplate={radarFrames[radarFrameIndex].tileUrl}
-                    zIndex={1}
-                    opacity={0.7}
-                  />
-                </MapView>
-              )}
-            </View>
-
-            {/* Playback controls */}
-            <View style={{ flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 16, paddingVertical: 14, paddingHorizontal: 16 }}>
-              <Pressable
-                onPress={() => {
-                  setRadarPlaying(false);
-                  setRadarFrameIndex((prev) => (prev - 1 + radarFrames.length) % radarFrames.length);
-                }}
-                style={{ width: 44, height: 44, borderRadius: 22, backgroundColor: COLORS.bgDeep, borderWidth: 1, borderColor: COLORS.border, alignItems: "center", justifyContent: "center" }}
-              >
-                <Text style={{ color: COLORS.white, fontWeight: "900", fontSize: 18 }}>◀</Text>
-              </Pressable>
-              <Pressable
-                onPress={() => setRadarPlaying((prev) => !prev)}
-                style={{ width: 56, height: 56, borderRadius: 28, backgroundColor: COLORS.greenBg, borderWidth: 1, borderColor: COLORS.green, alignItems: "center", justifyContent: "center" }}
-              >
-                <Text style={{ color: COLORS.green, fontWeight: "900", fontSize: 22 }}>{radarPlaying ? "⏸" : "▶"}</Text>
-              </Pressable>
-              <Pressable
-                onPress={() => {
-                  setRadarPlaying(false);
-                  setRadarFrameIndex((prev) => (prev + 1) % radarFrames.length);
-                }}
-                style={{ width: 44, height: 44, borderRadius: 22, backgroundColor: COLORS.bgDeep, borderWidth: 1, borderColor: COLORS.border, alignItems: "center", justifyContent: "center" }}
-              >
-                <Text style={{ color: COLORS.white, fontWeight: "900", fontSize: 18 }}>▶</Text>
-              </Pressable>
-            </View>
-
-            {/* Frame indicator */}
-            <View style={{ alignItems: "center", paddingBottom: 16 }}>
-              <Text style={{ color: COLORS.mutedDark, fontSize: 12, fontWeight: "700" }}>
-                Frame {radarFrameIndex + 1} of {radarFrames.length}
-              </Text>
-            </View>
-          </SafeAreaView>
-        </Modal>
-
-        {/* Hourly quick look — free: 3 consecutive hrs, Pro: 5 consecutive hrs */}
-        <TodayCard
-          title="Hourly Snapshot"
-          right={
-            !isPro ? (
-              <View style={s.proTagPill}>
-                <Text style={s.proTagText}>PRO: 5 hours</Text>
-              </View>
-            ) : null
           }
         >
-          <ScrollView horizontal showsHorizontalScrollIndicator={false}>
-            <View style={s.hourlyRow}>
-              {weather.hourly
-                .slice(0, isPro ? PRO_HOURLY_LIMIT : FREE_HOURLY_LIMIT)
-                .map((h) => (
-                  <View key={h.t} style={s.hourlyCard}>
-                    <Text style={s.hourlyTime}>{h.t}</Text>
-                    <Text style={s.hourlyTemp}>{h.temp}°</Text>
-                    <Text style={s.hourlySmall}>Precip {h.precip}%</Text>
-                    <Text style={s.hourlySmall}>Wind {h.wind} mph</Text>
-                    <Text style={s.hourlySmall}>Gust {h.gust}</Text>
-                  </View>
-                ))}
-
-              {/* Locked placeholder card for free users */}
-              {!isPro && (
-                <View style={[s.hourlyCard, s.hourlyCardLocked]}>
-                  <Text style={s.hourlyLockIcon}>🔒</Text>
-                  <Text style={s.hourlyLockText}>
-                    +{PRO_HOURLY_LIMIT - FREE_HOURLY_LIMIT} more{"\n"}with Pro
+          <View style={s.heroTop}>
+            <View style={s.headerRow}>
+              <View style={s.brandRow}>
+                <Image source={ASSETS.logo} style={s.logoSmall} resizeMode="contain" />
+                <View>
+                  <Text style={s.brand}>
+                    <Text style={s.brandDuck}>DUCK</Text>
+                    <Text style={s.brandSmart}>SMART</Text>
+                  </Text>
+                  <Text style={s.locationText} numberOfLines={1}>
+                    Today • {weather.locationName || "Current Location"}
                   </Text>
                 </View>
-              )}
+              </View>
+
+              <Pressable
+                style={s.gearButton}
+                onPress={() => {
+                  logEvent("today_settings_pressed", userId, todayAnalyticsMeta);
+                  (onLogout || (() => {}))();
+                }}
+                accessibilityLabel="Settings"
+                accessibilityRole="button"
+              >
+                <Text style={s.gearText}>⚙︎</Text>
+              </Pressable>
             </View>
-          </ScrollView>
-        </TodayCard>
 
-        {/* 48-Hour Trends — Pro feature */}
-        {weather.trends48h && weather.trends48h.length > 2 && (
-          isPro ? (
-            <TodayCard title="48-Hour Trends">
-              <View style={s.trendSection}>
-                <Text style={s.trendLabel}>Temperature (°F)</Text>
-                <TrendSparkline
-                  data={weather.trends48h.map((d) => d.temp)}
-                  color={COLORS.green}
-                  width={SCREEN_WIDTH - 64}
-                  height={55}
-                  suffix="°"
-                />
-              </View>
-              <View style={s.trendSection}>
-                <Text style={s.trendLabel}>Barometric Pressure (inHg)</Text>
-                <TrendSparkline
-                  data={weather.trends48h.map((d) => d.pressureInHg)}
-                  color={COLORS.yellow}
-                  width={SCREEN_WIDTH - 64}
-                  height={55}
-                  suffix=""
-                />
-              </View>
-              <View style={s.trendTimeRow}>
-                <Text style={s.trendTimeLabel}>Now</Text>
-                <Text style={s.trendTimeLabel}>24h</Text>
-                <Text style={s.trendTimeLabel}>48h</Text>
-              </View>
-            </TodayCard>
-          ) : (
-            <TodayCard
-              title="48-Hour Trends"
-              right={
-                <View style={s.proTagPill}>
-                  <Text style={s.proTagText}>PRO</Text>
-                </View>
-              }
-            >
-              <ProUpgradePrompt message="Unlock 48-hour temperature and pressure trend charts to spot cold fronts and pressure changes before they arrive." />
-            </TodayCard>
-          )
-        )}
+            <View style={s.heroCopy}>
+              <Text style={s.heroWhite}>PREDICT THE HUNT.</Text>
+            </View>
+          </View>
 
-        {/* ================================================================
-            DECOY SPREAD ADVISOR — Selection → Recommendation → Image Popup
-            ================================================================ */}
-        <TodayCard
-          title="Decoy Spread Advisor"
-          right={
+          {refreshCount > 0 && refreshCount % 4 === 0 ? (
+            <Text style={s.easterEggLine}>Same weather. Different hopes.</Text>
+          ) : null}
+
+          <View style={s.heroPanel}>
             <Pressable
-              style={[s.radarRefreshBtn, isPro && { borderColor: COLORS.green, backgroundColor: COLORS.greenBg }]}
-              onPress={promptAISpreadAnalyzer}
-              accessibilityLabel="AI Spread Analyzer"
+              style={s.predictionTapArea}
+              onPress={() => {
+                logEvent("today_score_details_opened", userId, todayAnalyticsMeta);
+                setWhyModalVisible(true);
+              }}
+              accessibilityLabel="Open prediction score details"
               accessibilityRole="button"
             >
-              <Text style={[s.radarRefreshText, isPro && { color: COLORS.green }]}>📷</Text>
-            </Pressable>
-          }
-        >
+              <View style={s.heroScoreHeader}>
+                <View>
+                  <Text style={s.panelEyebrow}>PREDICTION SCORE</Text>
+                  <Text style={s.panelTitle}>
+                    {hunt.score >= 70 ? "Optimal Conditions" : hunt.score >= 45 ? "Huntable Window" : "Tough Conditions"}
+                  </Text>
+                </View>
 
-          {/* Wind compass for spread orientation */}
-          <View style={s.decoyCompassRow}>
-            <WindCompass deg={weather.windDeg} size={64} />
-            <View style={{ flex: 1, marginLeft: 12 }}>
-              <Text style={s.decoyCompassTitle}>
-                Wind: {formatWind(weather.windDeg)} at {weather.windMph} mph
-              </Text>
-              <Text style={s.decoyCompassHint}>
-                Set your spread with the open end facing downwind
-              </Text>
+                <View style={s.scorePill}>
+                  <Text style={s.scorePillText}>
+                    {hunt.score >= 70 ? "PRIME" : hunt.score >= 45 ? "FAIR" : "LOW"}
+                  </Text>
+                </View>
+              </View>
+
+              <HeroGauge value={hunt.score} />
+
+              <Text style={s.tapHint}>Tap score for details</Text>
+            </Pressable>
+
+            <View style={s.heroMetricGrid}>
+              <SmallMetric
+                label="Weather"
+                icon={getWeatherEmojiFromData({
+                  precip: weather.precipChance,
+                  cloudPct: weather.cloudPct,
+                  temp: weather.tempF,
+                })}
+                value={`${weather.precipChance ?? "--"}%`}
+                accent={GOLD}
+              />
+              <SmallMetric
+                label="Wind"
+                icon="💨"
+                value={`${weather.windMph ?? "--"} mph`}
+              />
+              <SmallMetric
+                label="Pressure"
+                icon="⌁"
+                value={`${weather.pressureInHg ?? "--"}`}
+              />
             </View>
+
+            <MiniForecastBlock
+              title={isPro ? "5-Hour Weather" : "3-Hour Weather"}
+              subtitle={isPro ? "Next hunt window" : "Pro unlocks 5 hours"}
+            >
+              <HourlyWeatherRow hourly={hourly} limit={hourlyForecastLimit} />
+              {!isPro ? (
+                <ProUpgradePrompt compact message="Unlock the full 5-hour forecast with Pro" />
+              ) : null}
+            </MiniForecastBlock>
+
+            <MiniForecastBlock
+              title={isPro ? "5-Day Weather" : "3-Day Weather"}
+              subtitle={isPro ? "Daily outlook" : "Pro unlocks 5 days"}
+            >
+              <DailyWeatherRow days={dailyWeatherCards} limit={dailyForecastLimit} />
+              {!isPro ? (
+                <ProUpgradePrompt compact message="Unlock the full 5-day forecast with Pro" />
+              ) : null}
+            </MiniForecastBlock>
           </View>
 
-          {/* Selection pickers */}
-          <PickerRow label="Water Type" options={WATER_TYPES} value={dWater} onChange={setDWater} />
-          <PickerRow label="Weather" options={WEATHER_OPTIONS} value={dWeather} onChange={setDWeather} />
-          <PickerRow label="Season" options={SEASON_OPTIONS} value={dSeason} onChange={setDSeason} />
+          {weather.migration ? (
+            <SectionCard title="Migration Intel" eyebrow="BIRD MOVEMENT">
+              <Text style={s.migSummary}>{weather.migration.summary}</Text>
 
-          {/* Recommendation result */}
-          {primary && (
-            <View style={s.recBox}>
-              <Text style={s.recLabel}>Recommended Spread</Text>
+              {weather.migration.topSpecies?.length > 0 ? (
+                <View style={s.migSpeciesList}>
+                  {weather.migration.topSpecies.map((sp, i) => (
+                    <View key={`${sp.name}-${i}`} style={s.migSpeciesRow}>
+                      <Text style={s.migSpeciesName}>{sp.name}</Text>
+                      <Text style={s.migSpeciesCount}>{sp.count} sighted</Text>
+                    </View>
+                  ))}
+                </View>
+              ) : null}
 
-              <Pressable
-                style={s.recCard}
-                onPress={() => setSpreadModal(primary)}
-              >
-                {ASSETS.decoys[primary.key] && (
-                  <Image
-                    source={ASSETS.decoys[primary.key]}
-                    style={s.recThumb}
-                    resizeMode="cover"
-                  />
-                )}
-                <View style={s.recInfo}>
-                  <Text style={s.recName}>{primary.name}</Text>
-                  <Text style={s.recType}>{primary.type}</Text>
-                  <Text style={s.recDetail} numberOfLines={2}>
-                    {primary.notes}
+              <View style={s.migFooter}>
+                <View
+                  style={[
+                    s.migTrendPill,
+                    {
+                      backgroundColor:
+                        weather.migration.trending === "up"
+                          ? "#2ECC7122"
+                          : weather.migration.trending === "down"
+                            ? "#D94C4C22"
+                            : "#88888822",
+                    },
+                  ]}
+                >
+                  <Text
+                    style={[
+                      s.migTrendText,
+                      {
+                        color:
+                          weather.migration.trending === "up"
+                            ? COLORS.green
+                            : weather.migration.trending === "down"
+                              ? COLORS.red
+                              : COLORS.muted,
+                      },
+                    ]}
+                  >
+                    {weather.migration.trending === "up"
+                      ? "▲"
+                      : weather.migration.trending === "down"
+                        ? "▼"
+                        : "—"}{" "}
+                    {weather.migration.changePercent > 0 ? "+" : ""}
+                    {weather.migration.changePercent}% vs last week
                   </Text>
-                  <View style={s.recMetaRow}>
-                    <Text style={s.recMeta}>Decoys: {primary.decoyCount}</Text>
-                    <Text style={s.recMeta}>Match: {primary.score}%</Text>
+                </View>
+                <Text style={s.migSource}>via eBird</Text>
+              </View>
+            </SectionCard>
+          ) : null}
+
+          <SectionCard title="Real-Time Weather" eyebrow="FIELD CONDITIONS">
+            <View style={s.metricRow}>
+              <SmallMetric label="Temp" icon="🌡️" value={`${weather.tempF ?? "--"}°F`} />
+              <SmallMetric label="Feels" icon="🧥" value={`${weather.feelsLikeF ?? "--"}°F`} />
+              <SmallMetric label="Precip" icon="🌧️" value={`${weather.precipChance ?? "--"}%`} />
+            </View>
+
+            <View style={s.metricRow}>
+              <SmallMetric label="Pressure" icon="⌁" value={`${weather.pressureInHg ?? "--"}`} />
+              <SmallMetric label="Clouds" icon="☁️" value={`${weather.cloudPct ?? "--"}%`} />
+              <SmallMetric
+                label="Wind"
+                icon="💨"
+                value={`${weather.windMph ?? "--"} ${formatWind(weather.windDeg)}`}
+              />
+            </View>
+
+            <View style={s.windCompassRow}>
+              <WindCompass deg={weather.windDeg} speed={weather.windMph} size={82} />
+              <View style={{ flex: 1, marginLeft: 10 }}>
+                <Text style={s.windFromLabel}>
+                  Wind from <Text style={{ color: GOLD }}>{formatWind(weather.windDeg)}</Text>
+                </Text>
+                <View style={s.sunRow}>
+                  <View style={s.sunPill}>
+                    <Text style={s.sunLabel}>Sunrise</Text>
+                    <Text style={s.sunValue}>{weather.sunrise || "--"}</Text>
+                  </View>
+                  <View style={s.sunPill}>
+                    <Text style={s.sunLabel}>Sunset</Text>
+                    <Text style={s.sunValue}>{weather.sunset || "--"}</Text>
                   </View>
                 </View>
-                <Text style={s.recChevron}>›</Text>
-              </Pressable>
+              </View>
+            </View>
 
-              {/* Runner up spreads — free: 1 runner-up (2 total), Pro: all */}
-              {recommendation.all.length > 1 && (
-                <View style={s.runnersSection}>
-                  <Text style={s.runnersTitle}>Other Options</Text>
-                  {recommendation.all
-                    .slice(1, isPro ? 4 : FREE_SPREAD_LIMIT)
-                    .map((sp) => (
-                      <Pressable
-                        key={sp.key}
-                        style={s.runnerRow}
-                        onPress={() => setSpreadModal(sp)}
-                      >
-                        <View style={{ flex: 1 }}>
-                          <Text style={s.runnerName}>{sp.name}</Text>
-                          <Text style={s.runnerType}>{sp.type} • {sp.decoyCount} decoys</Text>
-                        </View>
-                        <Text style={s.runnerScore}>{sp.score}%</Text>
-                        <Text style={s.recChevron}>›</Text>
-                      </Pressable>
-                    ))}
+            <View style={s.moonRow}>
+              <Text style={s.moonEmoji}>{moonPhase.emoji}</Text>
+              <View style={{ flex: 1 }}>
+                <Text style={s.moonName}>{moonPhase.name}</Text>
+                <Text style={s.moonDetail}>
+                  {Math.round(moonPhase.illumination * 100)}% illuminated • Solunar{" "}
+                  {moonPhase.illumination < 0.15 || moonPhase.illumination > 0.85
+                    ? "peak"
+                    : moonPhase.illumination > 0.35 && moonPhase.illumination < 0.65
+                      ? "low"
+                      : "moderate"}
+                </Text>
+              </View>
+            </View>
 
-                  {/* Lock prompt for remaining spreads */}
-                  {!isPro && recommendation.all.length > FREE_SPREAD_LIMIT && (
-                    <ProUpgradePrompt
-                      compact
-                      message={`${recommendation.all.length - FREE_SPREAD_LIMIT} more spreads with Pro`}
+            <Pressable
+              style={[s.alertBtn, alertsOn ? s.alertBtnActive : null]}
+              onPress={toggleHuntAlerts}
+              accessibilityLabel={alertsOn ? "Turn off hunt alerts" : "Set sunrise and sunset alerts"}
+              accessibilityRole="button"
+            >
+              <Text style={[s.alertBtnText, alertsOn ? s.alertBtnTextActive : null]}>
+                {alertsOn ? "🔔  Shoot-Time Alerts On" : "🔕  Set Shoot-Time Alerts"}
+              </Text>
+            </Pressable>
+          </SectionCard>
+
+          {coords && radarTileUrl ? (
+            <SectionCard
+              title="Weather Radar"
+              eyebrow="LIVE MAP"
+              right={
+                isPro ? (
+                  <Pressable
+                    style={s.radarRefreshBtn}
+                    onPress={() => {
+                      logEvent("today_radar_refresh_pressed", userId, todayAnalyticsMeta);
+                      loadRadar();
+                    }}
+                    accessibilityLabel="Refresh radar"
+                    accessibilityRole="button"
+                  >
+                    <Text style={s.radarRefreshText}>↻</Text>
+                  </Pressable>
+                ) : (
+                  <View style={s.proTagPill}>
+                    <Text style={s.proTagText}>STATIC</Text>
+                  </View>
+                )
+              }
+            >
+              <Pressable
+                onPress={() => {
+                  logEvent("today_radar_card_pressed", userId, todayAnalyticsMeta);
+
+                  if ((isPro || __DEV__) && radarFrames.length > 1) {
+                    logEvent("today_radar_loop_opened", userId, todayAnalyticsMeta);
+                    setRadarFrameIndex(0);
+                    setRadarExpanded(true);
+                  } else if (!isPro && !__DEV__) {
+                    logEvent("today_radar_loop_paywall_shown", userId, todayAnalyticsMeta);
+                    Alert.alert("Pro Feature", "Animated radar loop requires DuckSmart Pro.", [
+                      { text: "Not Now", style: "cancel" },
+                      {
+                        text: "Upgrade to Pro",
+                        onPress: () => {
+                          logEvent("today_radar_loop_upgrade_pressed", userId, todayAnalyticsMeta);
+                          purchase();
+                        },
+                      },
+                    ]);
+                  }
+                }}
+              >
+                <View style={s.radarWrap}>
+                  <MapView
+                    style={s.radarMap}
+                    initialRegion={{
+                      latitude: coords.latitude,
+                      longitude: coords.longitude,
+                      latitudeDelta: RADAR_REGION_DELTA,
+                      longitudeDelta: RADAR_REGION_DELTA,
+                    }}
+                    mapType="standard"
+                    pointerEvents="none"
+                    maxZoomLevel={RADAR_MAX_ZOOM}
+                    scrollEnabled={false}
+                    zoomEnabled={false}
+                    rotateEnabled={false}
+                    pitchEnabled={false}
+                    toolbarEnabled={false}
+                  >
+                    <UrlTile
+                      urlTemplate={radarTileUrl}
+                      zIndex={1}
+                      opacity={0.7}
+                      minimumZ={0}
+                      maximumZ={RADAR_MAX_ZOOM}
+                      maximumNativeZ={RADAR_MAX_ZOOM}
+                      tileSize={256}
                     />
-                  )}
-                </View>
-              )}
+                  </MapView>
 
-              {/* Confidence Spread add-on tip — Pro only */}
-              {addon && isPro && (
-                <Pressable
-                  style={s.addonTip}
-                  onPress={() => setSpreadModal(addon)}
-                >
-                  <Text style={s.addonIcon}>+</Text>
-                  <View style={{ flex: 1 }}>
-                    <Text style={s.addonTitle}>Add a Confidence Spread</Text>
-                    <Text style={s.addonText}>
-                      Mix {addon.decoyCount} heron, egret, or coot decoys for extra realism.
+                  <View style={s.radarOverlayTag}>
+                    <Text style={s.radarOverlayText}>
+                      {(isPro || __DEV__) ? "Tap for loop" : "Pro unlocks animation"}
                     </Text>
                   </View>
-                  <Text style={s.recChevron}>›</Text>
+                </View>
+              </Pressable>
+
+              <Text style={s.radarCaption}>
+                {(isPro || __DEV__)
+                  ? `Live radar • ${formatRadarAge(radarTimestamp)} • Tap to expand`
+                  : "Static radar • Upgrade to Pro for animated radar"}
+              </Text>
+            </SectionCard>
+          ) : null}
+
+          <Modal
+            visible={radarExpanded}
+            transparent={false}
+            animationType="slide"
+            onRequestClose={() => {
+              logEvent("today_radar_modal_closed", userId, todayAnalyticsMeta);
+              setRadarExpanded(false);
+            }}
+          >
+            <SafeAreaView style={s.radarModalSafe}>
+              <View style={s.radarModalHeader}>
+                <View>
+                  <Text style={s.radarModalTitle}>Weather Radar</Text>
+                  {radarFrames[radarFrameIndex] ? (
+                    <Text style={s.radarModalSub}>
+                      {formatRadarAge(radarFrames[radarFrameIndex].timestamp)}
+                    </Text>
+                  ) : null}
+                </View>
+
+                <Pressable
+                  onPress={() => {
+                    logEvent("today_radar_modal_closed", userId, todayAnalyticsMeta);
+                    setRadarExpanded(false);
+                  }}
+                  style={s.radarCloseBtn}
+                >
+                  <Text style={s.radarCloseText}>✕</Text>
                 </Pressable>
-              )}
-              {addon && !isPro && (
-                <ProUpgradePrompt
-                  compact
-                  message="Confidence Spread tips with Pro"
-                />
-              )}
-            </View>
-          )}
-        </TodayCard>
+              </View>
 
-        {/* Ad Banner — free version only */}
-        <AdBanner />
+              <View style={{ flex: 1 }}>
+                {coords && radarFrames[radarFrameIndex] ? (
+                  <MapView
+                    style={{ flex: 1 }}
+                    initialRegion={{
+                      latitude: coords.latitude,
+                      longitude: coords.longitude,
+                      latitudeDelta: RADAR_REGION_DELTA,
+                      longitudeDelta: RADAR_REGION_DELTA,
+                    }}
+                    mapType="standard"
+                    maxZoomLevel={RADAR_MAX_ZOOM}
+                    rotateEnabled={false}
+                    pitchEnabled={false}
+                    toolbarEnabled={false}
+                  >
+                    <UrlTile
+                      urlTemplate={radarFrames[radarFrameIndex].tileUrl}
+                      zIndex={1}
+                      opacity={0.7}
+                      minimumZ={0}
+                      maximumZ={RADAR_MAX_ZOOM}
+                      maximumNativeZ={RADAR_MAX_ZOOM}
+                      tileSize={256}
+                    />
+                  </MapView>
+                ) : null}
+              </View>
 
-        {/* Disclaimer */}
-        <Text style={s.disclaimer}>
-          The prediction score is an estimate based on weather, environmental data, and historical patterns.
-          It is not a guarantee of hunt success — actual results may vary due to animal behavior,
-          local conditions, and other factors beyond prediction.
-        </Text>
+              <View style={s.radarControls}>
+                <Pressable
+                  onPress={() => {
+                    logEvent("today_radar_frame_previous_pressed", userId, {
+                      ...todayAnalyticsMeta,
+                      radarFrameIndex,
+                    });
+                    setRadarPlaying(false);
+                    setRadarFrameIndex((prev) => (prev - 1 + radarFrames.length) % radarFrames.length);
+                  }}
+                  style={s.radarStepBtn}
+                >
+                  <Text style={s.radarStepText}>◀</Text>
+                </Pressable>
 
-        <View style={{ height: 22 }} />
-      </ScrollView>
+                <Pressable
+                  onPress={() => {
+                    logEvent(radarPlaying ? "today_radar_paused" : "today_radar_played", userId, {
+                      ...todayAnalyticsMeta,
+                      radarFrameIndex,
+                    });
+                    setRadarPlaying((prev) => !prev);
+                  }}
+                  style={s.radarPlayBtn}
+                >
+                  <Text style={s.radarPlayText}>{radarPlaying ? "⏸" : "▶"}</Text>
+                </Pressable>
+
+                <Pressable
+                  onPress={() => {
+                    logEvent("today_radar_frame_next_pressed", userId, {
+                      ...todayAnalyticsMeta,
+                      radarFrameIndex,
+                    });
+                    setRadarPlaying(false);
+                    setRadarFrameIndex((prev) => (prev + 1) % radarFrames.length);
+                  }}
+                  style={s.radarStepBtn}
+                >
+                  <Text style={s.radarStepText}>▶</Text>
+                </Pressable>
+              </View>
+
+              <View style={s.radarFrameFooter}>
+                <Text style={s.radarFrameText}>
+                  Frame {radarFrameIndex + 1} of {radarFrames.length}
+                </Text>
+              </View>
+            </SafeAreaView>
+          </Modal>
+
+          {weather.trends48h && weather.trends48h.length > 2 ? (
+            isPro ? (
+              <SectionCard title="48-Hour Trends" eyebrow="PRESSURE + TEMP">
+                <View style={s.trendSection}>
+                  <Text style={s.trendLabel}>Temperature (°F)</Text>
+                  <TrendSparkline
+                    data={weather.trends48h.map((d) => d.temp)}
+                    color={COLORS.green}
+                    width={trendWidth}
+                    height={56}
+                    suffix="°"
+                  />
+                </View>
+
+                <View style={s.trendSection}>
+                  <Text style={s.trendLabel}>Barometric Pressure (inHg)</Text>
+                  <TrendSparkline
+                    data={weather.trends48h.map((d) => d.pressureInHg)}
+                    color={GOLD}
+                    width={trendWidth}
+                    height={56}
+                    suffix=""
+                  />
+                </View>
+
+                <View style={s.trendTimeRow}>
+                  <Text style={s.trendTimeLabel}>Now</Text>
+                  <Text style={s.trendTimeLabel}>24h</Text>
+                  <Text style={s.trendTimeLabel}>48h</Text>
+                </View>
+              </SectionCard>
+            ) : (
+              <SectionCard
+                title="48-Hour Trends"
+                eyebrow="PRO INSIGHTS"
+                right={
+                  <View style={s.proTagPill}>
+                    <Text style={s.proTagText}>PRO</Text>
+                  </View>
+                }
+              >
+                <ProUpgradePrompt message="Unlock 48-hour temperature and pressure trend charts to spot cold fronts and pressure changes before they arrive." />
+              </SectionCard>
+            )
+          ) : null}
+
+          <InAppSponsorAd screen="TodayScreen" placementId="today_bottom_sponsor" />
+
+          <Text style={s.disclaimer}>
+            The prediction score is an estimate based on weather, environmental data, and historical patterns.
+            It is not a guarantee of hunt success — actual results may vary due to animal behavior,
+            local conditions, and other factors beyond prediction.
+          </Text>
+
+        </ScrollView>
       </SafeAreaView>
     </ScreenBackground>
   );
 }
 
 const s = StyleSheet.create({
-  safe: { flex: 1 },
-  container: { padding: 16, paddingBottom: 28 },
+  safe: {
+    flex: 1,
+  },
+  scrollSurface: {
+    flex: 1,
+    backgroundColor: "transparent",
+  },
+  darkScrim: {
+    ...StyleSheet.absoluteFillObject,
+    backgroundColor: "rgba(0,0,0,0.68)",
+    zIndex: 0,
+  },
+  container: {
+    padding: 12,
+    paddingBottom: 100,
+    zIndex: 1,
+  },
 
-  headerRow: { flexDirection: "row", alignItems: "center", justifyContent: "space-between" },
-  logoSmall: { width: 42, height: 42, borderRadius: 12 },
-  brand: { fontSize: 28, fontWeight: "800", letterSpacing: 0.2 },
-  brandDuck: { color: COLORS.white },
-  brandSmart: { color: COLORS.green },
-  subHeader: { marginTop: 4, color: COLORS.muted, fontSize: 13 },
-
-  gearButton: {
-    width: 42,
-    height: 42,
-    borderRadius: 12,
-    borderWidth: 1,
-    borderColor: COLORS.border,
+  loadingWrap: {
+    flex: 1,
     alignItems: "center",
     justifyContent: "center",
-    backgroundColor: COLORS.bg,
+    paddingHorizontal: 22,
+    zIndex: 1,
   },
-  gearText: { color: COLORS.white, fontSize: 18 },
+  loadingTitle: {
+    color: COLORS.white,
+    marginTop: 12,
+    fontWeight: "900",
+    fontSize: 16,
+  },
+  loadingSub: {
+    color: COLORS.muted,
+    marginTop: 5,
+    fontWeight: "700",
+    fontSize: 12,
+  },
 
-  chipRow: { flexDirection: "row", gap: 10, paddingBottom: 4 },
-  chip: { paddingVertical: 9, paddingHorizontal: 14, borderRadius: 999, borderWidth: 1 },
-  chipSelected: { backgroundColor: COLORS.greenBg, borderColor: COLORS.green },
-  chipUnselected: { backgroundColor: COLORS.bg, borderColor: COLORS.border },
-  chipText: { fontSize: 13, fontWeight: "700", color: COLORS.white },
-  chipTextSelected: { color: COLORS.green },
-
-  card: {
-    marginTop: 14,
-    backgroundColor: COLORS.bg,
-    borderRadius: 18,
+  heroTop: {
+    marginBottom: 8,
+  },
+  headerRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+  },
+  brandRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 10,
+    flex: 1,
+  },
+  logoSmall: {
+    width: 38,
+    height: 38,
+    borderRadius: 11,
+  },
+  brand: {
+    fontSize: 24,
+    fontWeight: "900",
+    letterSpacing: 0.2,
+  },
+  brandDuck: {
+    color: COLORS.white,
+  },
+  brandSmart: {
+    color: GOLD,
+  },
+  locationText: {
+    color: "rgba(255,255,255,0.7)",
+    fontWeight: "800",
+    fontSize: 11,
+    marginTop: 1,
+    maxWidth: SCREEN_WIDTH - 126,
+  },
+  gearButton: {
+    width: 40,
+    height: 40,
+    borderRadius: 13,
     borderWidth: 1,
-    borderColor: COLORS.border,
-    padding: 14,
+    borderColor: "rgba(217,168,76,0.35)",
+    alignItems: "center",
+    justifyContent: "center",
+    backgroundColor: "rgba(0,0,0,0.62)",
   },
-  cardHeader: { flexDirection: "row", alignItems: "center", justifyContent: "space-between" },
-  cardTitle: { color: COLORS.white, fontSize: 15, fontWeight: "800" },
+  gearText: {
+    color: COLORS.white,
+    fontSize: 18,
+    fontWeight: "900",
+  },
 
+  heroCopy: {
+    marginTop: 14,
+    marginBottom: 2,
+  },
+  heroWhite: {
+    color: COLORS.white,
+    fontSize: 30,
+    lineHeight: 34,
+    fontWeight: "900",
+    letterSpacing: -0.8,
+  },
+
+  easterEggLine: {
+    color: "rgba(255,255,255,0.36)",
+    fontSize: 11,
+    fontWeight: "700",
+    fontStyle: "italic",
+    textAlign: "center",
+    marginTop: 2,
+    marginBottom: 6,
+  },
+
+  heroPanel: {
+    marginTop: 6,
+    padding: 12,
+    borderRadius: 22,
+    backgroundColor: "rgba(0,0,0,0.74)",
+    borderWidth: 1,
+    borderColor: "rgba(217,168,76,0.25)",
+    overflow: "hidden",
+  },
+  predictionTapArea: {
+    borderRadius: 18,
+  },
+  heroScoreHeader: {
+    flexDirection: "row",
+    alignItems: "flex-start",
+    justifyContent: "space-between",
+    gap: 10,
+  },
+  panelEyebrow: {
+    color: GOLD,
+    fontSize: 11,
+    fontWeight: "900",
+    letterSpacing: 1.1,
+    textTransform: "uppercase",
+  },
+  panelTitle: {
+    color: COLORS.white,
+    fontSize: 18,
+    fontWeight: "900",
+    marginTop: 3,
+  },
   scorePill: {
     paddingVertical: 6,
     paddingHorizontal: 10,
     borderRadius: 999,
-    backgroundColor: "#111111",
+    backgroundColor: GOLD_SOFT,
     borderWidth: 1,
-    borderColor: COLORS.border,
+    borderColor: GOLD,
   },
-  scorePillText: { color: COLORS.white, fontSize: 12, fontWeight: "800" },
+  scorePillText: {
+    color: GOLD,
+    fontSize: 10,
+    fontWeight: "900",
+    letterSpacing: 0.8,
+  },
+  gaugeWrap: {
+    alignItems: "center",
+    marginTop: 2,
+    marginBottom: -21,
+  },
+  tapHint: {
+    color: "rgba(255,255,255,0.42)",
+    fontSize: 10,
+    fontWeight: "800",
+    textAlign: "center",
+    marginBottom: 2,
+  },
+  heroMetricGrid: {
+    flexDirection: "row",
+    gap: 8,
+    marginTop: 6,
+  },
 
-  whyBox: {
-    marginTop: 12,
+  miniForecastBlock: {
+    marginTop: 10,
+  },
+  miniForecastHeader: {
+    flexDirection: "row",
+    alignItems: "baseline",
+    justifyContent: "space-between",
+    marginBottom: 7,
+  },
+  miniForecastTitle: {
+    color: COLORS.white,
+    fontSize: 14,
+    fontWeight: "900",
+  },
+  miniForecastSub: {
+    color: "rgba(255,255,255,0.45)",
+    fontSize: 10,
+    fontWeight: "800",
+    textTransform: "uppercase",
+  },
+
+  card: {
+    marginTop: 10,
+    backgroundColor: DARK_CARD,
+    borderRadius: 20,
+    borderWidth: 1,
+    borderColor: "rgba(255,255,255,0.10)",
     padding: 12,
-    borderRadius: 14,
-    backgroundColor: COLORS.bgDeep,
-    borderWidth: 1,
-    borderColor: COLORS.borderSubtle,
   },
-  whyTitle: { color: COLORS.white, fontSize: 13, fontWeight: "800", marginBottom: 8 },
-  whyRow: { flexDirection: "row", gap: 8, marginBottom: 6, alignItems: "flex-start" },
-  whyBullet: { color: COLORS.muted, fontWeight: "900", marginTop: 1 },
-  whyText: { color: COLORS.muted, fontSize: 13, lineHeight: 18, flex: 1 },
+  cardHeader: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    gap: 10,
+  },
+  cardEyebrow: {
+    color: GOLD,
+    fontSize: 9,
+    fontWeight: "900",
+    letterSpacing: 1.2,
+    textTransform: "uppercase",
+    marginBottom: 2,
+  },
+  cardTitle: {
+    color: COLORS.white,
+    fontSize: 17,
+    fontWeight: "900",
+    letterSpacing: -0.2,
+  },
+  cardBody: {
+    marginTop: 10,
+  },
 
-  metricRow: { flexDirection: "row", gap: 10, marginBottom: 10 },
-  metricPill: { flex: 1, padding: 12, borderRadius: 14, backgroundColor: COLORS.bgDeep, borderWidth: 1, borderColor: COLORS.borderSubtle },
-  metricLabel: { color: COLORS.mutedDark, fontSize: 11, fontWeight: "700" },
-  metricValue: { marginTop: 6, color: COLORS.white, fontSize: 16, fontWeight: "900" },
+  modalBackdrop: {
+    flex: 1,
+    backgroundColor: "rgba(0,0,0,0.78)",
+    alignItems: "center",
+    justifyContent: "center",
+    padding: 18,
+  },
+  whyModalCard: {
+    width: "100%",
+    maxWidth: 420,
+    borderRadius: 24,
+    backgroundColor: "rgba(8,12,13,0.98)",
+    borderWidth: 1,
+    borderColor: "rgba(217,168,76,0.34)",
+    padding: 16,
+  },
+  whyModalHeader: {
+    flexDirection: "row",
+    alignItems: "flex-start",
+    justifyContent: "space-between",
+    gap: 12,
+  },
+  modalEyebrow: {
+    color: GOLD,
+    fontSize: 10,
+    fontWeight: "900",
+    letterSpacing: 1.2,
+  },
+  whyModalTitle: {
+    color: COLORS.white,
+    fontSize: 22,
+    fontWeight: "900",
+    marginTop: 3,
+  },
+  modalCloseBtn: {
+    width: 38,
+    height: 38,
+    borderRadius: 13,
+    backgroundColor: "rgba(255,255,255,0.06)",
+    borderWidth: 1,
+    borderColor: "rgba(255,255,255,0.12)",
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  modalCloseText: {
+    color: COLORS.white,
+    fontSize: 17,
+    fontWeight: "900",
+  },
+  modalScoreRow: {
+    marginTop: 14,
+    padding: 13,
+    borderRadius: 18,
+    backgroundColor: GOLD_SOFT,
+    borderWidth: 1,
+    borderColor: "rgba(217,168,76,0.30)",
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 12,
+  },
+  modalScoreNumber: {
+    color: GOLD,
+    fontSize: 34,
+    fontWeight: "900",
+  },
+  modalScoreText: {
+    color: COLORS.white,
+    fontSize: 14,
+    fontWeight: "900",
+    flex: 1,
+  },
+  whyModalList: {
+    marginTop: 14,
+    gap: 2,
+  },
+  whyRow: {
+    flexDirection: "row",
+    gap: 8,
+    marginBottom: 7,
+    alignItems: "flex-start",
+  },
+  whyBullet: {
+    color: GOLD,
+    fontWeight: "900",
+    marginTop: 1,
+    width: 16,
+  },
+  whyText: {
+    color: "rgba(255,255,255,0.76)",
+    fontSize: 13,
+    lineHeight: 18,
+    flex: 1,
+    fontWeight: "700",
+  },
+  modalDoneBtn: {
+    marginTop: 12,
+    paddingVertical: 12,
+    borderRadius: 16,
+    backgroundColor: GOLD_SOFT,
+    borderWidth: 1,
+    borderColor: GOLD,
+    alignItems: "center",
+  },
+  modalDoneText: {
+    color: GOLD,
+    fontSize: 13,
+    fontWeight: "900",
+  },
 
-  sunRow: { flexDirection: "row", gap: 10 },
-  sunPill: { flex: 1, padding: 12, borderRadius: 14, backgroundColor: COLORS.bgDeep, borderWidth: 1, borderColor: COLORS.borderSubtle },
-  sunLabel: { color: COLORS.mutedDark, fontSize: 11, fontWeight: "700" },
-  sunValue: { marginTop: 6, color: COLORS.white, fontSize: 14, fontWeight: "900" },
+  metricRow: {
+    flexDirection: "row",
+    gap: 8,
+    marginBottom: 8,
+  },
+  smallMetric: {
+    flex: 1,
+    minHeight: 68,
+    padding: 10,
+    borderRadius: 16,
+    backgroundColor: DARK_CARD_SOFT,
+    borderWidth: 1,
+    borderColor: "rgba(255,255,255,0.08)",
+    justifyContent: "center",
+  },
+  smallMetricTop: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 5,
+  },
+  smallMetricIcon: {
+    color: GOLD,
+    fontSize: 14,
+    fontWeight: "900",
+  },
+  smallMetricLabel: {
+    color: "rgba(255,255,255,0.52)",
+    fontSize: 9,
+    fontWeight: "900",
+    textTransform: "uppercase",
+    letterSpacing: 0.5,
+  },
+  smallMetricValue: {
+    marginTop: 6,
+    color: COLORS.white,
+    fontSize: 17,
+    fontWeight: "900",
+  },
 
-  hourlyRow: { flexDirection: "row", gap: 10 },
-  hourlyCard: { width: 110, padding: 12, borderRadius: 14, backgroundColor: COLORS.bgDeep, borderWidth: 1, borderColor: COLORS.borderSubtle },
-  hourlyCardLocked: { alignItems: "center", justifyContent: "center", borderStyle: "dashed", borderColor: COLORS.border },
-  hourlyLockIcon: { fontSize: 20, marginBottom: 4 },
-  hourlyLockText: { color: COLORS.muted, fontSize: 11, fontWeight: "700", textAlign: "center", lineHeight: 16 },
-  hourlyTime: { color: COLORS.muted, fontWeight: "800", fontSize: 12 },
-  hourlyTemp: { color: COLORS.white, fontWeight: "900", fontSize: 22, marginTop: 6, marginBottom: 6 },
-  hourlySmall: { color: COLORS.mutedDark, fontSize: 11, fontWeight: "700" },
+  weatherEmoji: {
+    textAlign: "center",
+  },
 
-  proTagPill: { paddingVertical: 4, paddingHorizontal: 10, borderRadius: 999, backgroundColor: COLORS.greenBg, borderWidth: 1, borderColor: COLORS.green },
-  proTagText: { color: COLORS.green, fontSize: 10, fontWeight: "900" },
+  fiveCardRow: {
+    flexDirection: "row",
+    gap: 6,
+  },
+  forecastMiniCard: {
+    flex: 1,
+    minHeight: 92,
+    borderRadius: 15,
+    backgroundColor: "rgba(255,255,255,0.055)",
+    borderWidth: 1,
+    borderColor: "rgba(255,255,255,0.08)",
+    alignItems: "center",
+    justifyContent: "center",
+    paddingVertical: 8,
+    paddingHorizontal: 4,
+  },
+  forecastMiniTime: {
+    color: "rgba(255,255,255,0.78)",
+    fontSize: 10,
+    fontWeight: "900",
+    marginBottom: 4,
+  },
+  forecastMiniTemp: {
+    color: COLORS.white,
+    fontSize: 18,
+    fontWeight: "900",
+    marginTop: 4,
+  },
+  forecastMiniSmall: {
+    color: "rgba(255,255,255,0.48)",
+    fontSize: 9,
+    fontWeight: "800",
+    marginTop: 1,
+  },
+  emptyForecastBox: {
+    padding: 11,
+    borderRadius: 15,
+    backgroundColor: "rgba(255,255,255,0.055)",
+    borderWidth: 1,
+    borderColor: "rgba(255,255,255,0.08)",
+  },
+  emptyForecastText: {
+    color: "rgba(255,255,255,0.6)",
+    fontSize: 12,
+    fontWeight: "800",
+    textAlign: "center",
+  },
 
-  // ---- Wind Compass ----
+  migSummary: {
+    color: "rgba(255,255,255,0.82)",
+    fontSize: 13,
+    lineHeight: 19,
+    fontWeight: "700",
+  },
+  migSpeciesList: {
+    marginTop: 10,
+    gap: 7,
+  },
+  migSpeciesRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    paddingVertical: 9,
+    paddingHorizontal: 11,
+    borderRadius: 15,
+    backgroundColor: "rgba(255,255,255,0.055)",
+    borderWidth: 1,
+    borderColor: "rgba(255,255,255,0.07)",
+  },
+  migSpeciesName: {
+    color: COLORS.white,
+    fontSize: 13,
+    fontWeight: "900",
+  },
+  migSpeciesCount: {
+    color: GOLD,
+    fontSize: 12,
+    fontWeight: "900",
+  },
+  migFooter: {
+    marginTop: 10,
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+  },
+  migTrendPill: {
+    paddingVertical: 7,
+    paddingHorizontal: 11,
+    borderRadius: 999,
+  },
+  migTrendText: {
+    fontSize: 12,
+    fontWeight: "900",
+  },
+  migSource: {
+    color: "rgba(255,255,255,0.35)",
+    fontSize: 11,
+    fontWeight: "800",
+  },
+
   windCompassRow: {
     flexDirection: "row",
     alignItems: "center",
-    marginTop: 10,
+    marginTop: 2,
     padding: 10,
-    borderRadius: 14,
-    backgroundColor: COLORS.bgDeep,
+    borderRadius: 17,
+    backgroundColor: "rgba(255,255,255,0.055)",
     borderWidth: 1,
-    borderColor: COLORS.borderSubtle,
+    borderColor: "rgba(255,255,255,0.08)",
   },
-  windFromLabel: { color: COLORS.muted, fontSize: 13, fontWeight: "800", marginBottom: 8 },
-  compassSpeed: { color: COLORS.muted, fontSize: 11, fontWeight: "800", marginTop: 2 },
-
-  // ---- 48-Hour Trends ----
-  trendSection: { marginBottom: 14 },
-  trendLabel: { color: COLORS.muted, fontSize: 12, fontWeight: "900", marginBottom: 6 },
-  trendMeta: { flexDirection: "row", alignItems: "center", gap: 6, marginTop: 2 },
-  trendArrow: { fontSize: 12, fontWeight: "900" },
-  trendRange: { color: COLORS.mutedDark, fontSize: 11, fontWeight: "700" },
-  trendTimeRow: { flexDirection: "row", justifyContent: "space-between", paddingHorizontal: 4 },
-  trendTimeLabel: { color: COLORS.mutedDarker, fontSize: 10, fontWeight: "700" },
-
-  // ---- Decoy Compass ----
-  decoyCompassRow: {
-    flexDirection: "row",
-    alignItems: "center",
-    padding: 10,
-    borderRadius: 14,
-    backgroundColor: COLORS.bgDeep,
-    borderWidth: 1,
-    borderColor: COLORS.borderSubtle,
-  },
-  decoyCompassTitle: { color: COLORS.white, fontSize: 14, fontWeight: "800" },
-  decoyCompassHint: { color: COLORS.mutedDark, fontSize: 12, fontWeight: "700", marginTop: 4, lineHeight: 16 },
-
-  alertBtn: {
-    marginTop: 10,
-    paddingVertical: 12,
-    borderRadius: 14,
-    backgroundColor: COLORS.bgDeep,
-    borderWidth: 1,
-    borderColor: COLORS.border,
+  compassWrap: {
     alignItems: "center",
   },
-  alertBtnActive: { borderColor: COLORS.green, backgroundColor: COLORS.greenBg },
-  alertBtnText: { color: COLORS.muted, fontWeight: "900", fontSize: 13 },
-  alertBtnTextActive: { color: COLORS.green },
-
-  // ---- Decoy Spread Advisor ----
-  pickerSection: { marginTop: 12 },
-  pickerLabel: { color: COLORS.muted, fontSize: 12, fontWeight: "900", marginBottom: 8 },
-
-  recBox: { marginTop: 16 },
-  recLabel: { color: COLORS.green, fontSize: 13, fontWeight: "900", marginBottom: 10 },
-
-  recCard: {
-    flexDirection: "row",
-    alignItems: "center",
-    padding: 10,
-    borderRadius: 14,
-    backgroundColor: COLORS.bgDeep,
-    borderWidth: 1,
-    borderColor: COLORS.green,
-  },
-  recThumb: {
-    width: 70,
-    height: 70,
-    borderRadius: 10,
-    backgroundColor: COLORS.bgDeepest,
-  },
-  recInfo: { flex: 1, marginLeft: 12 },
-  recName: { color: COLORS.white, fontSize: 16, fontWeight: "900" },
-  recType: { color: COLORS.green, fontSize: 12, fontWeight: "700", marginTop: 2 },
-  recDetail: { color: COLORS.muted, fontSize: 12, fontWeight: "700", marginTop: 4, lineHeight: 16 },
-  recMetaRow: { flexDirection: "row", gap: 12, marginTop: 6 },
-  recMeta: { color: COLORS.mutedDark, fontSize: 11, fontWeight: "800" },
-  recChevron: { color: COLORS.mutedDark, fontSize: 24, fontWeight: "700", marginLeft: 4 },
-
-  runnersSection: { marginTop: 12 },
-  runnersTitle: { color: COLORS.muted, fontSize: 12, fontWeight: "900", marginBottom: 8 },
-  runnerRow: {
-    flexDirection: "row",
-    alignItems: "center",
-    paddingVertical: 10,
-    paddingHorizontal: 12,
-    borderRadius: 12,
-    backgroundColor: COLORS.bgDeep,
-    borderWidth: 1,
-    borderColor: COLORS.borderSubtle,
-    marginBottom: 6,
-  },
-  runnerName: { color: COLORS.white, fontSize: 14, fontWeight: "800" },
-  runnerType: { color: COLORS.mutedDark, fontSize: 11, fontWeight: "700", marginTop: 2 },
-  runnerScore: { color: COLORS.muted, fontSize: 13, fontWeight: "900", marginRight: 4 },
-
-  addonTip: {
-    flexDirection: "row",
-    alignItems: "center",
-    marginTop: 10,
-    padding: 12,
-    borderRadius: 14,
-    backgroundColor: COLORS.bgDeep,
-    borderWidth: 1,
-    borderColor: COLORS.borderSubtle,
-    borderStyle: "dashed",
-  },
-  addonIcon: { color: COLORS.green, fontSize: 22, fontWeight: "900", marginRight: 10 },
-  addonTitle: { color: COLORS.white, fontSize: 13, fontWeight: "800" },
-  addonText: { color: COLORS.mutedDark, fontSize: 12, fontWeight: "700", marginTop: 2 },
-
-  // ---- Spread image modal (full-screen) ----
-  modalSafe: { flex: 1, backgroundColor: COLORS.black },
-  modalScroll: { padding: 16, paddingBottom: 40 },
-  modalTopBar: {
-    flexDirection: "row",
-    alignItems: "center",
-    marginBottom: 12,
-  },
-  modalXBtn: {
-    width: 42,
-    height: 42,
-    borderRadius: 12,
-    borderWidth: 1,
-    borderColor: COLORS.border,
-    backgroundColor: COLORS.bg,
-    alignItems: "center",
-    justifyContent: "center",
-  },
-  modalXBtnText: { color: COLORS.white, fontSize: 18, fontWeight: "700" },
-  modalTitle: { color: COLORS.white, fontSize: 22, fontWeight: "900" },
-  modalSubtitle: { color: COLORS.green, fontSize: 13, fontWeight: "700", marginTop: 4 },
-  modalImage: {
-    width: SCREEN_WIDTH - 32,
-    height: SCREEN_WIDTH - 32,
-    borderRadius: 14,
-    backgroundColor: COLORS.bgDeep,
-  },
-  modalImagePlaceholder: {
-    width: SCREEN_WIDTH - 32,
-    height: 250,
-    borderRadius: 14,
-    backgroundColor: COLORS.bgDeep,
-    alignItems: "center",
-    justifyContent: "center",
-    borderWidth: 1,
-    borderColor: COLORS.borderSubtle,
-  },
-  modalImagePlaceholderText: { color: COLORS.mutedDark, fontWeight: "800" },
-
-  modalInfoRow: { flexDirection: "row", gap: 8, marginTop: 14 },
-  modalInfoPill: {
-    flex: 1,
-    padding: 10,
-    borderRadius: 12,
-    backgroundColor: COLORS.bgDeep,
-    borderWidth: 1,
-    borderColor: COLORS.borderSubtle,
-    alignItems: "center",
-  },
-  modalInfoLabel: { color: COLORS.mutedDark, fontSize: 10, fontWeight: "700" },
-  modalInfoValue: { color: COLORS.white, fontSize: 14, fontWeight: "900", marginTop: 4 },
-
-  modalNotes: {
-    color: COLORS.muted,
-    fontSize: 14,
-    fontWeight: "700",
-    lineHeight: 20,
-    marginTop: 14,
-  },
-  modalMistakeBox: {
-    marginTop: 12,
-    padding: 12,
-    borderRadius: 12,
-    backgroundColor: "rgba(217, 76, 76, 0.08)",
-    borderWidth: 1,
-    borderColor: "rgba(217, 76, 76, 0.3)",
-  },
-  modalMistakeLabel: { color: COLORS.red, fontSize: 11, fontWeight: "900" },
-  modalMistakeText: { color: COLORS.muted, fontSize: 13, fontWeight: "700", marginTop: 4 },
-
-  modalCloseBtn: {
-    marginTop: 18,
-    paddingVertical: 14,
-    borderRadius: 14,
-    backgroundColor: COLORS.greenBg,
-    borderWidth: 1,
-    borderColor: COLORS.green,
-    alignItems: "center",
-  },
-  modalCloseBtnText: { color: COLORS.green, fontWeight: "900", fontSize: 15 },
-
-  radarWrap: { borderRadius: 14, overflow: "hidden", borderWidth: 1, borderColor: COLORS.borderSubtle },
-  radarMap: { width: "100%", height: 200 },
-  radarCaption: { color: COLORS.mutedDark, fontSize: 11, fontWeight: "700", marginTop: 8, textAlign: "center" },
-  radarRefreshBtn: {
-    width: 32, height: 32, borderRadius: 10,
-    backgroundColor: COLORS.bgDeep, borderWidth: 1, borderColor: COLORS.border,
-    alignItems: "center", justifyContent: "center",
-  },
-  radarRefreshText: { color: COLORS.muted, fontSize: 16, fontWeight: "900" },
-
-  disclaimer: { marginTop: 18, color: COLORS.mutedDarker, fontSize: 11, lineHeight: 17, fontWeight: "700", textAlign: "center", paddingHorizontal: 8 },
-
-  // Easter Egg
-  easterEggLine: {
-    color: COLORS.mutedDarker,
-    fontSize: 11,
-    fontWeight: "700",
-    fontStyle: "italic",
-    textAlign: "center",
-    marginTop: 8,
-    opacity: 0.6,
-  },
-
-  // AI Spread Analyzer
-  aiSpreadPhoto: {
-    width: "100%",
-    height: 240,
-    borderRadius: 18,
-    backgroundColor: COLORS.bgDeep,
-    marginBottom: 4,
-  },
-  aiSpreadLoadingBox: {
-    alignItems: "center",
-    justifyContent: "center",
-    paddingVertical: 40,
-  },
-  aiSpreadLoadingText: {
-    color: COLORS.muted,
-    fontWeight: "800",
-    fontSize: 14,
-    marginTop: 14,
-  },
-  aiSpreadType: {
-    color: COLORS.green,
-    fontWeight: "800",
-    fontSize: 13,
-    textAlign: "center",
-    marginTop: 4,
-  },
-  aiSpreadSummary: {
-    color: COLORS.muted,
-    fontWeight: "700",
-    fontSize: 13,
-    textAlign: "center",
-    marginTop: 6,
-    lineHeight: 18,
-    fontStyle: "italic",
-  },
-  aiScoreCatRow: {
-    marginBottom: 14,
-  },
-  aiScoreCatHeader: {
-    flexDirection: "row",
-    alignItems: "center",
-    marginBottom: 6,
-  },
-  aiScoreCatIcon: {
-    fontSize: 16,
-    marginRight: 8,
-  },
-  aiScoreCatLabel: {
-    color: COLORS.white,
-    fontWeight: "800",
-    fontSize: 14,
-    flex: 1,
-  },
-  aiScoreCatValue: {
+  compassSpeed: {
+    color: "rgba(255,255,255,0.65)",
+    fontSize: 10,
     fontWeight: "900",
-    fontSize: 16,
+    marginTop: 1,
   },
-  aiScoreBarBg: {
-    height: 8,
-    borderRadius: 4,
-    backgroundColor: COLORS.bgDeep,
-    overflow: "hidden",
-  },
-  aiScoreBarFill: {
-    height: 8,
-    borderRadius: 4,
-  },
-  aiScoreCatNote: {
-    color: COLORS.mutedDark,
-    fontWeight: "700",
-    fontSize: 12,
-    marginTop: 4,
-    lineHeight: 16,
-  },
-  aiImprovRow: {
-    flexDirection: "row",
-    alignItems: "flex-start",
-    gap: 10,
-    marginBottom: 8,
-  },
-  aiImprovBullet: {
-    color: COLORS.green,
-    fontWeight: "900",
-    fontSize: 14,
-    width: 18,
-    textAlign: "center",
-  },
-  aiImprovText: {
-    color: COLORS.muted,
-    fontWeight: "700",
+  windFromLabel: {
+    color: "rgba(255,255,255,0.78)",
     fontSize: 13,
-    flex: 1,
-    lineHeight: 18,
-  },
-  aiSpreadDoneBtn: {
-    paddingVertical: 14,
-    borderRadius: 14,
-    backgroundColor: COLORS.greenBg,
-    borderWidth: 1,
-    borderColor: COLORS.green,
-    alignItems: "center",
-    marginTop: 6,
-  },
-  aiSpreadDoneBtnText: {
-    color: COLORS.green,
     fontWeight: "900",
-    fontSize: 15,
+    marginBottom: 7,
   },
-
-  // ---- 5-Day Forecast Bar Chart ----
-  fcRow: {
+  sunRow: {
     flexDirection: "row",
-    alignItems: "flex-end",
-    justifyContent: "space-between",
     gap: 8,
   },
-  fcCol: {
+  sunPill: {
     flex: 1,
-    alignItems: "center",
-  },
-  fcLabel: {
-    color: COLORS.muted,
-    fontSize: 12,
-    fontWeight: "800",
-    marginBottom: 8,
-  },
-  fcBarTrack: {
-    width: "100%",
-    height: 80,
-    justifyContent: "flex-end",
-    alignItems: "center",
-  },
-  fcBar: {
-    width: "70%",
-    borderRadius: 8,
-    minHeight: 6,
-  },
-  fcBarBest: {
+    padding: 9,
+    borderRadius: 14,
+    backgroundColor: "rgba(0,0,0,0.28)",
     borderWidth: 1,
-    borderColor: COLORS.green,
-    shadowColor: COLORS.green,
-    shadowOpacity: 0.4,
-    shadowRadius: 6,
-    elevation: 4,
+    borderColor: "rgba(255,255,255,0.07)",
   },
-  fcScore: {
-    color: COLORS.white,
-    fontSize: 16,
+  sunLabel: {
+    color: "rgba(255,255,255,0.48)",
+    fontSize: 9,
     fontWeight: "900",
-    marginTop: 8,
+    textTransform: "uppercase",
   },
-  fcCallout: {
-    marginTop: 12,
-    padding: 10,
-    borderRadius: 12,
-    backgroundColor: COLORS.greenBg,
-    borderWidth: 1,
-    borderColor: COLORS.green,
-    alignItems: "center",
+  sunValue: {
+    marginTop: 4,
+    color: COLORS.white,
+    fontSize: 12,
+    fontWeight: "900",
   },
-  fcCalloutText: {
-    color: COLORS.green,
-    fontSize: 13,
-    fontWeight: "800",
-  },
-
-  // ---- Moon Phase ----
   moonRow: {
     flexDirection: "row",
     alignItems: "center",
     marginTop: 10,
-    padding: 12,
-    borderRadius: 14,
-    backgroundColor: COLORS.bgDeep,
+    padding: 10,
+    borderRadius: 17,
+    backgroundColor: "rgba(217,168,76,0.09)",
     borderWidth: 1,
-    borderColor: COLORS.borderSubtle,
+    borderColor: "rgba(217,168,76,0.22)",
   },
   moonEmoji: {
-    fontSize: 28,
-    marginRight: 12,
+    fontSize: 24,
+    marginRight: 10,
   },
   moonName: {
     color: COLORS.white,
-    fontSize: 14,
-    fontWeight: "800",
+    fontSize: 13,
+    fontWeight: "900",
   },
   moonDetail: {
-    color: COLORS.mutedDark,
-    fontSize: 12,
-    fontWeight: "700",
-    marginTop: 2,
-  },
-
-  // Migration Intel card
-  migSummary: {
-    color: COLORS.white,
-    fontSize: 15,
-    fontWeight: "800",
-    marginBottom: 10,
-  },
-  migSpeciesList: {
-    marginBottom: 10,
-  },
-  migSpeciesRow: {
-    flexDirection: "row",
-    justifyContent: "space-between",
-    alignItems: "center",
-    paddingVertical: 6,
-    borderBottomWidth: 1,
-    borderBottomColor: COLORS.border,
-  },
-  migSpeciesName: {
-    color: COLORS.white,
-    fontSize: 14,
-    fontWeight: "700",
-  },
-  migSpeciesCount: {
-    color: COLORS.muted,
-    fontSize: 13,
-    fontWeight: "700",
-  },
-  migFooter: {
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "space-between",
-    marginTop: 4,
-  },
-  migTrendPill: {
-    paddingHorizontal: 10,
-    paddingVertical: 5,
-    borderRadius: 8,
-  },
-  migTrendText: {
-    fontSize: 13,
-    fontWeight: "800",
-  },
-  migSource: {
-    color: COLORS.mutedDark,
+    color: "rgba(255,255,255,0.65)",
     fontSize: 11,
     fontWeight: "700",
+    marginTop: 3,
+    lineHeight: 16,
+  },
+  alertBtn: {
+    marginTop: 10,
+    paddingVertical: 12,
+    borderRadius: 15,
+    backgroundColor: "rgba(255,255,255,0.055)",
+    borderWidth: 1,
+    borderColor: "rgba(255,255,255,0.10)",
+    alignItems: "center",
+  },
+  alertBtnActive: {
+    borderColor: GOLD,
+    backgroundColor: GOLD_SOFT,
+  },
+  alertBtnText: {
+    color: "rgba(255,255,255,0.78)",
+    fontWeight: "900",
+    fontSize: 13,
+  },
+  alertBtnTextActive: {
+    color: GOLD,
+  },
+
+  radarWrap: {
+    height: 198,
+    borderRadius: 17,
+    overflow: "hidden",
+    borderWidth: 1,
+    borderColor: "rgba(217,168,76,0.25)",
+    backgroundColor: "#111",
+  },
+  radarMap: {
+    width: "100%",
+    height: "100%",
+  },
+  radarOverlayTag: {
+    position: "absolute",
+    right: 9,
+    bottom: 9,
+    paddingVertical: 7,
+    paddingHorizontal: 10,
+    borderRadius: 999,
+    backgroundColor: "rgba(0,0,0,0.72)",
+    borderWidth: 1,
+    borderColor: "rgba(217,168,76,0.35)",
+  },
+  radarOverlayText: {
+    color: GOLD,
+    fontSize: 10,
+    fontWeight: "900",
+  },
+  radarCaption: {
+    color: "rgba(255,255,255,0.52)",
+    fontSize: 11,
+    fontWeight: "800",
+    marginTop: 8,
+    textAlign: "center",
+  },
+  radarRefreshBtn: {
+    width: 32,
+    height: 32,
+    borderRadius: 11,
+    backgroundColor: GOLD_SOFT,
+    borderWidth: 1,
+    borderColor: "rgba(217,168,76,0.35)",
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  radarRefreshText: {
+    color: GOLD,
+    fontSize: 16,
+    fontWeight: "900",
+  },
+
+  radarModalSafe: {
+    flex: 1,
+    backgroundColor: COLORS.black,
+  },
+  radarModalHeader: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    paddingHorizontal: 14,
+    paddingVertical: 11,
+    borderBottomWidth: 1,
+    borderBottomColor: "rgba(255,255,255,0.08)",
+  },
+  radarModalTitle: {
+    color: COLORS.white,
+    fontWeight: "900",
+    fontSize: 18,
+  },
+  radarModalSub: {
+    color: "rgba(255,255,255,0.5)",
+    fontWeight: "700",
+    fontSize: 12,
+    marginTop: 3,
+  },
+  radarCloseBtn: {
+    width: 40,
+    height: 40,
+    borderRadius: 13,
+    borderWidth: 1,
+    borderColor: "rgba(255,255,255,0.14)",
+    backgroundColor: "rgba(255,255,255,0.06)",
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  radarCloseText: {
+    color: COLORS.white,
+    fontSize: 17,
+    fontWeight: "900",
+  },
+  radarControls: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 14,
+    paddingVertical: 12,
+    paddingHorizontal: 14,
+  },
+  radarStepBtn: {
+    width: 42,
+    height: 42,
+    borderRadius: 21,
+    backgroundColor: DARK_CARD_SOFT,
+    borderWidth: 1,
+    borderColor: "rgba(255,255,255,0.12)",
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  radarStepText: {
+    color: COLORS.white,
+    fontWeight: "900",
+    fontSize: 17,
+  },
+  radarPlayBtn: {
+    width: 56,
+    height: 56,
+    borderRadius: 28,
+    backgroundColor: GOLD_SOFT,
+    borderWidth: 1,
+    borderColor: GOLD,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  radarPlayText: {
+    color: GOLD,
+    fontWeight: "900",
+    fontSize: 21,
+  },
+  radarFrameFooter: {
+    alignItems: "center",
+    paddingBottom: 14,
+  },
+  radarFrameText: {
+    color: "rgba(255,255,255,0.48)",
+    fontSize: 12,
+    fontWeight: "800",
+  },
+
+  trendSection: {
+    marginBottom: 12,
+  },
+  trendLabel: {
+    color: "rgba(255,255,255,0.72)",
+    fontSize: 12,
+    fontWeight: "900",
+    marginBottom: 7,
+  },
+  trendChartWrap: {
+    overflow: "hidden",
+  },
+  trendMeta: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 6,
+    marginTop: 1,
+  },
+  trendArrow: {
+    fontSize: 12,
+    fontWeight: "900",
+  },
+  trendRange: {
+    color: "rgba(255,255,255,0.45)",
+    fontSize: 11,
+    fontWeight: "800",
+  },
+  trendTimeRow: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    paddingHorizontal: 4,
+  },
+  trendTimeLabel: {
+    color: "rgba(255,255,255,0.32)",
+    fontSize: 10,
+    fontWeight: "800",
+  },
+
+  proTagPill: {
+    paddingVertical: 5,
+    paddingHorizontal: 10,
+    borderRadius: 999,
+    backgroundColor: GOLD_SOFT,
+    borderWidth: 1,
+    borderColor: "rgba(217,168,76,0.32)",
+  },
+  proTagText: {
+    color: GOLD,
+    fontSize: 10,
+    fontWeight: "900",
+    letterSpacing: 0.7,
+  },
+
+  disclaimer: {
+    marginTop: 14,
+    color: "rgba(255,255,255,0.34)",
+    fontSize: 11,
+    lineHeight: 17,
+    fontWeight: "700",
+    textAlign: "center",
+    paddingHorizontal: 8,
   },
 });

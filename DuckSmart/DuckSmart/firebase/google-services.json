@@ -1,0 +1,70 @@
+{
+  "project_info": {
+    "project_number": "747578003996",
+    "project_id": "ducksmart-9c80e",
+    "storage_bucket": "ducksmart-9c80e.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:747578003996:android:fa1b978454b9f99fca85d9",
+        "android_client_info": {
+          "package_name": "com.ducksmart.app"
+        }
+      },
+      "oauth_client": [
+        {
+          "client_id": "747578003996-4nn9ig78sifc6vank41v43jrob9eeu27.apps.googleusercontent.com",
+          "client_type": 1,
+          "android_info": {
+            "package_name": "com.ducksmart.app",
+            "certificate_hash": "311fab567d54ae8fc38b300582f334af92ee73d0"
+          }
+        },
+        {
+          "client_id": "747578003996-jte4u4nda5hlvbo8c24g0hanspu0vqgl.apps.googleusercontent.com",
+          "client_type": 1,
+          "android_info": {
+            "package_name": "com.ducksmart.app",
+            "certificate_hash": "5e8f16062ea3cd2c4a0d547876baa6f38cabf625"
+          }
+        },
+        {
+          "client_id": "747578003996-lquso57i24uim41n5hsjh449139dhate.apps.googleusercontent.com",
+          "client_type": 1,
+          "android_info": {
+            "package_name": "com.ducksmart.app",
+            "certificate_hash": "7148afa3f6924077ecbf3e817151f4989d902d93"
+          }
+        },
+        {
+          "client_id": "747578003996-1vuqq0capvfg22n607dj9l6icrpfor1f.apps.googleusercontent.com",
+          "client_type": 3
+        }
+      ],
+      "api_key": [
+        {
+          "current_key": "AIzaSyBnwwwpGQv_-UfdxPmDWbQM1tR7Z6obH74"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": [
+            {
+              "client_id": "747578003996-1vuqq0capvfg22n607dj9l6icrpfor1f.apps.googleusercontent.com",
+              "client_type": 3
+            },
+            {
+              "client_id": "747578003996-k5mnce6ejjg1vqgqq4bef8n85liu4eva.apps.googleusercontent.com",
+              "client_type": 2,
+              "ios_info": {
+                "bundle_id": "com.ducksmart.app"
+              }
+            }
+          ]
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}

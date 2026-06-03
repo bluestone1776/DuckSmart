@@ -4,13 +4,14 @@
 // 1. AI Duck ID     — identify a duck species from a photo
 // 2. AI Spread Analyzer — score a decoy spread photo for quality
 //
-// Uses OpenAI's GPT-4o vision endpoint.  Gracefully degrades if the key
-// is missing or the request fails.
+// Uses OpenAI vision through Firebase Functions.
+// The OpenAI API key is stored in Firebase Secret Manager, not in the app.
 
-import * as FileSystem from "expo-file-system";
-import { OPENAI_API_KEY } from "../config";
+import * as FileSystem from "expo-file-system/legacy";
+import { CALL_OPENAI_URL } from "../config";
+import { auth } from "./firebase";
 
-const API_URL = "https://api.openai.com/v1/chat/completions";
+const API_URL = CALL_OPENAI_URL;
 const MODEL = "gpt-4o";
 
 // ---------------------------------------------------------------------------
@@ -38,10 +39,15 @@ async function imageToBase64(uri) {
 let lastAIRequestTime = 0;
 const AI_COOLDOWN_MS = 15000;
 
-/** Call the OpenAI chat completions API with a vision prompt */
+/** Call the Firebase OpenAI proxy function with a vision prompt */
 async function callVision(systemPrompt, userText, imageUri) {
-  if (!OPENAI_API_KEY) {
-    throw new Error("AI features require an OpenAI API key. Add it in app.json → extra → openaiApiKey.");
+  if (!API_URL) {
+    throw new Error("AI features require the Firebase OpenAI function to be configured.");
+  }
+
+  const currentUser = auth.currentUser;
+  if (!currentUser) {
+    throw new Error("Please sign in to use AI features.");
   }
 
   const now = Date.now();
@@ -52,6 +58,7 @@ async function callVision(systemPrompt, userText, imageUri) {
   lastAIRequestTime = now;
 
   const dataUrl = await imageToBase64(imageUri);
+  const idToken = await currentUser.getIdToken();
 
   const body = {
     model: MODEL,
@@ -79,7 +86,7 @@ async function callVision(systemPrompt, userText, imageUri) {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
-        Authorization: `Bearer ${OPENAI_API_KEY}`,
+        Authorization: `Bearer ${idToken}`,
       },
       body: JSON.stringify(body),
       signal: controller.signal,
@@ -213,7 +220,7 @@ export async function analyzeSpread(imageUri, weatherContext) {
   }
 }
 
-/** Quick check if AI features are available (key configured) */
+/** Quick check if AI features are available (function configured) */
 export function isAIAvailable() {
-  return !!OPENAI_API_KEY;
+  return !!API_URL;
 }

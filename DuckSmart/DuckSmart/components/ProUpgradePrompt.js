@@ -18,7 +18,10 @@ export default function ProUpgradePrompt({ message, compact }) {
 
   if (compact) {
     return (
-      <Pressable style={styles.compactWrap} onPress={purchase}>
+      <Pressable
+        style={styles.compactWrap}
+        onPress={() => purchase(monthlyPackage || annualPackage)}
+      >
         <Text style={styles.lockIcon}>🔒</Text>
         <Text style={styles.compactText}>{message || "Upgrade to Pro"}</Text>
         <Text style={styles.compactArrow}>›</Text>
@@ -31,24 +34,35 @@ export default function ProUpgradePrompt({ message, compact }) {
       <Text style={styles.lockIconLarge}>🔒</Text>
       <Text style={styles.title}>DuckSmart Pro</Text>
       <Text style={styles.message}>{message || "This feature requires DuckSmart Pro"}</Text>
+
       <Pressable style={styles.upgradeBtn} onPress={() => purchase(annualPackage)}>
         <Text style={styles.upgradeBtnText}>
           {`${getAnnualPrice()} / year`}
         </Text>
         <Text style={styles.upgradeBtnSub}>Best value — save 33%</Text>
       </Pressable>
-      <Pressable style={[styles.upgradeBtn, styles.upgradeBtnSecondary]} onPress={() => purchase(monthlyPackage)}>
+
+      <Pressable
+        style={[styles.upgradeBtn, styles.upgradeBtnSecondary]}
+        onPress={() => purchase(monthlyPackage)}
+      >
         <Text style={styles.upgradeBtnTextSecondary}>
           {`${getMonthlyPrice()} / month`}
         </Text>
       </Pressable>
+
       <Text style={styles.legalNote}>
         Payment is charged to your iTunes account at confirmation. Subscriptions auto-renew unless cancelled at least 24 hours before the end of the current period.
       </Text>
+
       <View style={styles.legalRow}>
-        <Text style={styles.legalLink} onPress={() => Linking.openURL(PRIVACY_URL)}>Privacy Policy</Text>
+        <Text style={styles.legalLink} onPress={() => Linking.openURL(PRIVACY_URL)}>
+          Privacy Policy
+        </Text>
         <Text style={styles.legalSep}>|</Text>
-        <Text style={styles.legalLink} onPress={() => Linking.openURL(TERMS_URL)}>Terms of Use</Text>
+        <Text style={styles.legalLink} onPress={() => Linking.openURL(TERMS_URL)}>
+          Terms of Use
+        </Text>
       </View>
     </View>
   );

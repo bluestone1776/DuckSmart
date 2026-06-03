@@ -4,13 +4,6 @@
 // Interstitials show a full-screen ad that the user can dismiss.
 // Currently triggered: after logging a hunt (LogScreen).
 //
-// Setup required:
-//   1. Create AdMob account at https://admob.google.com
-//   2. Create ad units (interstitial) for iOS and Android
-//   3. Replace TEST ad unit IDs below with your real ones
-//   4. Add plugin to app.json (see comments in app.json)
-//   5. Install: npx expo install react-native-google-mobile-ads
-//
 // In Expo Go / dev builds where the native module isn't linked,
 // all functions are safe no-ops.
 
@@ -18,13 +11,13 @@ import { Platform } from "react-native";
 import Constants from "expo-constants";
 
 const isExpoGo = Constants.appOwnership === "expo";
+const SESSION_INTERSTITIAL_LIMIT = 3;
 
 // ---------------------------------------------------------------------------
 // Lazy-load the AdMob module — prevents crash in Expo Go
 // ---------------------------------------------------------------------------
 let AdMobInterstitial = null;
 let AdEventType = null;
-let TestIds = null;
 let mobileAds = null;
 let isAdMobAvailable = false;
 let isAdMobInitialized = false;
@@ -34,8 +27,7 @@ if (!isExpoGo) {
     const adModule = require("react-native-google-mobile-ads");
     AdMobInterstitial = adModule.InterstitialAd;
     AdEventType = adModule.AdEventType;
-    TestIds = adModule.TestIds;
-    mobileAds = adModule.default; // mobileAds() initializer
+    mobileAds = adModule.default;
     isAdMobAvailable = true;
   } catch (_) {
     /* react-native-google-mobile-ads not linked */
@@ -43,14 +35,12 @@ if (!isExpoGo) {
 }
 
 // ---------------------------------------------------------------------------
-// Ad Unit IDs
-// Replace these with your real AdMob ad unit IDs for production.
-// The TestIds are safe for development — they show test ads.
+// Production Interstitial Ad Unit IDs
 // ---------------------------------------------------------------------------
 const AD_UNIT_IDS = {
   interstitial: {
-    ios: TestIds?.INTERSTITIAL || "ca-app-pub-1495369158025732/5998809708",
-    android: TestIds?.INTERSTITIAL || "ca-app-pub-1495369158025732/6294827756",
+    ios: "ca-app-pub-1918151395354287/3411847187",
+    android: "ca-app-pub-1918151395354287/1783296087",
   },
 };
 
@@ -60,6 +50,8 @@ const AD_UNIT_IDS = {
 let interstitialAd = null;
 let isAdLoaded = false;
 let isAdLoading = false;
+let isAdShowing = false;
+let sessionInterstitialCount = 0;
 
 /**
  * Initialize the AdMob SDK. Must be called before creating any ad requests.
@@ -80,24 +72,49 @@ async function ensureAdMobInitialized() {
 }
 
 /**
+ * Returns true if this user should be allowed to see an interstitial.
+ */
+export function canShowInterstitialAd({ isPro = false } = {}) {
+  if (isPro) return false;
+  if (sessionInterstitialCount >= SESSION_INTERSTITIAL_LIMIT) return false;
+  return true;
+}
+
+/**
+ * Optional helper for debugging.
+ */
+export function getInterstitialSessionCount() {
+  return sessionInterstitialCount;
+}
+
+/**
+ * Optional helper if you ever want to manually reset the count.
+ * Normally a full app restart resets the in-memory session.
+ */
+export function resetInterstitialSessionCount() {
+  sessionInterstitialCount = 0;
+}
+
+/**
  * Preload an interstitial ad so it's ready to show immediately.
  * Call this early (e.g., when the app starts or a screen mounts).
- * Safe to call multiple times — will only load if not already loaded/loading.
+ * Safe to call multiple times.
  */
-export async function preloadInterstitialAd() {
+export async function preloadInterstitialAd({ isPro = false } = {}) {
   if (!isAdMobAvailable || !AdMobInterstitial) return;
-  if (isAdLoaded || isAdLoading) return;
+  if (!canShowInterstitialAd({ isPro })) return;
+  if (isAdLoaded || isAdLoading || isAdShowing) return;
 
-  // CRITICAL: Initialize AdMob SDK before any ad operations
   const ready = await ensureAdMobInitialized();
   if (!ready) return;
 
   try {
     isAdLoading = true;
 
-    const adUnitId = Platform.OS === "ios"
-      ? AD_UNIT_IDS.interstitial.ios
-      : AD_UNIT_IDS.interstitial.android;
+    const adUnitId =
+      Platform.OS === "ios"
+        ? AD_UNIT_IDS.interstitial.ios
+        : AD_UNIT_IDS.interstitial.android;
 
     interstitialAd = AdMobInterstitial.createForAdRequest(adUnitId, {
       requestNonPersonalizedAdsOnly: true,
@@ -108,19 +125,28 @@ export async function preloadInterstitialAd() {
       isAdLoading = false;
     });
 
+    interstitialAd.addAdEventListener(AdEventType.OPENED, () => {
+      isAdShowing = true;
+    });
+
     interstitialAd.addAdEventListener(AdEventType.CLOSED, () => {
-      // Ad was dismissed — preload the next one
       isAdLoaded = false;
       isAdLoading = false;
+      isAdShowing = false;
       interstitialAd = null;
-      // Slight delay before preloading next ad
-      setTimeout(preloadInterstitialAd, 2000);
+
+      if (sessionInterstitialCount < SESSION_INTERSTITIAL_LIMIT) {
+        setTimeout(() => {
+          preloadInterstitialAd({ isPro });
+        }, 2000);
+      }
     });
 
     interstitialAd.addAdEventListener(AdEventType.ERROR, (error) => {
-      console.warn("DuckSmart: Ad failed to load:", error.message);
+      console.warn("DuckSmart: Ad failed to load/show:", error.message);
       isAdLoaded = false;
       isAdLoading = false;
+      isAdShowing = false;
       interstitialAd = null;
     });
 
@@ -128,25 +154,33 @@ export async function preloadInterstitialAd() {
   } catch (err) {
     console.warn("DuckSmart: Failed to create interstitial ad:", err.message);
     isAdLoading = false;
+    isAdShowing = false;
     interstitialAd = null;
   }
 }
 
 /**
  * Show the preloaded interstitial ad.
- * Returns true if the ad was shown, false if it wasn't ready.
- * After showing, automatically preloads the next ad.
+ * Returns true if the ad was shown, false if it wasn't ready or was skipped.
+ *
+ * Example:
+ *   await showInterstitialAd({ isPro: user?.plan === "pro" });
  */
-export async function showInterstitialAd() {
-  if (!isAdMobAvailable || !interstitialAd || !isAdLoaded) {
-    // Ad not available — silently skip (don't block the user)
+export async function showInterstitialAd({ isPro = false } = {}) {
+  if (!canShowInterstitialAd({ isPro })) {
+    return false;
+  }
+
+  if (!isAdMobAvailable || !interstitialAd || !isAdLoaded || isAdShowing) {
     return false;
   }
 
   try {
+    sessionInterstitialCount += 1;
     await interstitialAd.show();
     return true;
   } catch (err) {
+    sessionInterstitialCount = Math.max(0, sessionInterstitialCount - 1);
     console.warn("DuckSmart: Failed to show ad:", err.message);
     return false;
   }

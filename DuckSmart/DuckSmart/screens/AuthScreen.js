@@ -54,144 +54,195 @@ export default function AuthScreen() {
   } = useAuth();
 
   const [mode, setMode] = useState("login"); // "login" | "signup"
+  const [displayName, setDisplayName] = useState("");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
+  const [localError, setLocalError] = useState("");
+
+  function clearLocalErrors() {
+    setLocalError("");
+    if (error) clearError();
+  }
 
   function toggleMode() {
     setMode((prev) => (prev === "login" ? "signup" : "login"));
-    clearError();
+    clearLocalErrors();
   }
 
   async function handleSubmit() {
-    if (!email.trim() || !password) return;
-    if (mode === "login") {
-      await login(email.trim(), password);
-    } else {
-      await signup(email.trim(), password);
+    const safeEmail = email.trim();
+    const safeDisplayName = displayName.trim();
+
+    clearLocalErrors();
+
+    if (mode === "signup" && !safeDisplayName) {
+      setLocalError("Please enter your name.");
+      return;
     }
+
+    if (!safeEmail || !password) return;
+
+    if (mode === "login") {
+      await login(safeEmail, password);
+    } else {
+      await signup(safeEmail, password, {
+        displayName: safeDisplayName,
+      });
+    }
+  }
+
+  async function handleGoogleSignIn() {
+    clearLocalErrors();
+    await loginWithGoogle();
+  }
+
+  async function handleAppleSignIn() {
+    clearLocalErrors();
+    await loginWithApple();
   }
 
   // Always show Google; show Apple only on iOS
   const showApple = Platform.OS === "ios";
+  const visibleError = localError || error;
 
   return (
     <ScreenBackground style={s.safe} bg={ASSETS.backgrounds.auth}>
       <SafeAreaView style={{ flex: 1 }}>
-      <StatusBar barStyle="light-content" />
-      <KeyboardAvoidingView
-        behavior={Platform.OS === "ios" ? "padding" : undefined}
-        style={{ flex: 1, justifyContent: "center" }}
-      >
-        <View style={s.inner}>
-          {/* Branding */}
-          <View style={s.brandWrap}>
-            <Image source={ASSETS.logo} style={s.logo} resizeMode="contain" />
-            <Text style={s.brand}>
-              <Text style={s.brandDuck}>Duck</Text>
-              <Text style={s.brandSmart}>Smart</Text>
-            </Text>
-            <Text style={s.tagline}>
-              {mode === "login" ? "Welcome back" : "Create your account"}
-            </Text>
-          </View>
-
-          {/* Error display */}
-          {error ? (
-            <View style={s.errorBox}>
-              <Text style={s.errorText}>{error}</Text>
+        <StatusBar barStyle="light-content" />
+        <KeyboardAvoidingView
+          behavior={Platform.OS === "ios" ? "padding" : undefined}
+          style={{ flex: 1, justifyContent: "center" }}
+        >
+          <View style={s.inner}>
+            {/* Branding */}
+            <View style={s.brandWrap}>
+              <Image source={ASSETS.logo} style={s.logo} resizeMode="contain" />
+              <Text style={s.brand}>
+                <Text style={s.brandDuck}>Duck</Text>
+                <Text style={s.brandSmart}>Smart</Text>
+              </Text>
+              <Text style={s.tagline}>
+                {mode === "login" ? "Welcome back" : "Create your account"}
+              </Text>
             </View>
-          ) : null}
 
-          {/* ---- Social Sign-In Buttons (always visible) ---- */}
-          <Pressable
-            style={[s.socialBtn, s.googleBtn, loading && s.submitBtnDisabled]}
-            onPress={loginWithGoogle}
-            disabled={loading}
-          >
-            <GoogleIcon />
-            <Text style={s.socialBtnText}>Continue with Google</Text>
-          </Pressable>
+            {/* Error display */}
+            {visibleError ? (
+              <View style={s.errorBox}>
+                <Text style={s.errorText}>{visibleError}</Text>
+              </View>
+            ) : null}
 
-          {showApple && (
+            {/* ---- Social Sign-In Buttons (always visible) ---- */}
             <Pressable
-              style={[s.socialBtn, s.appleBtn, loading && s.submitBtnDisabled]}
-              onPress={loginWithApple}
+              style={[s.socialBtn, s.googleBtn, loading && s.submitBtnDisabled]}
+              onPress={handleGoogleSignIn}
               disabled={loading}
             >
-              <AppleIcon />
-              <Text style={[s.socialBtnText, { color: COLORS.white }]}>
-                Continue with Apple
+              <GoogleIcon />
+              <Text style={s.socialBtnText}>Continue with Google</Text>
+            </Pressable>
+
+            {showApple && (
+              <Pressable
+                style={[s.socialBtn, s.appleBtn, loading && s.submitBtnDisabled]}
+                onPress={handleAppleSignIn}
+                disabled={loading}
+              >
+                <AppleIcon />
+                <Text style={[s.socialBtnText, { color: COLORS.white }]}>
+                  Continue with Apple
+                </Text>
+              </Pressable>
+            )}
+
+            {/* Divider */}
+            <View style={s.dividerRow}>
+              <View style={s.dividerLine} />
+              <Text style={s.dividerText}>or</Text>
+              <View style={s.dividerLine} />
+            </View>
+
+            {/* Name field - signup only */}
+            {mode === "signup" ? (
+              <>
+                <Text style={s.label}>Name</Text>
+                <TextInput
+                  value={displayName}
+                  onChangeText={(t) => {
+                    setDisplayName(t);
+                    clearLocalErrors();
+                  }}
+                  placeholder="Your name"
+                  placeholderTextColor={COLORS.mutedDarkest}
+                  style={s.input}
+                  autoCapitalize="words"
+                  autoComplete="name"
+                  textContentType="name"
+                />
+              </>
+            ) : null}
+
+            {/* Email field */}
+            <Text style={s.label}>Email</Text>
+            <TextInput
+              value={email}
+              onChangeText={(t) => {
+                setEmail(t);
+                clearLocalErrors();
+              }}
+              placeholder="you@example.com"
+              placeholderTextColor={COLORS.mutedDarkest}
+              style={s.input}
+              autoCapitalize="none"
+              autoComplete="email"
+              keyboardType="email-address"
+              textContentType="emailAddress"
+            />
+
+            {/* Password field */}
+            <Text style={s.label}>Password</Text>
+            <TextInput
+              value={password}
+              onChangeText={(t) => {
+                setPassword(t);
+                clearLocalErrors();
+              }}
+              placeholder="At least 6 characters"
+              placeholderTextColor={COLORS.mutedDarkest}
+              style={s.input}
+              secureTextEntry
+              textContentType={mode === "signup" ? "newPassword" : "password"}
+            />
+            {mode === "signup" && (
+              <Text style={s.hint}>Must be at least 6 characters</Text>
+            )}
+
+            {/* Submit button */}
+            <Pressable
+              style={[s.submitBtn, loading && s.submitBtnDisabled]}
+              onPress={handleSubmit}
+              disabled={loading}
+            >
+              {loading ? (
+                <ActivityIndicator color={COLORS.green} />
+              ) : (
+                <Text style={s.submitBtnText}>
+                  {mode === "login" ? "Log In" : "Sign Up"}
+                </Text>
+              )}
+            </Pressable>
+
+            {/* Mode toggle */}
+            <Pressable onPress={toggleMode} style={s.toggleBtn}>
+              <Text style={s.toggleText}>
+                {mode === "login"
+                  ? "Don't have an account? Sign Up"
+                  : "Already have an account? Log In"}
               </Text>
             </Pressable>
-          )}
-
-          {/* Divider */}
-          <View style={s.dividerRow}>
-            <View style={s.dividerLine} />
-            <Text style={s.dividerText}>or</Text>
-            <View style={s.dividerLine} />
           </View>
-
-          {/* Email field */}
-          <Text style={s.label}>Email</Text>
-          <TextInput
-            value={email}
-            onChangeText={(t) => {
-              setEmail(t);
-              if (error) clearError();
-            }}
-            placeholder="you@example.com"
-            placeholderTextColor={COLORS.mutedDarkest}
-            style={s.input}
-            autoCapitalize="none"
-            autoComplete="email"
-            keyboardType="email-address"
-            textContentType="emailAddress"
-          />
-
-          {/* Password field */}
-          <Text style={s.label}>Password</Text>
-          <TextInput
-            value={password}
-            onChangeText={(t) => {
-              setPassword(t);
-              if (error) clearError();
-            }}
-            placeholder="At least 6 characters"
-            placeholderTextColor={COLORS.mutedDarkest}
-            style={s.input}
-            secureTextEntry
-            textContentType={mode === "signup" ? "newPassword" : "password"}
-          />
-          {mode === "signup" && (
-            <Text style={s.hint}>Must be at least 6 characters</Text>
-          )}
-
-          {/* Submit button */}
-          <Pressable
-            style={[s.submitBtn, loading && s.submitBtnDisabled]}
-            onPress={handleSubmit}
-            disabled={loading}
-          >
-            {loading ? (
-              <ActivityIndicator color={COLORS.green} />
-            ) : (
-              <Text style={s.submitBtnText}>
-                {mode === "login" ? "Log In" : "Sign Up"}
-              </Text>
-            )}
-          </Pressable>
-
-          {/* Mode toggle */}
-          <Pressable onPress={toggleMode} style={s.toggleBtn}>
-            <Text style={s.toggleText}>
-              {mode === "login"
-                ? "Don't have an account? Sign Up"
-                : "Already have an account? Log In"}
-            </Text>
-          </Pressable>
-        </View>
-      </KeyboardAvoidingView>
+        </KeyboardAvoidingView>
       </SafeAreaView>
     </ScreenBackground>
   );

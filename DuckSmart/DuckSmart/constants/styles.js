@@ -1,11 +1,14 @@
 // DuckSmart shared styles
 
-import { StyleSheet } from "react-native";
+import { Platform, StyleSheet } from "react-native";
 import { COLORS } from "./theme";
 
 export const sharedStyles = StyleSheet.create({
   safe: { flex: 1 },
-  container: { padding: 16, paddingBottom: 28 },
+  container: {
+    padding: 16,
+    paddingBottom: Platform.OS === "android" ? 8 : 28,
+  },
 
   // general header
   headerRow: { flexDirection: "row", alignItems: "center", justifyContent: "space-between" },

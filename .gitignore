@@ -10,10 +10,6 @@ android/
 .env.local
 .env.*.local
 
-# Firebase service files (contain API keys)
-google-services.json
-GoogleService-Info.plist
-
 # Logs
 logs/
 *.log
@@ -48,3 +44,19 @@ build/
 # OS specific
 Thumbs.db
 .DS_Store
+
+**/ios/Pods/
+**/ios/build/
+**/android/.gradle/
+**/android/app/build/
+**/node_modules/
+.expo/
+dist/
+
+**/ios/Pods/
+**/ios/build/
+**/android/.gradle/
+**/android/app/build/
+**/node_modules/
+.expo/
+dist/

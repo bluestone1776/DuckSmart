@@ -1,3 +1,4 @@
+// /context/WeatherContext.js
 // DuckSmart — Weather Context
 //
 // Provides live weather data to all screens via React Context.
@@ -10,6 +11,7 @@ import * as Location from "expo-location";
 import { fetchWeather, MOCK_WEATHER } from "../services/weather";
 import { cacheWeather, loadCachedWeather } from "../services/storage";
 import { fetchMigrationData } from "../services/ebird";
+import { checkAndNotifyWeatherAlerts } from "../services/notifications";
 
 const WeatherContext = createContext(null);
 
@@ -34,9 +36,15 @@ export function WeatherProvider({ children }) {
       if (result) {
         setWeather(result);
         cacheWeather(result);
+        checkAndNotifyWeatherAlerts(result);
+
         // Non-blocking: fetch eBird migration data in parallel
         fetchMigrationData(coords.latitude, coords.longitude).then((mig) => {
-          if (mig) setWeather((prev) => ({ ...prev, migration: mig }));
+          if (mig) {
+            const updatedWeather = { ...result, migration: mig };
+            setWeather((prev) => ({ ...prev, migration: mig }));
+            checkAndNotifyWeatherAlerts(updatedWeather);
+          }
         });
       } else {
         // API failed — try loading from cache
