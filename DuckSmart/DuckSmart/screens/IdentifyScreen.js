@@ -199,7 +199,7 @@ const SpeciesMatchRow = React.memo(function SpeciesMatchRow({ species, score, on
 });
 
 function IdentifyHome({ navigation }) {
-  const { isPro, purchase } = usePremium();
+  const { isPro, loading: premiumLoading, purchase } = usePremium();
   const { user } = useAuth();
 
   const [group, setGroup] = useState(null);
@@ -262,12 +262,12 @@ function IdentifyHome({ navigation }) {
   }, []);
 
   useEffect(() => {
-    return () => {
-      if (!isPro) {
-        showInterstitialAd();
-      }
-    };
-  }, [isPro]);
+  return () => {
+    if (!premiumLoading && !isPro) {
+      showInterstitialAd({ isPro, premiumLoading });
+    }
+  };
+}, [isPro, premiumLoading]);
 
   const aiLimitReached = aiUsageReady && aiDailyCount >= AI_DUCK_DAILY_LIMIT;
 

@@ -74,7 +74,8 @@ async function ensureAdMobInitialized() {
 /**
  * Returns true if this user should be allowed to see an interstitial.
  */
-export function canShowInterstitialAd({ isPro = false } = {}) {
+export function canShowInterstitialAd({ isPro = false, premiumLoading = false } = {}) {
+  if (premiumLoading) return false;
   if (isPro) return false;
   if (sessionInterstitialCount >= SESSION_INTERSTITIAL_LIMIT) return false;
   return true;
@@ -100,9 +101,9 @@ export function resetInterstitialSessionCount() {
  * Call this early (e.g., when the app starts or a screen mounts).
  * Safe to call multiple times.
  */
-export async function preloadInterstitialAd({ isPro = false } = {}) {
+export async function preloadInterstitialAd({ isPro = false, premiumLoading = false } = {}) {
   if (!isAdMobAvailable || !AdMobInterstitial) return;
-  if (!canShowInterstitialAd({ isPro })) return;
+  if (!canShowInterstitialAd({ isPro, premiumLoading })) return;
   if (isAdLoaded || isAdLoading || isAdShowing) return;
 
   const ready = await ensureAdMobInitialized();
@@ -166,8 +167,8 @@ export async function preloadInterstitialAd({ isPro = false } = {}) {
  * Example:
  *   await showInterstitialAd({ isPro: user?.plan === "pro" });
  */
-export async function showInterstitialAd({ isPro = false } = {}) {
-  if (!canShowInterstitialAd({ isPro })) {
+export async function showInterstitialAd({ isPro = false, premiumLoading = false } = {}) {
+  if (!canShowInterstitialAd({ isPro, premiumLoading })) {
     return false;
   }
 

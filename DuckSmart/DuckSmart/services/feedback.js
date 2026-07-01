@@ -8,15 +8,13 @@ import { db, auth } from "./firebase";
 import { collection, addDoc } from "firebase/firestore";
 import { Platform } from "react-native";
 import Constants from "expo-constants";
+import { createAdminInboxNotificationIfNeeded } from "./in_app_notifications";
 
 const FEEDBACK_KEY = "ducksmart_feedback";
 
-/**
- * Submit a feedback ticket to Firestore and save locally as backup.
- * @param {{ message: string, category: string }} ticket
- */
 export async function submitFeedback(ticket) {
   const user = auth.currentUser;
+
   const entry = {
     id: `fb-${Date.now()}`,
     ...ticket,
@@ -27,30 +25,37 @@ export async function submitFeedback(ticket) {
     createdAt: new Date().toISOString(),
     timestamp: Date.now(),
     status: "pending",
+    adminUnread: true,
+    userUnread: false,
   };
 
+  let feedbackDocId = "";
+
   try {
-    // Push to Firestore
-    await addDoc(collection(db, "feedback"), entry);
+    const docRef = await addDoc(collection(db, "feedback"), entry);
+    feedbackDocId = docRef.id;
+
+    await createAdminInboxNotificationIfNeeded({
+      senderUid: user?.uid || "",
+      feedbackId: feedbackDocId,
+      relatedId: feedbackDocId,
+      message: "New and Updated Admin Messages To Check",
+    });
   } catch (err) {
     console.warn("DuckSmart feedback: Firestore write failed —", err.message);
   }
 
   try {
-    // Also save locally as backup
     const existing = await loadFeedback();
-    const updated = [entry, ...existing];
+    const updated = [{ ...entry, firestoreId: feedbackDocId }, ...existing];
     await AsyncStorage.setItem(FEEDBACK_KEY, JSON.stringify(updated));
   } catch (err) {
     console.warn("DuckSmart feedback: local save failed —", err.message);
   }
 
-  return entry;
+  return { ...entry, firestoreId: feedbackDocId };
 }
 
-/**
- * Load all locally stored feedback entries.
- */
 export async function loadFeedback() {
   try {
     const raw = await AsyncStorage.getItem(FEEDBACK_KEY);

@@ -57,6 +57,7 @@ export default function AuthScreen() {
   const [displayName, setDisplayName] = useState("");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
+  const [marketingOptIn, setMarketingOptIn] = useState(true);
   const [localError, setLocalError] = useState("");
 
   function clearLocalErrors() {
@@ -87,6 +88,7 @@ export default function AuthScreen() {
     } else {
       await signup(safeEmail, password, {
         displayName: safeDisplayName,
+        marketingOptIn,
       });
     }
   }
@@ -218,6 +220,27 @@ export default function AuthScreen() {
               <Text style={s.hint}>Must be at least 6 characters</Text>
             )}
 
+            {mode === "signup" ? (
+              <Pressable
+                style={s.marketingRow}
+                onPress={() => setMarketingOptIn((prev) => !prev)}
+                disabled={loading}
+              >
+                <View style={[s.checkbox, marketingOptIn && s.checkboxChecked]}>
+                  {marketingOptIn ? <Text style={s.checkboxCheck}>✓</Text> : null}
+                </View>
+
+                <View style={{ flex: 1 }}>
+                  <Text style={s.marketingText}>
+                    Send me DuckSmart app tips, feature updates, and product news.
+                  </Text>
+                  <Text style={s.marketingSubText}>
+                    Stay in the loop on new hunting tools, gear, and DuckSmart releases.
+                  </Text>
+                </View>
+              </Pressable>
+            ) : null}
+
             {/* Submit button */}
             <Pressable
               style={[s.submitBtn, loading && s.submitBtnDisabled]}
@@ -313,8 +336,19 @@ const s = StyleSheet.create({
     marginHorizontal: 12,
   },
 
-  label: { color: COLORS.muted, fontSize: 12, fontWeight: "900", marginBottom: 8, marginTop: 12 },
-  hint: { color: COLORS.mutedDark, fontSize: 11, fontWeight: "700", marginTop: 6 },
+  label: {
+    color: COLORS.muted,
+    fontSize: 12,
+    fontWeight: "900",
+    marginBottom: 8,
+    marginTop: 12,
+  },
+  hint: {
+    color: COLORS.mutedDark,
+    fontSize: 11,
+    fontWeight: "700",
+    marginTop: 6,
+  },
   input: {
     borderWidth: 1,
     borderColor: COLORS.border,
@@ -325,6 +359,52 @@ const s = StyleSheet.create({
     color: COLORS.white,
     fontWeight: "800",
     fontSize: 15,
+  },
+
+  marketingRow: {
+    flexDirection: "row",
+    alignItems: "flex-start",
+    marginTop: 14,
+    padding: 12,
+    borderRadius: 14,
+    backgroundColor: "rgba(57, 217, 106, 0.08)",
+    borderWidth: 1,
+    borderColor: "rgba(57, 217, 106, 0.24)",
+  },
+  checkbox: {
+    width: 22,
+    height: 22,
+    borderRadius: 6,
+    borderWidth: 1,
+    borderColor: COLORS.border,
+    backgroundColor: COLORS.bgDeep,
+    alignItems: "center",
+    justifyContent: "center",
+    marginRight: 10,
+    marginTop: 1,
+  },
+  checkboxChecked: {
+    backgroundColor: COLORS.greenBg,
+    borderColor: COLORS.green,
+  },
+  checkboxCheck: {
+    color: COLORS.green,
+    fontSize: 15,
+    fontWeight: "900",
+    marginTop: -1,
+  },
+  marketingText: {
+    color: COLORS.white,
+    fontSize: 12,
+    fontWeight: "900",
+    lineHeight: 17,
+  },
+  marketingSubText: {
+    color: COLORS.mutedDark,
+    fontSize: 11,
+    fontWeight: "700",
+    lineHeight: 15,
+    marginTop: 3,
   },
 
   submitBtn: {

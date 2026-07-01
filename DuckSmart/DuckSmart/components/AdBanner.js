@@ -76,7 +76,10 @@ const ACTIVE_SPONSOR = {
  * Initializes AdMob SDK before showing the first banner.
  */
 export default function AdBanner() {
-  const { isPro, purchase } = usePremium();
+  const { isPro, loading: premiumLoading, purchase } = usePremium();
+  if (premiumLoading || isPro) {
+  return null;
+}
   const [adReady, setAdReady] = useState(false);
 
   // Initialize AdMob SDK before rendering any banner

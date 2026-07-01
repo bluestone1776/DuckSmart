@@ -7,7 +7,7 @@ module.exports = {
     name: IS_DEV ? "DuckSmart (Dev)" : "DuckSmart",
     slug: "ducksmart",
     scheme: "ducksmart",
-    version: "1.2.8",
+    version: "1.3.6",
     orientation: "portrait",
     icon: "./assets/icon.png",
     userInterfaceStyle: "dark",

@@ -128,6 +128,28 @@ export function normalizeStateForRegridPath(stateValue) {
   return "";
 }
 
+function normalizeCountyForRegridPath(countyValue) {
+  const raw = cleanString(countyValue)
+    .toLowerCase()
+    .replace(/\./g, "")
+    .replace(/\bcounty\b/g, "")
+    .replace(/&/g, "and")
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "");
+
+  return raw;
+}
+
+function buildRegridOwnerSearchPath({ state, county }) {
+  const statePath = normalizeStateForRegridPath(state);
+  const countySlug = normalizeCountyForRegridPath(county);
+
+  if (!statePath) return "";
+  if (!countySlug) return statePath;
+
+  return `${statePath}/${countySlug}`;
+}
+
 function getFeatureCoordinate(feature) {
   const props = feature?.properties || {};
   const fields = props.fields || {};
@@ -496,10 +518,11 @@ export function getPropertyFeatureRegion(feature) {
 export async function searchParcelsByOwner({
   owner,
   state,
+  county,
   limit = DEFAULT_LIMIT,
 } = {}) {
   const cleanOwner = cleanString(owner);
-  const path = normalizeStateForRegridPath(state);
+  const path = buildRegridOwnerSearchPath({ state, county });
   const safeLimit = cleanLimit(limit);
 
   if (!REGRID_OWNER_SEARCH_URL) {
@@ -551,13 +574,14 @@ export async function searchParcelsByOwner({
   const featureCollection = normalizeRegridResponse(data, safeLimit);
   const center = getPropertySearchCenter(featureCollection);
 
-  return {
-    owner: cleanOwner,
-    statePath: path,
-    limit: safeLimit,
-    count: featureCollection.features.length,
-    featureCollection,
-    center,
-    raw: data,
-  };
+return {
+  owner: cleanOwner,
+  statePath: path,
+  county: cleanString(county),
+  limit: safeLimit,
+  count: featureCollection.features.length,
+  featureCollection,
+  center,
+  raw: data,
+};
 }

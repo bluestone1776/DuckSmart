@@ -903,7 +903,7 @@ export default function TodayScreen({ onLogout, openGroupScreen }) {
 
             <View style={s.heroMetricGrid}>
               <SmallMetric
-                label="Weather"
+                label="Rain"
                 icon={getWeatherEmojiFromData({
                   precip: weather.precipChance,
                   cloudPct: weather.cloudPct,
@@ -1187,7 +1187,7 @@ export default function TodayScreen({ onLogout, openGroupScreen }) {
                 </Pressable>
               </View>
 
-              <View style={{ flex: 1 }}>
+                            <View style={s.radarMapModalWrap}>
                 {coords && radarFrames[radarFrameIndex] ? (
                   <MapView
                     style={{ flex: 1 }}
@@ -1214,6 +1214,16 @@ export default function TodayScreen({ onLogout, openGroupScreen }) {
                     />
                   </MapView>
                 ) : null}
+
+                <Pressable
+                  onPress={() => {
+                    logEvent("today_radar_modal_closed", userId, todayAnalyticsMeta);
+                    setRadarExpanded(false);
+                  }}
+                  style={s.radarFloatingCloseBtn}
+                >
+                  <Text style={s.radarFloatingCloseText}>✕</Text>
+                </Pressable>
               </View>
 
               <View style={s.radarControls}>
@@ -1396,6 +1406,30 @@ const s = StyleSheet.create({
   brandSmart: {
     color: GOLD,
   },
+    radarMapModalWrap: {
+    flex: 1,
+    position: "relative",
+  },
+  radarFloatingCloseBtn: {
+    position: "absolute",
+    top: 12,
+    right: 12,
+    width: 44,
+    height: 44,
+    borderRadius: 22,
+    backgroundColor: "rgba(0,0,0,0.78)",
+    borderWidth: 1,
+    borderColor: "rgba(255,255,255,0.25)",
+    alignItems: "center",
+    justifyContent: "center",
+    zIndex: 50,
+    elevation: 50,
+  },
+  radarFloatingCloseText: {
+    color: COLORS.white,
+    fontSize: 20,
+    fontWeight: "900",
+  },
   locationText: {
     color: "rgba(255,255,255,0.7)",
     fontWeight: "800",
@@ -1413,11 +1447,11 @@ const s = StyleSheet.create({
     justifyContent: "center",
     backgroundColor: "rgba(0,0,0,0.62)",
   },
-  gearText: {
-    color: COLORS.white,
-    fontSize: 18,
-    fontWeight: "900",
-  },
+gearText: {
+  color: COLORS.white,
+  fontSize: 34,
+  fontWeight: "900",
+},
 
   heroCopy: {
     marginTop: 14,

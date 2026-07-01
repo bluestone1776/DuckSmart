@@ -1,12 +1,12 @@
 // DuckSmart — Blocked Users / Reports Screen
 //
 // Lets users:
+// - View open admin conversations
+// - Open/reply to admin conversations
+// - Swipe left to close/archive admin conversations
 // - View blocked users
 // - Unblock users
 // - Submit a report / admin contact request
-//
-// Uses:
-// - services/block_user.js
 
 import React, { useEffect, useState } from "react";
 import {
@@ -25,17 +25,30 @@ import {
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { useNavigation } from "@react-navigation/native";
+import { Swipeable } from "react-native-gesture-handler";
+import {
+  collection,
+  doc,
+  getDocs,
+  query,
+  serverTimestamp,
+  updateDoc,
+  where,
+} from "firebase/firestore";
 
 import { COLORS } from "../constants/theme";
 import { useAuth } from "../context/AuthContext";
+import { db } from "../services/firebase";
 import {
   loadBlockedUsers,
   unblockUser,
   submitUserReport,
 } from "../services/block_user";
+import UserMessages from "../components/UserMessages";
 
 const GOLD = "#D9A84C";
 const RED = "#FF4D4D";
+const GREEN = "#39FF14";
 const BG = "#05090A";
 const CARD = "rgba(13,18,19,0.96)";
 const CARD_SOFT = "rgba(255,255,255,0.045)";
@@ -52,6 +65,14 @@ const REPORT_CATEGORIES = [
   "Account Help",
   "Other",
 ];
+
+function clean(value) {
+  return String(value || "").trim();
+}
+
+function lower(value) {
+  return clean(value).toLowerCase();
+}
 
 function getDisplayName(profile) {
   return (
@@ -79,6 +100,64 @@ function getInitials(value) {
   }
 
   return String(parts[0]?.[0] || "D").toUpperCase();
+}
+
+function getThreadId(thread) {
+  return clean(thread?.firestoreId || thread?.id);
+}
+
+function isClosedThread(thread) {
+  const status = lower(thread?.status);
+  return status === "closed" || status === "resolved";
+}
+
+function getThreadTime(thread) {
+  return Number(
+    thread?.latestMessageAtMillis ||
+      thread?.updatedAtMillis ||
+      thread?.timestamp ||
+      0
+  );
+}
+
+function formatThreadDate(value) {
+  const time = Number(value || 0);
+  if (!time) return "No date";
+
+  const date = new Date(time);
+  if (Number.isNaN(date.getTime())) return "No date";
+
+  return date.toLocaleString(undefined, {
+    month: "short",
+    day: "numeric",
+    hour: "numeric",
+    minute: "2-digit",
+  });
+}
+
+function getThreadTitle(thread) {
+  return clean(thread?.category) || "DuckSmart Admin";
+}
+
+function getThreadPreview(thread) {
+  return (
+    clean(thread?.latestMessage) ||
+    clean(thread?.message) ||
+    "Tap to view your conversation with DuckSmart admin."
+  );
+}
+
+function getThreadStatus(thread) {
+  const status = lower(thread?.status);
+
+  if (thread?.userUnread === true || status === "admin_replied") {
+    return "NEW";
+  }
+
+  if (status === "user_replied") return "SENT";
+  if (status === "pending") return "OPEN";
+
+  return "OPEN";
 }
 
 function BlockedUserRow({ item, busy, onUnblock }) {
@@ -117,9 +196,69 @@ function BlockedUserRow({ item, busy, onUnblock }) {
   );
 }
 
+function AdminThreadRow({ item, onOpen, onCloseThread }) {
+  const threadId = getThreadId(item);
+  const status = getThreadStatus(item);
+  const isUnread = status === "NEW";
+
+  function renderRightActions() {
+    return (
+      <Pressable style={s.swipeCloseAction} onPress={() => onCloseThread?.(item)}>
+        <Text style={s.swipeCloseText}>Close</Text>
+      </Pressable>
+    );
+  }
+
+  return (
+    <Swipeable
+      renderRightActions={renderRightActions}
+      overshootRight={false}
+      key={threadId}
+    >
+      <Pressable
+        style={[s.adminThreadRow, isUnread ? s.adminThreadRowUnread : null]}
+        onPress={() => onOpen?.(item)}
+      >
+        <View style={s.adminIconWrap}>
+          <Text style={s.adminIcon}>💬</Text>
+        </View>
+
+        <View style={{ flex: 1, minWidth: 0 }}>
+          <View style={s.adminThreadTopRow}>
+            <Text style={s.adminThreadTitle} numberOfLines={1}>
+              {getThreadTitle(item)}
+            </Text>
+
+            <View style={[s.threadBadge, isUnread ? s.threadBadgeNew : null]}>
+              <Text style={[s.threadBadgeText, isUnread ? s.threadBadgeTextNew : null]}>
+                {status}
+              </Text>
+            </View>
+          </View>
+
+          <Text style={s.adminThreadPreview} numberOfLines={2}>
+            {getThreadPreview(item)}
+          </Text>
+
+          <Text style={s.adminThreadDate} numberOfLines={1}>
+            {formatThreadDate(getThreadTime(item))}
+          </Text>
+        </View>
+
+        <Text style={s.threadArrow}>›</Text>
+      </Pressable>
+    </Swipeable>
+  );
+}
+
 export default function BlockedScreen() {
   const navigation = useNavigation();
   const { user } = useAuth();
+
+  const [adminThreads, setAdminThreads] = useState([]);
+  const [loadingThreads, setLoadingThreads] = useState(true);
+  const [selectedThread, setSelectedThread] = useState(null);
+  const [threadModalVisible, setThreadModalVisible] = useState(false);
 
   const [blockedUsers, setBlockedUsers] = useState([]);
   const [loadingBlocked, setLoadingBlocked] = useState(true);
@@ -135,26 +274,34 @@ export default function BlockedScreen() {
 
     async function loadData() {
       if (!user?.uid) {
+        setLoadingThreads(false);
         setLoadingBlocked(false);
         return;
       }
 
+      setLoadingThreads(true);
       setLoadingBlocked(true);
 
       try {
-        const results = await loadBlockedUsers(user.uid);
+        const [threadsResults, blockedResults] = await Promise.all([
+          loadAdminThreads(user.uid),
+          loadBlockedUsers(user.uid),
+        ]);
 
         if (mounted) {
-          setBlockedUsers(Array.isArray(results) ? results : []);
+          setAdminThreads(Array.isArray(threadsResults) ? threadsResults : []);
+          setBlockedUsers(Array.isArray(blockedResults) ? blockedResults : []);
         }
       } catch (err) {
-        console.log("DuckSmart blocked users load error:", err?.message || err);
+        console.log("DuckSmart blocked screen load error:", err?.message || err);
 
         if (mounted) {
+          setAdminThreads([]);
           setBlockedUsers([]);
         }
       } finally {
         if (mounted) {
+          setLoadingThreads(false);
           setLoadingBlocked(false);
         }
       }
@@ -166,6 +313,41 @@ export default function BlockedScreen() {
       mounted = false;
     };
   }, [user?.uid]);
+
+  async function loadAdminThreads(uid) {
+    if (!uid) return [];
+
+    const feedbackQuery = query(
+      collection(db, "feedback"),
+      where("userId", "==", uid)
+    );
+
+    const snap = await getDocs(feedbackQuery);
+
+    return snap.docs
+      .map((docSnap) => ({
+        firestoreId: docSnap.id,
+        ...docSnap.data(),
+      }))
+      .filter((thread) => !isClosedThread(thread))
+      .sort((a, b) => getThreadTime(b) - getThreadTime(a));
+  }
+
+  async function refreshAdminThreads() {
+    if (!user?.uid) return;
+
+    setLoadingThreads(true);
+
+    try {
+      const results = await loadAdminThreads(user.uid);
+      setAdminThreads(Array.isArray(results) ? results : []);
+    } catch (err) {
+      console.log("DuckSmart admin threads refresh error:", err?.message || err);
+      setAdminThreads([]);
+    } finally {
+      setLoadingThreads(false);
+    }
+  }
 
   async function refreshBlockedUsers() {
     if (!user?.uid) return;
@@ -179,6 +361,71 @@ export default function BlockedScreen() {
       setBlockedUsers([]);
     } finally {
       setLoadingBlocked(false);
+    }
+  }
+
+  function openAdminThread(thread) {
+    if (!getThreadId(thread)) {
+      Alert.alert("Missing Conversation", "This admin conversation could not be opened.");
+      return;
+    }
+
+    setSelectedThread(thread);
+    setThreadModalVisible(true);
+  }
+
+  function closeThreadModal() {
+    setThreadModalVisible(false);
+    setSelectedThread(null);
+
+    setTimeout(() => {
+      refreshAdminThreads();
+    }, 300);
+  }
+
+  function confirmCloseThread(thread) {
+    const threadId = getThreadId(thread);
+
+    if (!threadId) {
+      Alert.alert("Missing Conversation", "This admin conversation could not be closed.");
+      return;
+    }
+
+    Alert.alert(
+      "Close Conversation?",
+      "This will archive the conversation and remove it from this screen.",
+      [
+        { text: "Cancel", style: "cancel" },
+        {
+          text: "Close",
+          style: "destructive",
+          onPress: () => closeAdminThread(thread),
+        },
+      ]
+    );
+  }
+
+  async function closeAdminThread(thread) {
+    const threadId = getThreadId(thread);
+
+    if (!threadId) return;
+
+    try {
+      await updateDoc(doc(db, "feedback", threadId), {
+        status: "closed",
+        userUnread: false,
+        closedByUserAt: serverTimestamp(),
+        closedByUserAtMillis: Date.now(),
+        updatedAt: serverTimestamp(),
+        updatedAtMillis: Date.now(),
+      });
+
+      setAdminThreads((prev) =>
+        prev.filter((item) => getThreadId(item) !== threadId)
+      );
+    } catch (err) {
+      console.error("DuckSmart close admin thread error:", err);
+      Alert.alert("Close Failed", err?.message || "Could not close this conversation.");
     }
   }
 
@@ -267,6 +514,44 @@ export default function BlockedScreen() {
               <Text style={s.headerKicker}>DUCKSMART</Text>
               <Text style={s.headerTitle}>REPORTS / BLOCKED USERS</Text>
             </View>
+          </View>
+
+          <View style={s.section}>
+            <View style={s.sectionHeaderRow}>
+              <View style={{ flex: 1 }}>
+                <Text style={s.sectionTitle}>Admin Conversations</Text>
+                <Text style={s.sectionSub}>
+                  Open conversations with DuckSmart admin appear here first. Swipe left to close one.
+                </Text>
+              </View>
+
+              {loadingThreads ? <ActivityIndicator color={GOLD} size="small" /> : null}
+            </View>
+
+            {loadingThreads ? (
+              <View style={s.loadingCard}>
+                <ActivityIndicator color={GOLD} />
+                <Text style={s.loadingText}>Loading admin conversations...</Text>
+              </View>
+            ) : adminThreads.length > 0 ? (
+              <View style={s.adminThreadList}>
+                {adminThreads.map((item) => (
+                  <AdminThreadRow
+                    key={getThreadId(item)}
+                    item={item}
+                    onOpen={openAdminThread}
+                    onCloseThread={confirmCloseThread}
+                  />
+                ))}
+              </View>
+            ) : (
+              <View style={s.emptyCard}>
+                <Text style={s.emptyTitle}>No Admin Conversations</Text>
+                <Text style={s.emptyText}>
+                  If DuckSmart admin replies to one of your reports, the conversation will appear here.
+                </Text>
+              </View>
+            )}
           </View>
 
           <View style={s.section}>
@@ -366,6 +651,19 @@ export default function BlockedScreen() {
 
           <View style={{ height: 28 }} />
         </ScrollView>
+
+        <UserMessages
+          visible={threadModalVisible}
+          onClose={closeThreadModal}
+          report={selectedThread}
+          feedbackId={selectedThread?.firestoreId || ""}
+          mode="user"
+          title={
+            selectedThread?.category
+              ? `${selectedThread.category} Report`
+              : "DuckSmart Support"
+          }
+        />
       </KeyboardAvoidingView>
     </SafeAreaView>
   );
@@ -461,6 +759,104 @@ const s = StyleSheet.create({
     fontSize: 12,
     fontWeight: "800",
     marginTop: 10,
+  },
+
+  adminThreadList: {
+    gap: 8,
+  },
+  adminThreadRow: {
+    minHeight: 78,
+    borderRadius: 15,
+    borderWidth: 1,
+    borderColor: BORDER,
+    backgroundColor: CARD_SOFT,
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 10,
+    paddingHorizontal: 10,
+    paddingVertical: 10,
+    marginBottom: 8,
+  },
+  adminThreadRowUnread: {
+    borderColor: GOLD,
+    backgroundColor: "rgba(217,168,76,0.11)",
+  },
+  adminIconWrap: {
+    width: 46,
+    height: 46,
+    borderRadius: 15,
+    backgroundColor: "rgba(217,168,76,0.14)",
+    borderWidth: 1,
+    borderColor: GOLD_BORDER,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  adminIcon: {
+    fontSize: 21,
+  },
+  adminThreadTopRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 7,
+  },
+  adminThreadTitle: {
+    color: COLORS.white,
+    fontSize: 14,
+    fontWeight: "900",
+    flexShrink: 1,
+  },
+  adminThreadPreview: {
+    color: MUTED,
+    fontSize: 12,
+    fontWeight: "700",
+    lineHeight: 17,
+    marginTop: 4,
+  },
+  adminThreadDate: {
+    color: MUTED_DARK,
+    fontSize: 10,
+    fontWeight: "800",
+    marginTop: 4,
+  },
+  threadBadge: {
+    paddingHorizontal: 7,
+    paddingVertical: 3,
+    borderRadius: 999,
+    backgroundColor: CARD,
+    borderWidth: 1,
+    borderColor: BORDER,
+  },
+  threadBadgeNew: {
+    backgroundColor: GOLD,
+    borderColor: GOLD,
+  },
+  threadBadgeText: {
+    color: MUTED,
+    fontSize: 9,
+    fontWeight: "900",
+  },
+  threadBadgeTextNew: {
+    color: BG,
+  },
+  threadArrow: {
+    color: GOLD,
+    fontSize: 26,
+    fontWeight: "900",
+    marginLeft: 2,
+  },
+  swipeCloseAction: {
+    width: 92,
+    minHeight: 78,
+    marginBottom: 8,
+    borderRadius: 15,
+    backgroundColor: "rgba(255,77,77,0.92)",
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  swipeCloseText: {
+    color: COLORS.white,
+    fontSize: 13,
+    fontWeight: "900",
   },
 
   blockedList: {

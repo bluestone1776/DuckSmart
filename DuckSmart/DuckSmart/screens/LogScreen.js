@@ -33,6 +33,7 @@ import { clamp } from "../utils/helpers";
 import { scoreHuntToday } from "../utils/scoring";
 import Chip from "../components/Chip";
 import ScreenBackground from "../components/ScreenBackground";
+import DogHelper from "../components/DogHelper";
 import { useWeather } from "../context/WeatherContext";
 import { usePremium } from "../context/PremiumContext";
 import { useAuth } from "../context/AuthContext";
@@ -432,7 +433,9 @@ export default function LogScreen({
   addPin,
   pins = [],
   logs = [],
+  dogs = [],
 }) {
+
   const navigation = useNavigation();
   const { weather: liveWeather } = useWeather();
   const { isPro, purchase } = usePremium();
@@ -481,6 +484,8 @@ export default function LogScreen({
   const [timePickerVisible, setTimePickerVisible] = useState(false);
   const [timePickerTarget, setTimePickerTarget] = useState("start");
   const [saving, setSaving] = useState(false);
+  const [dogHelperVisible, setDogHelperVisible] = useState(false);
+  const [dogStatsList, setDogStatsList] = useState([]);
 
   const isScoutLog = activeLogType === "scout";
   const activeLogLabel = isScoutLog ? "Scout" : "Hunt";
@@ -490,6 +495,36 @@ export default function LogScreen({
     () => pins.find((pin) => pin.id === selectedPinId) || null,
     [pins, selectedPinId]
   );
+
+const activeDogs = useMemo(
+  () => dogs.filter((dog) => dog && !dog.deletedAt && dog.active !== false),
+  [dogs]
+);
+
+const dogHelperSummary = useMemo(() => {
+  const birdsRecovered = dogStatsList.reduce((sum, item) => {
+    return (
+      sum +
+      Number(item.duckRetrieves || 0) +
+      Number(item.gooseRetrieves || 0) +
+      Number(item.crippleRetrieves || 0)
+    );
+  }, 0);
+
+  const dogsUsed = dogStatsList.filter((item) => item.dogUsed !== false).length;
+
+  if (!dogsUsed) {
+    return {
+      title: "No dog stats added",
+      sub: "Tap to add retrieves for this hunt",
+    };
+  }
+
+  return {
+    title: `${birdsRecovered} Birds Recovered`,
+    sub: `${dogsUsed} dog${dogsUsed === 1 ? "" : "s"} used on this hunt`,
+  };
+}, [dogStatsList]);
 
   const selectedSpread = useMemo(
     () => SPREADS.find((sp) => sp.key === spread) || null,
@@ -727,6 +762,8 @@ const renderScoutSpeciesPickerItem = useCallback(
     setSpeciesModalVisible(false);
     setSelectedSpeciesId(null);
     setShowFemaleSpecies(false);
+    setDogHelperVisible(false);
+    setDogStatsList([]);
   }
 
   function defaultPinName() {
@@ -772,6 +809,65 @@ const renderScoutSpeciesPickerItem = useCallback(
       (sp) => `${sp.count} ${sp.name}`
     );
 
+const cleanDogStatsList = !isScoutLog
+  ? Array.from(
+      new Map(
+        dogStatsList
+          .filter((item) => item?.dogId && item?.dogUsed !== false)
+          .map((item) => {
+            const matchingDog = activeDogs.find((dog) => dog.id === item.dogId);
+
+            const cleanItem = {
+              dogId: String(item.dogId),
+              dogName: String(item.dogName || matchingDog?.name || "Dog"),
+              dogUsed: true,
+              duckRetrieves: Math.max(0, Math.round(Number(item.duckRetrieves || 0))),
+              gooseRetrieves: Math.max(0, Math.round(Number(item.gooseRetrieves || 0))),
+              crippleRetrieves: Math.max(0, Math.round(Number(item.crippleRetrieves || 0))),
+              blindRetrieves: Math.max(0, Math.round(Number(item.blindRetrieves || 0))),
+              markedRetrieves: Math.max(0, Math.round(Number(item.markedRetrieves || 0))),
+              waterRetrieves: Math.max(0, Math.round(Number(item.waterRetrieves || 0))),
+              landRetrieves: Math.max(0, Math.round(Number(item.landRetrieves || 0))),
+              longRetrieveYards: Math.max(0, Math.round(Number(item.longRetrieveYards || 0))),
+              notes: String(item.notes || "").trim().slice(0, 1000),
+            };
+
+            return [cleanItem.dogId, cleanItem];
+          })
+      ).values()
+    )
+  : [];
+
+const dogStatsSummary = cleanDogStatsList.reduce(
+  (sum, item) => {
+    sum.dogsUsed += 1;
+    sum.duckRetrieves += Number(item.duckRetrieves || 0);
+    sum.gooseRetrieves += Number(item.gooseRetrieves || 0);
+    sum.crippleRetrieves += Number(item.crippleRetrieves || 0);
+    sum.blindRetrieves += Number(item.blindRetrieves || 0);
+    sum.markedRetrieves += Number(item.markedRetrieves || 0);
+    sum.waterRetrieves += Number(item.waterRetrieves || 0);
+    sum.landRetrieves += Number(item.landRetrieves || 0);
+
+    return sum;
+  },
+  {
+    dogsUsed: 0,
+    duckRetrieves: 0,
+    gooseRetrieves: 0,
+    crippleRetrieves: 0,
+    blindRetrieves: 0,
+    markedRetrieves: 0,
+    waterRetrieves: 0,
+    landRetrieves: 0,
+  }
+);
+
+dogStatsSummary.birdsRecovered =
+  dogStatsSummary.duckRetrieves +
+  dogStatsSummary.gooseRetrieves +
+  dogStatsSummary.crippleRetrieves;
+
     return {
       id: logId,
       logType,
@@ -810,6 +906,9 @@ const renderScoutSpeciesPickerItem = useCallback(
       ducksHarvested: isScoutLog ? null : safeHarvest,
       crippledBirds: isScoutLog ? null : safeCrippled,
       hunters: isScoutLog ? null : safeHunters,
+      dogStats: cleanDogStatsList[0] || { dogUsed: false },
+      dogStatsList: cleanDogStatsList,
+      dogStatsSummary,
       scoutSpecies: scoutSpeciesPayload,
       speciesSighted: speciesSightedPayload,
       ducksSighted: scoutSpeciesPayload,
@@ -1111,6 +1210,14 @@ const renderScoutSpeciesPickerItem = useCallback(
       <SafeAreaView edges={["top", "left", "right"]} style={{ flex: 1 }}>
         <StatusBar barStyle="light-content" />
 
+<DogHelper
+  visible={dogHelperVisible}
+  dogs={activeDogs}
+  value={dogStatsList}
+  onChange={setDogStatsList}
+  onClose={() => setDogHelperVisible(false)}
+/>
+
         <SelectionModal
           visible={pinPickerVisible}
           title="Select Location"
@@ -1262,23 +1369,32 @@ const renderScoutSpeciesPickerItem = useCallback(
                 style={local.modalInput}
               />
 
-              <View style={local.modalButtonRow}>
-                <Pressable
-                  style={[local.modalSecondaryBtn, saving ? local.disabledBtn : null]}
-                  onPress={saveWithoutNewPin}
-                  disabled={saving}
-                >
-                  <Text style={local.modalSecondaryText}>{saving ? "Saving..." : "No"}</Text>
-                </Pressable>
+<View style={local.modalButtonRow}>
+  <Pressable
+    style={[local.modalSecondaryBtn, saving ? local.disabledBtn : null]}
+    onPress={() => {
+      setSavePinModalVisible(false);
+      setPendingHuntEntry(null);
+      setNewPinName("");
+      setSaving(false);
+    }}
+    disabled={saving}
+  >
+    <Text style={local.modalSecondaryText}>Cancel</Text>
+  </Pressable>
 
-                <Pressable
-                  style={[local.modalPrimaryBtn, saving ? local.disabledBtn : null]}
-                  onPress={saveWithNewPin}
-                  disabled={saving}
-                >
-                  <Text style={local.modalPrimaryText}>{saving ? "Saving..." : "Save Pin"}</Text>
-                </Pressable>
-              </View>
+  <Pressable
+    style={[local.modalPrimaryBtn, saving ? local.disabledBtn : null]}
+    onPress={saveWithNewPin}
+    disabled={saving}
+  >
+    <Text style={local.modalPrimaryText}>{saving ? "Saving..." : "Save Pin"}</Text>
+  </Pressable>
+</View>
+
+<Text style={[local.smallHelper, { textAlign: "center", lineHeight: 16 }]}>
+  Go back and pick or save a map pin before saving this scout log.
+</Text>
             </View>
           </View>
         </Modal>
@@ -1670,7 +1786,62 @@ const renderScoutSpeciesPickerItem = useCallback(
     </SectionCard>
   </View>
 ) : null}
+{!isScoutLog && activeDogs.length > 0 ? (
+  <SectionCard title="DOG HELPER">
+    <Text style={local.dogHelperText}>
+      Track retrieves and birds recovered by your hunting dog.
+    </Text>
 
+    <Pressable
+      style={local.dogHelperButton}
+      onPress={() => setDogHelperVisible(true)}
+    >
+      {activeDogs[0]?.photoUri ? (
+  <Image
+    source={{ uri: activeDogs[0].photoUri }}
+    style={local.dogHelperPhoto}
+    resizeMode="cover"
+  />
+) : (
+  <View style={local.dogHelperIconWrap}>
+    <Text style={local.dogHelperIcon}>🐾</Text>
+  </View>
+)}
+
+<View style={{ flex: 1, minWidth: 0 }}>
+  <Text style={local.dogHelperTitle}>
+    {dogStatsList.length > 0
+      ? dogHelperSummary.title
+      : activeDogs.map((dog) => dog.name).filter(Boolean).join(", ")}
+  </Text>
+
+  <Text style={local.dogHelperSub} numberOfLines={2}>
+    {dogStatsList.length > 0
+      ? dogHelperSummary.sub
+      : "Tap to add retrieve stats for this hunt"}
+  </Text>
+</View>
+
+      <Text style={local.rowChevron}>›</Text>
+    </Pressable>
+
+    {dogStatsList.length > 0 ? (
+      <View style={local.dogStatsPreview}>
+        {dogStatsList.map((item) => (
+          <View key={item.dogId} style={local.dogStatsPill}>
+            <Text style={local.dogStatsPillText}>
+              {item.dogName}:{" "}
+              {Number(item.duckRetrieves || 0) +
+                Number(item.gooseRetrieves || 0) +
+                Number(item.crippleRetrieves || 0)}{" "}
+              recovered
+            </Text>
+          </View>
+        ))}
+      </View>
+    ) : null}
+  </SectionCard>
+) : null}
             <SectionCard title="NOTES">
               <TextInput
                 value={notes}
@@ -1972,6 +2143,76 @@ scoutSpeciesCounterBtnText: {
   fontWeight: "800",
   lineHeight: 24,
 },
+dogHelperText: {
+  color: HUNT_TEXT_SOFT,
+  fontSize: 12,
+  fontWeight: "700",
+  lineHeight: 17,
+  marginBottom: 10,
+},
+
+dogHelperButton: {
+  minHeight: 76,
+  borderRadius: 16,
+  borderWidth: 1,
+  borderColor: "rgba(255,255,255,0.10)",
+  backgroundColor: "rgba(255,255,255,0.04)",
+  padding: 10,
+  flexDirection: "row",
+  alignItems: "center",
+},
+
+dogHelperIconWrap: {
+  width: 46,
+  height: 46,
+  borderRadius: 14,
+  alignItems: "center",
+  justifyContent: "center",
+  backgroundColor: "rgba(217,168,76,0.12)",
+  borderWidth: 1,
+  borderColor: "rgba(217,168,76,0.22)",
+  marginRight: 10,
+},
+
+dogHelperIcon: {
+  fontSize: 24,
+},
+
+dogHelperTitle: {
+  color: COLORS.white,
+  fontSize: 15,
+  fontWeight: "900",
+},
+
+dogHelperSub: {
+  color: HUNT_TEXT_SOFT,
+  fontSize: 12,
+  fontWeight: "700",
+  lineHeight: 17,
+  marginTop: 3,
+},
+
+dogStatsPreview: {
+  flexDirection: "row",
+  flexWrap: "wrap",
+  gap: 8,
+  marginTop: 10,
+},
+
+dogStatsPill: {
+  borderRadius: 999,
+  borderWidth: 1,
+  borderColor: HUNT_BORDER,
+  backgroundColor: "rgba(217,168,76,0.08)",
+  paddingHorizontal: 10,
+  paddingVertical: 7,
+},
+
+dogStatsPillText: {
+  color: HUNT_GOLD,
+  fontSize: 12,
+  fontWeight: "900",
+},
 
 scoutSpeciesCount: {
   width: 34,
@@ -1985,7 +2226,15 @@ scoutSpeciesCount: {
     paddingTop: 6,
     paddingBottom: Platform.OS === "android" ? 110 : 64,
   },
-
+dogHelperPhoto: {
+  width: 46,
+  height: 46,
+  borderRadius: 14,
+  backgroundColor: "rgba(255,255,255,0.04)",
+  borderWidth: 1,
+  borderColor: "rgba(217,168,76,0.22)",
+  marginRight: 10,
+},
   headerRow: {
     height: 52,
     flexDirection: "row",

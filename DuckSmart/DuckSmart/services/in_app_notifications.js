@@ -9,6 +9,8 @@
 // - Shared pins
 // - Shared decoy spreads
 // - Shared scouting logs
+// - Admin support messages
+// - Admin inbox alerts
 
 import {
   addDoc,
@@ -25,6 +27,21 @@ import {
 
 import { auth, db, isFirebaseConfigValid } from "./firebase";
 
+const ADMIN_NOTIFICATION_RECIPIENTS = [
+  {
+    uid: "yLHt9KO1PdgWpjxHa5ILkQaajbk1",
+    email: "chris@mallardworks.io",
+  },
+  {
+    uid: "Egau9Y6y1zMjWlr3UkiEEunlg4N2",
+    email: "ryals.chris@gmail.com",
+  },
+  {
+    uid: "prFCE8m3Bdbs6iKZRLn2cI9l4ck1",
+    email: "bluestone1776@gmail.com",
+  },
+];
+
 function assertFirebaseReady() {
   if (!isFirebaseConfigValid) {
     throw new Error("Firebase is not configured for this build.");
@@ -34,6 +51,10 @@ function assertFirebaseReady() {
 function cleanString(value, maxLength = 500) {
   if (value === undefined || value === null) return "";
   return String(value).trim().slice(0, maxLength);
+}
+
+function lower(value) {
+  return cleanString(value, 500).toLowerCase();
 }
 
 function normalizeNotification(data = {}, id = "") {
@@ -49,9 +70,22 @@ function normalizeNotification(data = {}, id = "") {
     status: data.status || "unread",
     actionScreen: data.actionScreen || "GroupScreen",
     relatedId: data.relatedId || "",
+    feedbackId: data.feedbackId || data.relatedId || "",
     createdAt: data.createdAt || 0,
     updatedAt: data.updatedAt || 0,
   };
+}
+
+function isOpenAdminInboxItem(item = {}) {
+  const status = lower(item.status || "pending");
+
+  if (status === "closed" || status === "resolved") return false;
+
+  return (
+    status === "pending" ||
+    status === "user_replied" ||
+    item.adminUnread === true
+  );
 }
 
 export async function createInAppNotification({
@@ -64,6 +98,7 @@ export async function createInAppNotification({
   message = "",
   actionScreen = "GroupScreen",
   relatedId = "",
+  feedbackId = "",
 } = {}) {
   assertFirebaseReady();
 
@@ -74,6 +109,8 @@ export async function createInAppNotification({
   }
 
   const now = Date.now();
+  const safeRelatedId = cleanString(relatedId || feedbackId, 200);
+  const safeFeedbackId = cleanString(feedbackId || relatedId, 200);
 
   const ref = await addDoc(
     collection(db, "users", safeRecipientUid, "inAppNotifications"),
@@ -87,7 +124,8 @@ export async function createInAppNotification({
       message: cleanString(message, 500),
       status: "unread",
       actionScreen: cleanString(actionScreen, 80),
-      relatedId: cleanString(relatedId, 200),
+      relatedId: safeRelatedId,
+      feedbackId: safeFeedbackId,
       createdAt: now,
       createdAtServer: serverTimestamp(),
       updatedAt: now,
@@ -96,6 +134,96 @@ export async function createInAppNotification({
   );
 
   return ref.id;
+}
+
+export async function createAdminMessageNotification({
+  recipientUid,
+  feedbackId,
+  adminUid = "",
+  adminName = "DuckSmart Admin",
+  message = "",
+} = {}) {
+  const safeFeedbackId = cleanString(feedbackId, 200);
+
+  if (!safeFeedbackId) {
+    throw new Error("Missing feedback thread ID.");
+  }
+
+  return createInAppNotification({
+    recipientUid,
+    senderUid: adminUid,
+    senderName: adminName,
+    senderDuckId: "",
+    type: "admin_message",
+    title: "DuckSmart Admin Replied",
+    message:
+      cleanString(message, 180) ||
+      "You have a new message from DuckSmart support.",
+    actionScreen: "UserMessages",
+    relatedId: safeFeedbackId,
+    feedbackId: safeFeedbackId,
+  });
+}
+
+export async function createAdminInboxNotification({
+  senderUid = "",
+  relatedId = "",
+  feedbackId = "",
+  message = "New and Updated Admin Messages To Check",
+} = {}) {
+  assertFirebaseReady();
+
+  const safeRelatedId = cleanString(relatedId || feedbackId, 200);
+  const safeFeedbackId = cleanString(feedbackId || relatedId, 200);
+
+  const notificationIds = [];
+
+  for (const admin of ADMIN_NOTIFICATION_RECIPIENTS) {
+    if (!admin?.uid) continue;
+
+    const notificationId = await createInAppNotification({
+      recipientUid: admin.uid,
+      senderUid,
+      senderName: "DuckSmart",
+      senderDuckId: "",
+      type: "admin_inbox",
+      title: "Admin Inbox",
+      message,
+      actionScreen: "AdminReportsScreen",
+      relatedId: safeRelatedId,
+      feedbackId: safeFeedbackId,
+    });
+
+    notificationIds.push(notificationId);
+  }
+
+  return notificationIds;
+}
+
+export async function createAdminInboxNotificationIfNeeded({
+  senderUid = "",
+  relatedId = "",
+  feedbackId = "",
+  message = "New and Updated Admin Messages To Check",
+} = {}) {
+  assertFirebaseReady();
+
+  const snap = await getDocs(collection(db, "feedback"));
+
+  const hasOpenAdminItems = snap.docs.some((docSnap) =>
+    isOpenAdminInboxItem(docSnap.data())
+  );
+
+  if (!hasOpenAdminItems) {
+    return [];
+  }
+
+  return createAdminInboxNotification({
+    senderUid,
+    relatedId,
+    feedbackId,
+    message,
+  });
 }
 
 export async function loadUnreadInAppNotifications(uid = null) {

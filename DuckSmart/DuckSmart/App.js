@@ -3,9 +3,11 @@ import { View, Text, Pressable, ActivityIndicator, Image, Alert, Linking } from 
 import * as SplashScreen from "expo-splash-screen";
 import { GestureHandlerRootView } from "react-native-gesture-handler";
 import { SafeAreaProvider, useSafeAreaInsets } from "react-native-safe-area-context";
-import { NavigationContainer } from "@react-navigation/native";
+import { NavigationContainer, createNavigationContainerRef } from "@react-navigation/native";
 import { createBottomTabNavigator } from "@react-navigation/bottom-tabs";
 import { Ionicons } from "@expo/vector-icons";
+import AsyncStorage from "@react-native-async-storage/async-storage";
+import { getCurrentUserEmail, isAdminEmail } from "./services/adminLogin";
 
 import { COLORS } from "./constants/theme";
 import { WeatherProvider } from "./context/WeatherContext";
@@ -21,11 +23,16 @@ import {
 } from "./services/sync";
 import { logAppOpen, logHuntDeleted, logPinDeleted } from "./services/analytics";
 import {
-  buildImportedHuntLog,
+  buildImportedHuntLogAndPin,
   buildImportedPin,
   getSharedItem,
   parseDuckSmartShareId,
 } from "./services/shareImport";
+import { loadDogsFromFirebase, saveDogsToFirebase } from "./services/dogs";
+import {
+  loadUnreadInAppNotifications,
+  markInAppNotificationActioned,
+} from "./services/in_app_notifications";
 
 import TodayScreen from "./screens/TodayScreen";
 import MapScreen from "./screens/MapScreen";
@@ -36,10 +43,15 @@ import IdentifyStackScreen from "./screens/IdentifyScreen";
 import AuthScreen from "./screens/AuthScreen";
 import ProfileScreen from "./screens/ProfileScreen";
 import GroupScreen from "./screens/GroupScreen";
+import PartyScreen from "./screens/PartyScreen";
 import BlockedScreen from "./screens/BlockedScreen";
 import UserCardScreen from "./screens/UserCardScreen";
 import ShareScreen from "./screens/ShareScreen";
+import DogScreen from "./screens/DogScreen";
+import AdminReportsScreen from "./screens/AdminReportsScreen";
 import SettingsModal from "./components/SettingsModal";
+import UserMessages from "./components/UserMessages";
+import IntroVideo from "./components/IntroVideo";
 import { ASSETS } from "./constants/assets";
 
 SplashScreen.preventAutoHideAsync().catch(() => {});
@@ -85,6 +97,8 @@ class ErrorBoundary extends React.Component {
 
 const Tab = createBottomTabNavigator();
 
+const navigationRef = createNavigationContainerRef();
+
 const TAB_ICONS = {
   Today: { focused: "today", unfocused: "today-outline" },
   Map: { focused: "map", unfocused: "map-outline" },
@@ -94,10 +108,15 @@ const TAB_ICONS = {
   Identify: { focused: "search", unfocused: "search-outline" },
   ProfileScreen: { focused: "person", unfocused: "person-outline" },
   GroupScreen: { focused: "people", unfocused: "people-outline" },
+  PartyScreen: { focused: "people-circle", unfocused: "people-circle-outline" },
   BlockedScreen: { focused: "ban", unfocused: "ban-outline" },
   UserCardScreen: { focused: "person-circle", unfocused: "person-circle-outline" },
   ShareScreen: { focused: "share-social", unfocused: "share-social-outline" },
+  DogScreen: { focused: "paw", unfocused: "paw-outline" },
+  AdminReportsScreen: { focused: "shield-checkmark", unfocused: "shield-checkmark-outline" },
 };
+
+const DOGS_STORAGE_KEY = "@ducksmart_dogs_v1";
 
 const SEED_PINS = [
   {
@@ -109,6 +128,23 @@ const SEED_PINS = [
     createdAt: Date.now() - 1000 * 60 * 60 * 24,
   },
 ];
+
+function mergeDogs(localDogs = [], cloudDogs = []) {
+  const map = new Map();
+
+  [...cloudDogs, ...localDogs].forEach((dog) => {
+    if (!dog?.id) return;
+
+    const existing = map.get(dog.id);
+    if (!existing || Number(dog.updatedAt || 0) >= Number(existing.updatedAt || 0)) {
+      map.set(dog.id, dog);
+    }
+  });
+
+  return Array.from(map.values()).sort(
+    (a, b) => Number(b.updatedAt || 0) - Number(a.updatedAt || 0)
+  );
+}
 
 function SyncManager({ uid, user, logs, pins, setLogs, setPins, ready }) {
   const { isPro } = usePremium();
@@ -219,14 +255,23 @@ function SyncManager({ uid, user, logs, pins, setLogs, setPins, ready }) {
 
 function MainApp() {
   const { user, logout } = useAuth();
-  const { accentColor } = useTheme();
+const { isPro, loading: premiumLoading } = usePremium();
+const { accentColor } = useTheme();
   const insets = useSafeAreaInsets();
   const [logs, setLogs] = useState([]);
   const [pins, setPins] = useState(SEED_PINS);
+  const [dogs, setDogs] = useState([]);
   const [ready, setReady] = useState(false);
+  const [introDone, setIntroDone] = useState(false);
   const handledShareIdsRef = useRef(new Set());
 
   const [settingsVisible, setSettingsVisible] = useState(false);
+
+  const [supportMessageNotification, setSupportMessageNotification] = useState(null);
+  const [supportMessagesVisible, setSupportMessagesVisible] = useState(false);
+  const [supportFeedbackId, setSupportFeedbackId] = useState("");
+  const [supportThreadTitle, setSupportThreadTitle] = useState("DuckSmart Support");
+  const supportAlertedIdsRef = useRef(new Set());
 
   const addLog = useCallback((entry) => setLogs((prev) => [entry, ...prev]), []);
   const addPin = useCallback((entry) => setPins((prev) => [entry, ...prev]), []);
@@ -245,6 +290,136 @@ function MainApp() {
 
   const openSettings = useCallback(() => setSettingsVisible(true), []);
   const closeSettings = useCallback(() => setSettingsVisible(false), []);
+
+  const hasActiveDogs = dogs.some((dog) => !dog?.deletedAt && dog?.active !== false);
+
+  const loadSupportNotifications = useCallback(async () => {
+    if (!user?.uid) {
+      setSupportMessageNotification(null);
+      return;
+    }
+
+    try {
+      const unread = await loadUnreadInAppNotifications(user.uid);
+
+      const currentEmail = getCurrentUserEmail(user);
+      const currentUserIsAdmin = isAdminEmail(currentEmail);
+
+      const adminInboxMessage = unread.find((item) =>
+        item.type === "admin_inbox" ||
+        item.actionScreen === "AdminReportsScreen"
+      );
+
+      const userSupportMessage = unread.find((item) =>
+        item.type === "admin_message" ||
+        item.actionScreen === "UserMessages" ||
+        item.actionScreen === "SupportMessages"
+      );
+
+      setSupportMessageNotification(
+        currentUserIsAdmin
+          ? adminInboxMessage || null
+          : userSupportMessage || null
+      );
+    } catch (err) {
+      console.warn("DuckSmart support notification load failed:", err?.message || err);
+    }
+  }, [user?.uid]);
+
+  const openSupportThreadFromNotification = useCallback(
+    async (notification = supportMessageNotification) => {
+      const relatedId = notification?.relatedId || "";
+
+      if (notification?.type === "admin_inbox" || notification?.actionScreen === "AdminReportsScreen") {
+        if (user?.uid && notification?.id) {
+          try {
+            await markInAppNotificationActioned(user.uid, notification.id);
+            setSupportMessageNotification(null);
+          } catch (err) {
+            console.warn("DuckSmart admin inbox notification action failed:", err?.message || err);
+          }
+        }
+
+        setSettingsVisible(false);
+
+        setTimeout(() => {
+          if (navigationRef.isReady()) {
+            navigationRef.navigate("AdminReportsScreen");
+          } else {
+            console.warn("DuckSmart admin navigation skipped: navigation not ready.");
+          }
+        }, 200);
+
+        return;
+      }
+
+      if (!relatedId) {
+        Alert.alert("Support Message", "This support message is missing a conversation ID.");
+        return;
+      }
+
+      setSupportFeedbackId(relatedId);
+      setSupportThreadTitle(notification?.title || "DuckSmart Support");
+      setSupportMessagesVisible(true);
+
+      if (user?.uid && notification?.id) {
+        try {
+          await markInAppNotificationActioned(user.uid, notification.id);
+          setSupportMessageNotification(null);
+        } catch (err) {
+          console.warn("DuckSmart support notification action failed:", err?.message || err);
+        }
+      }
+    },
+    [supportMessageNotification, user?.uid]
+  );
+
+  function closeSupportMessages() {
+    setSupportMessagesVisible(false);
+    setSupportFeedbackId("");
+    setSupportThreadTitle("DuckSmart Support");
+
+    setTimeout(() => {
+      loadSupportNotifications();
+    }, 350);
+  }
+
+  useEffect(() => {
+    if (!ready || !user?.uid) return;
+
+    loadSupportNotifications();
+
+    const timer = setInterval(() => {
+      loadSupportNotifications();
+    }, 30000);
+
+    return () => clearInterval(timer);
+  }, [ready, user?.uid, loadSupportNotifications]);
+
+  useEffect(() => {
+    if (!settingsVisible || !supportMessageNotification) return;
+
+    const notificationId = supportMessageNotification.id;
+
+    if (!notificationId || supportAlertedIdsRef.current.has(notificationId)) return;
+
+    supportAlertedIdsRef.current.add(notificationId);
+
+    Alert.alert(
+      supportMessageNotification.title || "DuckSmart Admin Replied",
+      supportMessageNotification.message || "You have a new message from DuckSmart support.",
+      [
+        {
+          text: "Later",
+          style: "cancel",
+        },
+        {
+          text: "View",
+          onPress: () => openSupportThreadFromNotification(supportMessageNotification),
+        },
+      ]
+    );
+  }, [settingsVisible, supportMessageNotification, openSupportThreadFromNotification]);
 
   const handleSharedLink = useCallback(
     async (url) => {
@@ -323,7 +498,20 @@ function MainApp() {
                 text: "Add Log",
                 onPress: () => {
                   try {
-                    const importedLog = buildImportedHuntLog(sharedItem);
+                    const { huntLog: importedLog, pin: importedPin } =
+                      buildImportedHuntLogAndPin(sharedItem);
+
+                    if (importedPin) {
+                      setPins((prev) => {
+                        const alreadyImported = prev.some(
+                          (pin) => pin.importedFromShareId === sharedItem.id
+                        );
+
+                        if (alreadyImported) return prev;
+
+                        return [importedPin, ...prev];
+                      });
+                    }
 
                     setLogs((prev) => {
                       const alreadyImported = prev.some(
@@ -335,7 +523,12 @@ function MainApp() {
                       return [importedLog, ...prev];
                     });
 
-                    Alert.alert("Hunt Log Added", "The shared hunt log was added to your history.");
+                    Alert.alert(
+                      "Hunt Log Added",
+                      importedPin
+                        ? "The shared hunt log and map pin were added."
+                        : "The shared hunt log was added to your history."
+                    );
                   } catch (err) {
                     handledShareIdsRef.current.delete(shareId);
                     Alert.alert("Import Failed", err.message || "Could not import this hunt log.");
@@ -360,22 +553,49 @@ function MainApp() {
 
   useEffect(() => {
     (async () => {
-      const [savedLogs, savedPins] = await Promise.all([loadLogs(), loadPins()]);
+      const [savedLogs, savedPins, savedDogsRaw] = await Promise.all([
+        loadLogs(),
+        loadPins(),
+        AsyncStorage.getItem(DOGS_STORAGE_KEY),
+      ]);
 
       if (savedLogs.length > 0) setLogs(savedLogs);
       if (savedPins) setPins(savedPins);
 
+      let localDogs = [];
+
+      try {
+        localDogs = savedDogsRaw ? JSON.parse(savedDogsRaw) : [];
+        if (!Array.isArray(localDogs)) localDogs = [];
+      } catch {
+        localDogs = [];
+      }
+
+      let cloudDogs = [];
+
+      try {
+        if (user?.uid) {
+          cloudDogs = await loadDogsFromFirebase(user.uid);
+        }
+      } catch (err) {
+        console.warn("DuckSmart dogs cloud load failed:", err?.message || err);
+      }
+
+      setDogs(mergeDogs(localDogs, cloudDogs));
+
       setReady(true);
     })();
 
-    try {
-      preloadInterstitialAd().catch((err) =>
-        console.warn("DuckSmart: Ad preload failed:", err.message)
-      );
-    } catch (err) {
-      console.warn("DuckSmart: Ad preload error:", err.message);
-    }
-  }, []);
+   if (!premiumLoading && !isPro) {
+  try {
+    preloadInterstitialAd({ isPro, premiumLoading }).catch((err) =>
+      console.warn("DuckSmart: Ad preload failed:", err.message)
+    );
+  } catch (err) {
+    console.warn("DuckSmart: Ad preload error:", err.message);
+  }
+}
+  }, [user?.uid, isPro, premiumLoading]);
 
   useEffect(() => {
     if (ready) saveLogs(logs);
@@ -384,6 +604,18 @@ function MainApp() {
   useEffect(() => {
     if (ready) savePins(pins);
   }, [pins, ready]);
+
+  useEffect(() => {
+    if (!ready) return;
+
+    AsyncStorage.setItem(DOGS_STORAGE_KEY, JSON.stringify(dogs)).catch(() => {});
+
+    if (user?.uid) {
+      saveDogsToFirebase(user.uid, dogs).catch((err) => {
+        console.warn("DuckSmart dogs cloud save failed:", err?.message || err);
+      });
+    }
+  }, [dogs, ready, user?.uid]);
 
   useEffect(() => {
     let mounted = true;
@@ -406,165 +638,224 @@ function MainApp() {
     };
   }, [handleSharedLink]);
 
-  return (
-    <PremiumProvider>
-      <SyncManager
-        uid={user?.uid}
-        user={user}
-        logs={logs}
-        pins={pins}
-        setLogs={setLogs}
-        setPins={setPins}
-        ready={ready}
-      />
+return (
+  <>
+    {!introDone ? (
+      <IntroVideo onDone={() => setIntroDone(true)} />
+    ) : (
+        <>
+          <SyncManager
+            uid={user?.uid}
+            user={user}
+            logs={logs}
+            pins={pins}
+            setLogs={setLogs}
+            setPins={setPins}
+            ready={ready}
+          />
 
-      <WeatherProvider>
-        <NavigationContainer>
-          <Tab.Navigator
-            screenOptions={({ route }) => {
-              const icons = TAB_ICONS[route.name] || {
-                focused: "ellipse",
-                unfocused: "ellipse-outline",
-              };
+          <WeatherProvider>
+            <NavigationContainer ref={navigationRef}>
+              <Tab.Navigator
+                screenOptions={({ route }) => {
+                  const icons = TAB_ICONS[route.name] || {
+                    focused: "ellipse",
+                    unfocused: "ellipse-outline",
+                  };
 
-              const isHiddenRoute =
-                route.name === "ProfileScreen" ||
-                route.name === "GroupScreen" ||
-                route.name === "BlockedScreen" ||
-                route.name === "UserCardScreen" ||
-                route.name === "ShareScreen";
+                  const isHiddenRoute =
+                    route.name === "ProfileScreen" ||
+                    route.name === "GroupScreen" ||
+                    route.name === "PartyScreen" ||
+                    route.name === "BlockedScreen" ||
+                    route.name === "UserCardScreen" ||
+                    route.name === "ShareScreen" ||
+                    route.name === "DogScreen" ||
+                    route.name === "AdminReportsScreen";
 
-              return {
-                headerShown: false,
+                  return {
+                    headerShown: false,
 
-                tabBarButton: isHiddenRoute ? () => null : undefined,
+                    tabBarButton: isHiddenRoute ? () => null : undefined,
 
-                tabBarStyle: isHiddenRoute
-                  ? { display: "none" }
-                  : {
-                      position: "absolute",
-                      backgroundColor: HUNT_BROWN,
-                      borderTopColor: HUNT_BORDER,
-                      borderTopWidth: 1,
+                    tabBarStyle: isHiddenRoute
+                      ? { display: "none" }
+                      : {
+                          position: "absolute",
+                          backgroundColor: HUNT_BROWN,
+                          borderTopColor: HUNT_BORDER,
+                          borderTopWidth: 1,
+                        },
+
+                    tabBarActiveTintColor: accentColor || HUNT_TAN,
+                    tabBarInactiveTintColor: HUNT_INACTIVE,
+
+                    tabBarLabelStyle: {
+                      fontWeight: "900",
+                      fontSize: 10,
                     },
 
-                tabBarActiveTintColor: accentColor || HUNT_TAN,
-                tabBarInactiveTintColor: HUNT_INACTIVE,
+                    tabBarItemStyle: isHiddenRoute
+                      ? {
+                          display: "none",
+                        }
+                      : {
+                          flex: 1,
+                          paddingTop: 2,
+                          paddingBottom: 15,
+                        },
 
-                tabBarLabelStyle: {
-                  fontWeight: "900",
-                  fontSize: 10,
-                },
+                    tabBarHideOnKeyboard: true,
 
-                tabBarItemStyle: isHiddenRoute
-                  ? {
-                      display: "none",
-                    }
-                  : {
-                      flex: 1,
-                      paddingTop: 2,
-                      paddingBottom: 15,
+                    tabBarIcon: ({ focused, color, size }) => {
+                      const shouldUseDogIcon = route.name === "Log" && hasActiveDogs;
+                      const iconName = shouldUseDogIcon
+                        ? focused
+                          ? "paw"
+                          : "paw-outline"
+                        : focused
+                          ? icons.focused
+                          : icons.unfocused;
+
+                      return <Ionicons name={iconName} size={size} color={color} />;
                     },
+                  };
+                }}
+              >
+                <Tab.Screen name="Today">
+                  {(props) => (
+                    <TodayScreen
+                      {...props}
+                      onLogout={openSettings}
+                      openGroupScreen={() => props.navigation.navigate("GroupScreen")}
+                    />
+                  )}
+                </Tab.Screen>
 
-                tabBarHideOnKeyboard: true,
+                <Tab.Screen name="Map">
+                  {(props) => (
+                    <MapScreen
+                      {...props}
+                      pins={pins}
+                      setPins={setPins}
+                      logs={logs}
+                    />
+                  )}
+                </Tab.Screen>
 
-                tabBarIcon: ({ focused, color, size }) => {
-                  const iconName = focused ? icons.focused : icons.unfocused;
-                  return <Ionicons name={iconName} size={size} color={color} />;
-                },
-              };
-            }}
-          >
-            <Tab.Screen name="Today">
-              {(props) => (
-                <TodayScreen
-                  {...props}
-                  onLogout={openSettings}
-                  openGroupScreen={() => props.navigation.navigate("GroupScreen")}
-                />
-              )}
-            </Tab.Screen>
+                <Tab.Screen name="Log">
+                  {() => (
+                    <LogScreen
+                      addLog={addLog}
+                      addPin={addPin}
+                      pins={pins}
+                      logs={logs}
+                      dogs={dogs}
+                      onLogout={openSettings}
+                    />
+                  )}
+                </Tab.Screen>
 
-            <Tab.Screen name="Map">
-              {(props) => (
-                <MapScreen
-                  {...props}
-                  pins={pins}
-                  setPins={setPins}
-                  logs={logs}
-                />
-              )}
-            </Tab.Screen>
+                <Tab.Screen name="History">
+                  {() => (
+                    <HistoryScreen
+                      logs={logs}
+                      pins={pins}
+                      setPins={setPins}
+                      deleteLog={deleteLog}
+                      updateLog={updateLog}
+                      onLogout={openSettings}
+                    />
+                  )}
+                </Tab.Screen>
 
-            <Tab.Screen name="Log">
-              {() => (
-                <LogScreen
-                  addLog={addLog}
-                  addPin={addPin}
-                  pins={pins}
-                  logs={logs}
-                  onLogout={openSettings}
-                />
-              )}
-            </Tab.Screen>
+                <Tab.Screen name="Decoy">
+                  {(props) => (
+                    <DecoyScreen
+                      {...props}
+                      pins={pins}
+                      setPins={setPins}
+                      onLogout={openSettings}
+                    />
+                  )}
+                </Tab.Screen>
 
-            <Tab.Screen name="History">
-              {() => (
-                <HistoryScreen
-                  logs={logs}
-                  pins={pins}
-                  setPins={setPins}
-                  deleteLog={deleteLog}
-                  updateLog={updateLog}
-                  onLogout={openSettings}
-                />
-              )}
-            </Tab.Screen>
+                <Tab.Screen name="Identify" component={IdentifyStackScreen} />
 
-            <Tab.Screen name="Decoy">
-              {(props) => (
-                <DecoyScreen
-                  {...props}
-                  pins={pins}
-                  setPins={setPins}
-                  onLogout={openSettings}
-                />
-              )}
-            </Tab.Screen>
+                <Tab.Screen name="ProfileScreen">
+                  {(props) => (
+                    <ProfileScreen
+                      {...props}
+                      openSettings={openSettings}
+                      pins={pins}
+                      setPins={setPins}
+                    />
+                  )}
+                </Tab.Screen>
 
-            <Tab.Screen name="Identify" component={IdentifyStackScreen} />
+                <Tab.Screen name="GroupScreen">
+                  {(props) => <GroupScreen {...props} openSettings={openSettings} />}
+                </Tab.Screen>
 
-           <Tab.Screen name="ProfileScreen">
-  {(props) => <ProfileScreen {...props} openSettings={openSettings} />}
-</Tab.Screen>
+                <Tab.Screen name="PartyScreen" component={PartyScreen} />
 
-            <Tab.Screen name="GroupScreen">
-  {(props) => <GroupScreen {...props} openSettings={openSettings} />}
-</Tab.Screen>
+                <Tab.Screen name="BlockedScreen" component={BlockedScreen} />
 
-            <Tab.Screen name="BlockedScreen" component={BlockedScreen} />
+                <Tab.Screen name="UserCardScreen" component={UserCardScreen} />
 
-            <Tab.Screen name="UserCardScreen" component={UserCardScreen} />
+                <Tab.Screen name="ShareScreen">
+                  {(props) => (
+                    <ShareScreen
+                      {...props}
+                      pins={pins}
+                      logs={logs}
+                      addPin={addPin}
+                      addLog={addLog}
+                      openGroupScreen={() => props.navigation.navigate("GroupScreen")}
+                    />
+                  )}
+                </Tab.Screen>
 
-            <Tab.Screen name="ShareScreen">
-  {(props) => (
-    <ShareScreen
-      {...props}
-      pins={pins}
-      logs={logs}
-      addPin={addPin}
-      addLog={addLog}
-      openGroupScreen={() => props.navigation.navigate("GroupScreen")}
-    />
-  )}
-</Tab.Screen>
-          </Tab.Navigator>
+                <Tab.Screen name="DogScreen">
+                  {(props) => (
+                    <DogScreen
+                      {...props}
+                      dogs={dogs}
+                      setDogs={setDogs}
+                      logs={logs}
+                    />
+                  )}
+                </Tab.Screen>
 
-          <SettingsModal visible={settingsVisible} onClose={closeSettings} onLogout={logout} />
-        </NavigationContainer>
-      </WeatherProvider>
-    </PremiumProvider>
-  );
+                <Tab.Screen name="AdminReportsScreen" component={AdminReportsScreen} />
+              </Tab.Navigator>
+
+              <SettingsModal
+                visible={settingsVisible}
+                onClose={closeSettings}
+                onLogout={logout}
+                logs={logs}
+                pins={pins}
+                setPins={setPins}
+                dogs={dogs}
+                supportMessageNotification={supportMessageNotification}
+                onOpenSupportMessage={() => openSupportThreadFromNotification(supportMessageNotification)}
+                refreshSupportNotifications={loadSupportNotifications}
+              />
+
+              <UserMessages
+                visible={supportMessagesVisible}
+                onClose={closeSupportMessages}
+                feedbackId={supportFeedbackId}
+                mode="user"
+                title={supportThreadTitle}
+              />
+            </NavigationContainer>
+          </WeatherProvider>
+        </>
+          )}
+  </>
+);
 }
 
 function VerifyEmailScreen() {
@@ -682,7 +973,11 @@ function AuthGate() {
     return <VerifyEmailScreen />;
   }
 
-  return <MainApp />;
+  return (
+  <PremiumProvider>
+    <MainApp />
+  </PremiumProvider>
+);
 }
 
 export default function App() {

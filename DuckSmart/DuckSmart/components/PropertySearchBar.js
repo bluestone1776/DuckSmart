@@ -1,4 +1,5 @@
 // /Users/gozyr/Development/ducksmart/DuckSmart/DuckSmart/components/PropertySearchBar.js
+// /Users/gozyr/Development/ducksmart/DuckSmart/DuckSmart/components/PropertySearchBar.js
 
 import React, { useMemo, useState } from "react";
 import {
@@ -31,7 +32,7 @@ const MUTED_DARK = "rgba(255,255,255,0.44)";
 const RED = "#FF4D4D";
 
 const RESULTS_PAGE_SIZE = 10;
-const SEARCH_LIMIT = 50;
+const SEARCH_LIMIT = 10;
 
 const STATES = [
   { label: "Alabama", value: "AL" },
@@ -189,6 +190,7 @@ export default function PropertySearchBar({
 }) {
   const [owner, setOwner] = useState("");
   const [state, setState] = useState("");
+  const [county, setCounty] = useState("");
   const [stateDropdownOpen, setStateDropdownOpen] = useState(false);
   const [loading, setLoading] = useState(false);
   const [lastResult, setLastResult] = useState(null);
@@ -197,6 +199,7 @@ export default function PropertySearchBar({
 
   const cleanOwner = owner.trim();
   const cleanState = state.trim().toUpperCase();
+  const cleanCounty = county.trim();
 
   const resultFeatures = useMemo(() => {
     return Array.isArray(lastResult?.featureCollection?.features)
@@ -241,6 +244,14 @@ export default function PropertySearchBar({
     setSelectedFeature(null);
     setVisibleCount(RESULTS_PAGE_SIZE);
     onClear?.();
+  }
+
+  function clearSearchForm() {
+    setOwner("");
+    setState("");
+    setCounty("");
+    setStateDropdownOpen(false);
+    clearResults();
   }
 
   function selectState(value) {
@@ -299,6 +310,7 @@ export default function PropertySearchBar({
       const result = await searchParcelsByOwner({
         owner: cleanOwner,
         state: cleanState,
+        county: cleanCounty,
         limit: SEARCH_LIMIT,
       });
 
@@ -319,7 +331,9 @@ export default function PropertySearchBar({
       if (!features.length) {
         Alert.alert(
           "No Properties Found",
-          "No matching properties were found for that owner name in that state."
+          cleanCounty
+            ? `No matching properties were found for that owner name in ${cleanCounty} County, ${cleanState}.`
+            : "No matching properties were found for that owner name in that state."
         );
       }
     } catch (err) {
@@ -349,7 +363,7 @@ export default function PropertySearchBar({
               <Text style={s.kicker}>PROPERTY SEARCH</Text>
               <Text style={s.title}>Search Landowner Records</Text>
               <Text style={s.subtitle}>
-                Search by owner or business name, choose a state, then tap a result to highlight it on the map.
+                Search by owner or business name. Add a county to keep results from pulling across the whole state.
               </Text>
             </View>
 
@@ -372,8 +386,7 @@ export default function PropertySearchBar({
               autoCapitalize="words"
               autoCorrect={false}
               style={s.input}
-              returnKeyType="search"
-              onSubmitEditing={handleSearch}
+              returnKeyType="next"
             />
 
             <Text style={s.label}>State</Text>
@@ -442,10 +455,27 @@ export default function PropertySearchBar({
               </View>
             ) : null}
 
+            <Text style={s.label}>County</Text>
+            <TextInput
+              value={county}
+              onChangeText={setCounty}
+              placeholder="Optional — example: Burke"
+              placeholderTextColor="rgba(255,255,255,0.34)"
+              autoCapitalize="words"
+              autoCorrect={false}
+              style={s.input}
+              returnKeyType="search"
+              onSubmitEditing={handleSearch}
+            />
+
+            <Text style={s.countyNote}>
+              County is optional, but it keeps owner search from pulling results across the whole state.
+            </Text>
+
             <View style={s.buttonRow}>
               <Pressable
                 style={[s.secondaryBtn, loading ? s.disabledBtn : null]}
-                onPress={clearResults}
+                onPress={clearSearchForm}
                 disabled={loading}
               >
                 <Text style={s.secondaryBtnText}>Clear</Text>
@@ -465,7 +495,7 @@ export default function PropertySearchBar({
             </View>
 
             <Text style={s.usageNote}>
-              Results display 10 at a time. Tap any result row to open it on the map.
+              Results display up to 10 at a time. Tap any result row to open it on the map.
             </Text>
 
             {selectedFeature ? (
@@ -503,6 +533,7 @@ export default function PropertySearchBar({
                     <Text style={s.resultsSub}>
                       Showing {Math.min(visibleCount, resultFeatures.length)} of{" "}
                       {resultFeatures.length} • {lastResult.owner} •{" "}
+                      {cleanCounty ? `${cleanCounty} County, ` : ""}
                       {lastResult.statePath || cleanState}
                     </Text>
                   </View>
@@ -555,6 +586,13 @@ export default function PropertySearchBar({
                               <Text style={s.resultParcel} numberOfLines={1}>
                                 Parcel: {getFeatureParcelNumber(feature)}
                               </Text>
+
+                              {getFeatureCounty(feature) ? (
+                                <Text style={s.resultCounty} numberOfLines={1}>
+                                  County: {getFeatureCounty(feature)}
+                                </Text>
+                              ) : null}
+
                               <Text style={s.tapHint}>
                                 Tap to open parcel details on map
                               </Text>
@@ -580,7 +618,7 @@ export default function PropertySearchBar({
                   <View style={s.emptyBox}>
                     <Text style={s.emptyTitle}>No matching parcels</Text>
                     <Text style={s.emptyText}>
-                      Try a different spelling, business name, or state.
+                      Try a different spelling, business name, state, or county.
                     </Text>
                   </View>
                 )}
@@ -691,6 +729,14 @@ const s = StyleSheet.create({
     paddingVertical: 10,
     fontSize: 14,
     fontWeight: "800",
+  },
+
+  countyNote: {
+    color: MUTED_DARK,
+    fontSize: 11,
+    fontWeight: "700",
+    lineHeight: 16,
+    marginTop: 8,
   },
 
   dropdownButton: {
@@ -999,6 +1045,13 @@ const s = StyleSheet.create({
 
   resultParcel: {
     color: GOLD,
+    fontSize: 11,
+    fontWeight: "800",
+    marginTop: 4,
+  },
+
+  resultCounty: {
+    color: MUTED,
     fontSize: 11,
     fontWeight: "800",
     marginTop: 4,

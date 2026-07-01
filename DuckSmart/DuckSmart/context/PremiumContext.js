@@ -9,6 +9,7 @@ import { Alert, Platform } from "react-native";
 import Constants from "expo-constants";
 import { auth } from "../services/firebase";
 import { logProUpgrade } from "../services/analytics";
+import { loadPartyAccess } from "../services/party_helper";
 
 const isExpoGo = Constants.appOwnership === "expo";
 
@@ -35,10 +36,12 @@ const PRO_ENTITLEMENT = "pro";
 const PRODUCT_IDS = {
   monthly: "ducksmart_pro_monthly",
   yearly: "ducksmart_pro_yearly",
+  ducksmartGroup: "ducksmart_group",
 };
 
 const FALLBACK_MONTHLY_PRICE = "$9.99";
 const FALLBACK_YEARLY_PRICE = "$39.99";
+const FALLBACK_DUCKSMART_GROUP_PRICE = "$249.99";
 
 const DEV_FORCE_PRO = __DEV__ && false;
 
@@ -76,8 +79,19 @@ function hasPro(customerInfo) {
   return customerInfo?.entitlements?.active?.[PRO_ENTITLEMENT] !== undefined;
 }
 
+function hasActivePartyAccess(access) {
+  return access?.active === true || access?.isPro === true;
+}
+
 function normalizeText(value) {
   return String(value || "").toLowerCase();
+}
+
+function isExactProduct(item, productId) {
+  const found = normalizeText(getProductId(item));
+  const wanted = normalizeText(productId);
+
+  return found === wanted || found.startsWith(`${wanted}:`);
 }
 
 function isMonthlyPackage(pkg) {
@@ -108,6 +122,10 @@ function isYearlyPackage(pkg) {
   );
 }
 
+function isDuckSmartGroupPackage(pkg) {
+  return isExactProduct(pkg, PRODUCT_IDS.ducksmartGroup);
+}
+
 function isSupportedPackageOrProduct(item) {
   const productId = normalizeText(getProductId(item));
 
@@ -117,25 +135,83 @@ function isSupportedPackageOrProduct(item) {
   );
 }
 
+function isSupportedDuckSmartGroupItem(item) {
+  return isExactProduct(item, PRODUCT_IDS.ducksmartGroup);
+}
+
+async function purchaseRevenueCatItem(packageOrProduct) {
+  if (!packageOrProduct) return null;
+
+  if (packageOrProduct?.product && typeof Purchases.purchasePackage === "function") {
+    return Purchases.purchasePackage(packageOrProduct);
+  }
+
+  if (typeof Purchases.purchaseStoreProduct === "function") {
+    return Purchases.purchaseStoreProduct(packageOrProduct);
+  }
+
+  return null;
+}
+
 export function PremiumProvider({ children }) {
   const [isPro, setIsPro] = useState(DEV_FORCE_PRO);
   const [loading, setLoading] = useState(true);
   const [monthlyPackage, setMonthlyPackage] = useState(null);
   const [yearlyPackage, setYearlyPackage] = useState(null);
 
+  const [ducksmartGroupPackage, setDucksmartGroupPackage] = useState(null);
+  const [partyAccess, setPartyAccess] = useState(null);
+  const [revenueCatIsPro, setRevenueCatIsPro] = useState(DEV_FORCE_PRO);
+
+  const updateProState = useCallback((revenueActive, nextPartyAccess) => {
+    const partyActive = hasActivePartyAccess(nextPartyAccess);
+
+    setRevenueCatIsPro(DEV_FORCE_PRO || !!revenueActive);
+    setIsPro(DEV_FORCE_PRO || !!revenueActive || partyActive);
+  }, []);
+
+  const refreshPartyAccess = useCallback(async () => {
+    const uid = auth.currentUser?.uid;
+
+    if (!uid) {
+      setPartyAccess(null);
+      return null;
+    }
+
+    try {
+      const access = await loadPartyAccess(uid);
+      const safeAccess = access || null;
+
+      setPartyAccess(safeAccess);
+      return safeAccess;
+    } catch (err) {
+      console.warn("DuckSmart: Failed to check Hunting Party access:", err?.message || err);
+      setPartyAccess(null);
+      return null;
+    }
+  }, []);
+
   const checkSubscription = useCallback(async () => {
-    if (!isRevenueCatAvailable || !Purchases) return false;
+    const nextPartyAccess = await refreshPartyAccess();
+
+    if (!isRevenueCatAvailable || !Purchases) {
+      updateProState(false, nextPartyAccess);
+      return DEV_FORCE_PRO || hasActivePartyAccess(nextPartyAccess);
+    }
 
     try {
       const customerInfo = await Purchases.getCustomerInfo();
       const active = hasPro(customerInfo);
-      setIsPro(DEV_FORCE_PRO || active);
-      return active;
+
+      updateProState(active, nextPartyAccess);
+
+      return DEV_FORCE_PRO || active || hasActivePartyAccess(nextPartyAccess);
     } catch (err) {
       console.error("DuckSmart: Failed to check subscription:", err.message);
-      return false;
+      updateProState(false, nextPartyAccess);
+      return DEV_FORCE_PRO || hasActivePartyAccess(nextPartyAccess);
     }
-  }, []);
+  }, [refreshPartyAccess, updateProState]);
 
   const loadOfferings = useCallback(async () => {
     if (!isRevenueCatAvailable || !Purchases) return;
@@ -169,8 +245,14 @@ export function PremiumProvider({ children }) {
         packages.find((pkg) => normalizeText(getProductId(pkg)).includes("yearly")) ||
         null;
 
+      const ducksmartGroup =
+        packages.find(isDuckSmartGroupPackage) ||
+        packages.find((pkg) => isExactProduct(pkg, PRODUCT_IDS.ducksmartGroup)) ||
+        null;
+
       setMonthlyPackage(monthly);
       setYearlyPackage(yearly);
+      setDucksmartGroupPackage(ducksmartGroup);
 
       if (!monthly) {
         console.warn("DuckSmart: Monthly RevenueCat package not found.");
@@ -179,16 +261,23 @@ export function PremiumProvider({ children }) {
       if (!yearly) {
         console.warn("DuckSmart: Yearly RevenueCat package not found.");
       }
+
+      if (!ducksmartGroup) {
+        console.warn("DuckSmart: DuckSmart Group RevenueCat package not found.");
+      }
     } catch (err) {
       console.warn("DuckSmart: Failed to load RevenueCat offerings:", err.message);
       setMonthlyPackage(null);
       setYearlyPackage(null);
+      setDucksmartGroupPackage(null);
     }
   }, []);
 
   useEffect(() => {
     async function initRevenueCat() {
       if (!isRevenueCatAvailable || !Purchases) {
+        const nextPartyAccess = await refreshPartyAccess();
+        updateProState(false, nextPartyAccess);
         setLoading(false);
         return;
       }
@@ -201,6 +290,8 @@ export function PremiumProvider({ children }) {
 
         if (!apiKey) {
           console.warn("DuckSmart: No RevenueCat API key for this platform.");
+          const nextPartyAccess = await refreshPartyAccess();
+          updateProState(false, nextPartyAccess);
           setLoading(false);
           return;
         }
@@ -208,9 +299,10 @@ export function PremiumProvider({ children }) {
         await Purchases.configure({ apiKey });
 
         if (typeof Purchases.addCustomerInfoUpdateListener === "function") {
-          Purchases.addCustomerInfoUpdateListener((customerInfo) => {
+          Purchases.addCustomerInfoUpdateListener(async (customerInfo) => {
             const active = hasPro(customerInfo);
-            setIsPro(DEV_FORCE_PRO || active);
+            const nextPartyAccess = await refreshPartyAccess();
+            updateProState(active, nextPartyAccess);
           });
         }
 
@@ -218,13 +310,15 @@ export function PremiumProvider({ children }) {
         await loadOfferings();
       } catch (err) {
         console.error("DuckSmart: RevenueCat init error:", err.message);
+        const nextPartyAccess = await refreshPartyAccess();
+        updateProState(false, nextPartyAccess);
       } finally {
         setLoading(false);
       }
     }
 
     initRevenueCat();
-  }, [checkSubscription, loadOfferings]);
+  }, [checkSubscription, loadOfferings, refreshPartyAccess, updateProState]);
 
   const purchase = useCallback(
     async (packageOrProduct) => {
@@ -255,13 +349,9 @@ export function PremiumProvider({ children }) {
       }
 
       try {
-        let result;
+        const result = await purchaseRevenueCatItem(packageOrProduct);
 
-        if (packageOrProduct?.product && typeof Purchases.purchasePackage === "function") {
-          result = await Purchases.purchasePackage(packageOrProduct);
-        } else if (typeof Purchases.purchaseStoreProduct === "function") {
-          result = await Purchases.purchaseStoreProduct(packageOrProduct);
-        } else {
+        if (!result) {
           Alert.alert(
             "Purchase Unavailable",
             "Could not start the purchase right now. Please try again."
@@ -271,8 +361,9 @@ export function PremiumProvider({ children }) {
 
         const customerInfo = result?.customerInfo || result;
         const active = hasPro(customerInfo);
+        const nextPartyAccess = await refreshPartyAccess();
 
-        setIsPro(DEV_FORCE_PRO || active);
+        updateProState(active, nextPartyAccess);
 
         if (active) {
           logProUpgrade(auth.currentUser?.uid);
@@ -296,8 +387,76 @@ export function PremiumProvider({ children }) {
         return false;
       }
     },
-    [checkSubscription, loadOfferings]
+    [checkSubscription, loadOfferings, refreshPartyAccess, updateProState]
   );
+
+  const purchaseDuckSmartGroup = useCallback(async () => {
+    if (!isRevenueCatAvailable || !Purchases) {
+      Alert.alert(
+        "Not Available",
+        "DuckSmart Group purchases require a production build."
+      );
+      return false;
+    }
+
+    const packageOrProduct = ducksmartGroupPackage;
+
+    if (!packageOrProduct) {
+      Alert.alert(
+        "DuckSmart Group Loading",
+        "DuckSmart Group is still loading. Please wait a few seconds and try again."
+      );
+
+      await loadOfferings();
+      return false;
+    }
+
+    if (!isSupportedDuckSmartGroupItem(packageOrProduct)) {
+      Alert.alert(
+        "DuckSmart Group Error",
+        "The DuckSmart Group product is not supported in this build."
+      );
+      return false;
+    }
+
+    try {
+      const result = await purchaseRevenueCatItem(packageOrProduct);
+
+      if (!result) {
+        Alert.alert(
+          "Purchase Unavailable",
+          "Could not start the DuckSmart Group purchase right now."
+        );
+        return false;
+      }
+
+      const customerInfo = result?.customerInfo || result;
+      const active = hasPro(customerInfo);
+      const nextPartyAccess = await refreshPartyAccess();
+
+      updateProState(active, nextPartyAccess);
+
+      if (active) {
+        logProUpgrade(auth.currentUser?.uid);
+      }
+
+      return true;
+    } catch (err) {
+      if (err?.userCancelled) return false;
+
+      console.error("DuckSmart: DuckSmart Group purchase error:", err.message);
+      Alert.alert(
+        "DuckSmart Group Failed",
+        err.message || "Could not complete the DuckSmart Group purchase."
+      );
+      return false;
+    }
+  }, [
+    ducksmartGroupPackage,
+    loadOfferings,
+    refreshPartyAccess,
+    updateProState,
+  ]);
 
   const restore = useCallback(async () => {
     if (!isRevenueCatAvailable || !Purchases) {
@@ -310,12 +469,18 @@ export function PremiumProvider({ children }) {
 
     try {
       const customerInfo = await Purchases.restorePurchases();
-      const active = hasPro(customerInfo);
+      console.log("DUCKSMART RC RESTORE CUSTOMER INFO:", JSON.stringify(customerInfo, null, 2));
 
-      setIsPro(DEV_FORCE_PRO || active);
+      const active = hasPro(customerInfo);
+      const nextPartyAccess = await refreshPartyAccess();
+      const partyActive = hasActivePartyAccess(nextPartyAccess);
+
+      updateProState(active, nextPartyAccess);
 
       if (active) {
         Alert.alert("Restored!", "Your Pro subscription has been restored.");
+      } else if (partyActive) {
+        Alert.alert("Access Active", "Your Hunting Party access is active.");
       } else {
         Alert.alert(
           "No Subscription Found",
@@ -323,13 +488,13 @@ export function PremiumProvider({ children }) {
         );
       }
 
-      return active;
+      return DEV_FORCE_PRO || active || partyActive;
     } catch (err) {
       console.error("DuckSmart: Restore error:", err.message);
       Alert.alert("Restore Failed", "Could not restore purchases. Please try again.");
       return false;
     }
-  }, []);
+  }, [refreshPartyAccess, updateProState]);
 
   const redeemOfferCode = useCallback(async () => {
     if (Platform.OS !== "ios") {
@@ -383,6 +548,10 @@ export function PremiumProvider({ children }) {
     return getPriceString(yearlyPackage, FALLBACK_YEARLY_PRICE);
   }, [yearlyPackage]);
 
+  const getDuckSmartGroupPrice = useCallback(() => {
+    return getPriceString(ducksmartGroupPackage, FALLBACK_DUCKSMART_GROUP_PRICE);
+  }, [ducksmartGroupPackage]);
+
   const getYearlyPrice = getAnnualPrice;
   const getProPrice = getMonthlyPrice;
 
@@ -403,6 +572,14 @@ export function PremiumProvider({ children }) {
         annualPackage: yearlyPackage,
         checkSubscription,
         reloadOfferings: loadOfferings,
+
+        revenueCatIsPro,
+        partyAccess,
+        refreshPartyAccess,
+
+        purchaseDuckSmartGroup,
+        getDuckSmartGroupPrice,
+        ducksmartGroupPackage,
       }}
     >
       {children}
@@ -419,4 +596,3 @@ export function usePremium() {
 
   return ctx;
 }
-

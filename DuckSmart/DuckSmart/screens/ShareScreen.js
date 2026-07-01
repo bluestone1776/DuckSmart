@@ -20,19 +20,15 @@
 //    });
 //
 // Composer mode writes:
+// - shared_ducksmart_items/{shareId}
 // - users/{currentUid}/sharedItems/{shareId}
-// - users/{recipientUid}/inAppNotifications/{notificationId}
+// - users/{recipientUid}/inAppNotifications/{shareId}
 //
 // View shared mode can save:
 // - shared pins into local/cloud pins through App state
 // - shared hunt/scout/decoy logs into local/cloud logs through App state
-//
-// Fixed:
-// - No stale Done / already shared state between different shared items.
-// - Shared pins/logs carry normalized coordinate, latitude, longitude, and location fields.
-// - Remove / Unshare is handled inside ShareScreen instead of GroupScreen/UserCardScreen rows.
 
-import React, { useEffect, useMemo, useState } from "react";
+import React, { useEffect, useMemo, useRef, useState } from "react";
 import {
   View,
   Text,
@@ -48,11 +44,11 @@ import {
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { useNavigation, useRoute } from "@react-navigation/native";
-import MapView, { Marker } from "react-native-maps";
+import MapView, { Marker, Polyline } from "react-native-maps";
 import {
-  addDoc,
   collection,
   doc,
+  getDoc,
   serverTimestamp,
   setDoc,
 } from "firebase/firestore";
@@ -87,6 +83,8 @@ const GOLD_BORDER = "rgba(217,168,76,0.34)";
 const BLUE_BORDER = "rgba(77,163,255,0.36)";
 const MUTED = "rgba(255,255,255,0.62)";
 const MUTED_DARK = "rgba(255,255,255,0.42)";
+
+const SHARED_COLLECTION = "shared_ducksmart_items";
 
 function assertFirebaseReady() {
   if (!isFirebaseConfigValid) {
@@ -169,20 +167,6 @@ function getRouteShareItem(params = {}) {
     params.payload ||
     null
   );
-}
-
-function getRouteShareType(params = {}) {
-  const item = getRouteShareItem(params) || {};
-
-  return cleanString(
-    params.shareType ||
-      params.type ||
-      item.shareType ||
-      item.itemType ||
-      item.type ||
-      "pin",
-    80
-  ).toLowerCase();
 }
 
 function getNotificationType(shareType) {
@@ -343,6 +327,143 @@ function getCoordinate(item = {}) {
   return null;
 }
 
+
+function getPathCoordinates(item = {}) {
+  const payload = item?.payload || {};
+
+  const possibleLists = [
+    item.pathCoordinates,
+    item.pathPoints,
+    item.waypointPath?.coordinates,
+    item.waypointPath?.points,
+    item.linkedPin?.pathCoordinates,
+    item.linkedPin?.pathPoints,
+    item.linkedPin?.waypointPath?.coordinates,
+    item.linkedPin?.waypointPath?.points,
+
+    payload.pathCoordinates,
+    payload.pathPoints,
+    payload.waypointPath?.coordinates,
+    payload.waypointPath?.points,
+    payload.linkedPin?.pathCoordinates,
+    payload.linkedPin?.pathPoints,
+    payload.linkedPin?.waypointPath?.coordinates,
+    payload.linkedPin?.waypointPath?.points,
+  ];
+
+  const firstUsableList = possibleLists.find(
+    (list) => Array.isArray(list) && list.length >= 2
+  );
+
+  if (!firstUsableList) return [];
+
+  const coordinates = firstUsableList
+    .map((point) => getCoordinate(point))
+    .filter(Boolean);
+
+  const seen = new Set();
+
+  return coordinates.filter((point) => {
+    const key = `${point.latitude.toFixed(6)}:${point.longitude.toFixed(6)}`;
+
+    if (seen.has(key)) return false;
+
+    seen.add(key);
+    return true;
+  });
+}
+
+function isSharedWaypointPath(item = {}, shareType = "pin") {
+  if (!isSharedPinType(shareType)) return false;
+
+  const payload = item?.payload || {};
+  const typeText = String(
+    item.itemKind ||
+      item.type ||
+      item.pinType ||
+      payload.itemKind ||
+      payload.type ||
+      payload.pinType ||
+      ""
+  ).toLowerCase();
+
+  return (
+    typeText.includes("waypoint") ||
+    typeText.includes("path") ||
+    getPathCoordinates(item).length >= 2
+  );
+}
+
+function getPathDistanceText(item = {}, pathCoordinates = []) {
+  const payload = item?.payload || {};
+  const rawMiles =
+    item.distanceMiles ??
+    item.waypointPath?.distanceMiles ??
+    payload.distanceMiles ??
+    payload.waypointPath?.distanceMiles;
+
+  const miles = Number(rawMiles);
+
+  if (Number.isFinite(miles) && miles > 0) {
+    if (miles < 0.1) return `${Math.round(miles * 5280)} ft`;
+    return `${miles.toFixed(2)} mi`;
+  }
+
+  if (pathCoordinates.length >= 2) {
+    return `${pathCoordinates.length} points`;
+  }
+
+  return "";
+}
+
+function getPathPointCount(item = {}, pathCoordinates = []) {
+  const payload = item?.payload || {};
+  const rawCount =
+    item.pointCount ??
+    item.waypointPath?.pointCount ??
+    payload.pointCount ??
+    payload.waypointPath?.pointCount;
+
+  const count = Number(rawCount);
+
+  if (Number.isFinite(count) && count > 0) return Math.round(count);
+
+  return pathCoordinates.length;
+}
+
+function getPathMapRegion(coordinate, pathCoordinates = []) {
+  const points = pathCoordinates.length >= 2
+    ? pathCoordinates
+    : coordinate
+      ? [coordinate]
+      : [];
+
+  if (!points.length) return null;
+
+  const latitudes = points.map((point) => Number(point.latitude)).filter(Number.isFinite);
+  const longitudes = points.map((point) => Number(point.longitude)).filter(Number.isFinite);
+
+  if (!latitudes.length || !longitudes.length) return null;
+
+  const minLat = Math.min(...latitudes);
+  const maxLat = Math.max(...latitudes);
+  const minLng = Math.min(...longitudes);
+  const maxLng = Math.max(...longitudes);
+
+  const latitude = (minLat + maxLat) / 2;
+  const longitude = (minLng + maxLng) / 2;
+
+  const latitudeDelta = Math.max((maxLat - minLat) * 1.8, 0.012);
+  const longitudeDelta = Math.max((maxLng - minLng) * 1.8, 0.012);
+
+  return {
+    latitude,
+    longitude,
+    latitudeDelta,
+    longitudeDelta,
+  };
+}
+
 function getItemTitle(item = {}, shareType = "pin") {
   return (
     item.title ||
@@ -470,6 +591,95 @@ function getPhotos(item = {}) {
   return Array.from(new Set(output)).slice(0, 12);
 }
 
+function getDogStatTotal(stats) {
+  return (
+    Number(stats?.duckRetrieves || 0) +
+    Number(stats?.gooseRetrieves || 0) +
+    Number(stats?.crippleRetrieves || 0) +
+    Number(stats?.blindRetrieves || 0) +
+    Number(stats?.markedRetrieves || 0) +
+    Number(stats?.waterRetrieves || 0) +
+    Number(stats?.landRetrieves || 0)
+  );
+}
+
+function getDogWorkEntries(item = {}) {
+  const payload = item?.payload || {};
+
+  const rawList = Array.isArray(item?.dogStatsList)
+    ? item.dogStatsList
+    : Array.isArray(payload?.dogStatsList)
+      ? payload.dogStatsList
+      : item?.dogStats?.dogUsed
+        ? [item.dogStats]
+        : payload?.dogStats?.dogUsed
+          ? [payload.dogStats]
+          : [];
+
+  const mergedByDogId = new Map();
+
+  rawList
+    .filter((entry) => entry?.dogId && entry?.dogUsed !== false)
+    .forEach((entry) => {
+      const dogId = String(entry.dogId);
+      const existing = mergedByDogId.get(dogId);
+
+      const next = existing
+        ? {
+            ...existing,
+            duckRetrieves: Number(existing.duckRetrieves || 0) + Number(entry.duckRetrieves || 0),
+            gooseRetrieves: Number(existing.gooseRetrieves || 0) + Number(entry.gooseRetrieves || 0),
+            crippleRetrieves: Number(existing.crippleRetrieves || 0) + Number(entry.crippleRetrieves || 0),
+            blindRetrieves: Number(existing.blindRetrieves || 0) + Number(entry.blindRetrieves || 0),
+            markedRetrieves: Number(existing.markedRetrieves || 0) + Number(entry.markedRetrieves || 0),
+            waterRetrieves: Number(existing.waterRetrieves || 0) + Number(entry.waterRetrieves || 0),
+            landRetrieves: Number(existing.landRetrieves || 0) + Number(entry.landRetrieves || 0),
+            longRetrieveYards: Math.max(
+              Number(existing.longRetrieveYards || 0),
+              Number(entry.longRetrieveYards || 0)
+            ),
+            notes: existing.notes || entry.notes || "",
+          }
+        : {
+            dogId,
+            dogName: entry.dogName || entry.name || "Dog",
+            duckRetrieves: Number(entry.duckRetrieves || 0),
+            gooseRetrieves: Number(entry.gooseRetrieves || 0),
+            crippleRetrieves: Number(entry.crippleRetrieves || 0),
+            blindRetrieves: Number(entry.blindRetrieves || 0),
+            markedRetrieves: Number(entry.markedRetrieves || 0),
+            waterRetrieves: Number(entry.waterRetrieves || 0),
+            landRetrieves: Number(entry.landRetrieves || 0),
+            longRetrieveYards: Number(entry.longRetrieveYards || 0),
+            notes: entry.notes || "",
+          };
+
+      mergedByDogId.set(dogId, next);
+    });
+
+  return Array.from(mergedByDogId.values()).map((entry) => ({
+    ...entry,
+    birdsRecovered: getDogStatTotal(entry),
+  }));
+}
+
+function getDogWorkSummary(item = {}) {
+  const entries = getDogWorkEntries(item);
+
+  if (!entries.length) {
+    return null;
+  }
+
+  return {
+    entries,
+    dogsUsed: entries.length,
+    birdsRecovered: entries.reduce(
+      (sum, entry) => sum + Number(entry.birdsRecovered || 0),
+      0
+    ),
+  };
+}
+
 function formatDate(value) {
   if (!value) return "";
 
@@ -548,7 +758,9 @@ function getDetailRows(item = {}, shareType = "pin") {
   const payload = item?.payload || {};
   const linkedPin = item?.linkedPin || item?.payload?.linkedPin || {};
   const coordinate = getCoordinate(item);
-  const rows = [];
+const pathCoordinates = getPathCoordinates(item);
+const isPath = isSharedWaypointPath(item, shareType);
+const rows = [];
 
   function add(label, value) {
     const text = formatValue(value);
@@ -558,10 +770,19 @@ function getDetailRows(item = {}, shareType = "pin") {
     if (!exists) rows.push({ label, value: text });
   }
 
-  add("Date", getNestedValue(root, ["dateTime", "huntDate", "date", "createdAt"]));
-  add("Location", getNestedValue(root, ["locationName", "spotName", "location.name", "payload.locationName", "payload.spotName"]));
-  add("Linked Pin", linkedPin?.title || linkedPin?.name || linkedPin?.spotName);
-  add("Pin Type", getNestedValue(root, ["pinType", "type", "payload.pinType", "payload.type"]));
+add("Date", getNestedValue(root, ["dateTime", "huntDate", "date", "createdAt"]));
+add("Location", getNestedValue(root, ["locationName", "spotName", "location.name", "pinTitle", "payload.locationName", "payload.spotName", "payload.location.name", "payload.pinTitle"]));
+add("Linked Pin", linkedPin?.title || linkedPin?.name || linkedPin?.spotName);
+add("Pin Type", getNestedValue(root, ["pinType", "type", "payload.pinType", "payload.type"]));
+if (isPath) {
+  add("Path Distance", getPathDistanceText(item, pathCoordinates));
+  add("Path Points", getPathPointCount(item, pathCoordinates));
+}
+add("Environment", getNestedValue(root, ["environment", "payload.environment"]));
+add("Spread", getNestedValue(root, ["spreadDetails.name", "spreadName", "spread", "payload.spreadDetails.name", "payload.spreadName", "payload.spread"]));
+add("Other Spread", getNestedValue(root, ["spreadOtherText", "payload.spreadOtherText"]));
+add("Hunt Score", getNestedValue(root, ["huntScore", "score", "payload.huntScore", "payload.score"]));
+add("Crippled Birds", getNestedValue(root, ["crippledBirds", "payload.crippledBirds"]));
 
   if (coordinate) {
     add("Coordinates", coordinate);
@@ -638,6 +859,7 @@ function buildSharePayload(item, shareType) {
   const coordinate = getCoordinate(item);
   const photos = getPhotos(item);
   const normalizedShareType = getShareTypeForPayload(shareType);
+  const dogWorkEntries = getDogWorkEntries(source);
 
   return deepCleanForFirestore({
     ...source,
@@ -645,12 +867,35 @@ function buildSharePayload(item, shareType) {
     notificationType: getNotificationType(shareType),
     title: getItemTitle(source, shareType),
     notes: getItemNotes(source),
+
     coordinate,
+    coordinates: coordinate,
+    coords: coordinate,
+    location: coordinate || source.location || null,
     latitude: coordinate ? coordinate.latitude : null,
     longitude: coordinate ? coordinate.longitude : null,
-    location: source.location || coordinate || null,
-    photos,
-    sharedPayloadVersion: 2,
+    locationLatitude: coordinate ? coordinate.latitude : null,
+    locationLongitude: coordinate ? coordinate.longitude : null,
+
+photos,
+images: photos,
+
+dogStatsList: dogWorkEntries.map((entry) => ({
+  ...entry,
+  dogUsed: true,
+})),
+
+dogWorkSummary: dogWorkEntries.length
+  ? {
+      dogsUsed: dogWorkEntries.length,
+      birdsRecovered: dogWorkEntries.reduce(
+        (sum, entry) => sum + Number(entry.birdsRecovered || 0),
+        0
+      ),
+    }
+  : null,
+
+sharedPayloadVersion: 5,
   });
 }
 
@@ -683,13 +928,29 @@ function buildSavedPinFromSharedItem({
     ...shareItem,
     id: `shared-pin-${now}`,
     title: originalTitle || "Shared Pin",
-    type: getSavedPinType(shareItem.pinType || shareItem.type),
+    name: originalTitle || shareItem.name || "Shared Pin",
+type: isSharedWaypointPath(shareItem, shareType)
+  ? "Path"
+  : getSavedPinType(shareItem.pinType || shareItem.type),
+
+pinType: isSharedWaypointPath(shareItem, shareType)
+  ? "Path"
+  : getSavedPinType(shareItem.pinType || shareItem.type),
     notes: getItemNotes(shareItem),
+    description: getItemNotes(shareItem),
+
     coordinate,
+    coordinates: coordinate,
+    coords: coordinate,
+    location: coordinate,
     latitude: coordinate.latitude,
     longitude: coordinate.longitude,
-    location: coordinate,
+    locationLatitude: coordinate.latitude,
+    locationLongitude: coordinate.longitude,
+
     photos: getPhotos(shareItem),
+    images: getPhotos(shareItem),
+
     importedFromShareId: shareId || shareItem.shareId || shareItem.id || null,
     sharedFromUid: ownerProfile?.uid || shareItem.senderUid || null,
     sharedFromName: getDisplayName(ownerProfile),
@@ -833,19 +1094,25 @@ function SharedCardPreview({
 }) {
   const title = getItemTitle(item, shareType);
   const notes = getItemNotes(item);
-  const coordinate = getCoordinate(item);
-  const photos = getPhotos(item);
-  const previewPhoto = photos[0] || null;
-  const typeLabel = getShareTypeLabel(shareType);
-  const detailRows = getDetailRows(item, shareType);
+const coordinate = getCoordinate(item);
+const pathCoordinates = getPathCoordinates(item);
+const isPathPreview = isSharedWaypointPath(item, shareType);
+const mapRegion = getPathMapRegion(coordinate, pathCoordinates);
+const pathDistanceText = getPathDistanceText(item, pathCoordinates);
+const pathPointCount = getPathPointCount(item, pathCoordinates);
+
+const photos = getPhotos(item);
+const previewPhoto = photos[0] || null;
+const typeLabel = isPathPreview ? "Mapped Path" : getShareTypeLabel(shareType);
+const detailRows = getDetailRows(item, shareType);
+const dogWorkSummary = getDogWorkSummary(item);
 
   const createdAt =
-    item?.createdAt ||
     item?.dateTime ||
+    item?.huntDate ||
     item?.date ||
-    item?.payload?.createdAt ||
-    item?.payload?.dateTime ||
-    item?.payload?.date ||
+    item?.originalCreatedAt ||
+    item?.createdAt ||
     sharedNotification?.createdAt ||
     null;
 
@@ -870,41 +1137,67 @@ function SharedCardPreview({
         </View>
       </View>
 
-      {coordinate ? (
-        <View style={s.sharedMapWrap}>
-          <MapView
-            style={s.sharedMap}
-            region={{
-              latitude: coordinate.latitude,
-              longitude: coordinate.longitude,
-              latitudeDelta: 0.012,
-              longitudeDelta: 0.012,
-            }}
-            scrollEnabled={false}
-            zoomEnabled={false}
-            pitchEnabled={false}
-            rotateEnabled={false}
-            toolbarEnabled={false}
-          >
-            <Marker coordinate={coordinate} title={title} />
-          </MapView>
+{mapRegion ? (
+  <View style={s.sharedMapWrap}>
+    <MapView
+      style={s.sharedMap}
+      region={mapRegion}
+      scrollEnabled={false}
+      zoomEnabled={false}
+      pitchEnabled={false}
+      rotateEnabled={false}
+      toolbarEnabled={false}
+    >
+      {isPathPreview && pathCoordinates.length >= 2 ? (
+        <Polyline
+          coordinates={pathCoordinates}
+          strokeColor={BLUE}
+          strokeWidth={5}
+          lineDashPattern={[10, 8]}
+        />
+      ) : null}
 
-          <View style={s.sharedMapFooter}>
-            <Text style={s.sharedMapText}>
-              {coordinate.latitude.toFixed(5)}, {coordinate.longitude.toFixed(5)}
-            </Text>
-          </View>
-        </View>
-      ) : (
-        isSharedPinType(shareType) ? (
-          <View style={s.missingMapBox}>
-            <Text style={s.missingMapTitle}>GPS Missing</Text>
-            <Text style={s.missingMapText}>
-              This shared pin did not include usable coordinates.
-            </Text>
-          </View>
-        ) : null
-      )}
+      {isPathPreview && pathCoordinates.length >= 1 ? (
+        <Marker
+          coordinate={pathCoordinates[0]}
+          title="Path Start"
+          pinColor={GOLD}
+        />
+      ) : null}
+
+      {isPathPreview && pathCoordinates.length >= 2 ? (
+        <Marker
+          coordinate={pathCoordinates[pathCoordinates.length - 1]}
+          title="Path End"
+          pinColor={GREEN}
+        />
+      ) : null}
+
+      {!isPathPreview && coordinate ? (
+        <Marker coordinate={coordinate} title={title} />
+      ) : null}
+    </MapView>
+
+    <View style={s.sharedMapFooter}>
+      <Text style={s.sharedMapText}>
+        {isPathPreview
+          ? `Mapped Path${pathDistanceText ? ` • ${pathDistanceText}` : ""} • ${pathPointCount} points`
+          : coordinate
+            ? `${coordinate.latitude.toFixed(5)}, ${coordinate.longitude.toFixed(5)}`
+            : "Map preview"}
+      </Text>
+    </View>
+  </View>
+) : (
+  isSharedPinType(shareType) ? (
+    <View style={s.missingMapBox}>
+      <Text style={s.missingMapTitle}>GPS Missing</Text>
+      <Text style={s.missingMapText}>
+        This shared pin did not include usable coordinates.
+      </Text>
+    </View>
+  ) : null
+)}
 
       {previewPhoto ? (
         <Image source={{ uri: previewPhoto }} style={s.previewImage} resizeMode="cover" />
@@ -923,26 +1216,46 @@ function SharedCardPreview({
         </ScrollView>
       ) : null}
 
-      <View style={s.detailGrid}>
-        <View style={s.detailBox}>
-          <Text style={s.detailLabel}>Photos</Text>
-          <Text style={s.detailValue}>{photos.length}</Text>
-        </View>
+<View style={s.detailGrid}>
+  <View style={s.detailBox}>
+    <Text style={s.detailLabel}>Photos</Text>
+    <Text style={s.detailValue}>{photos.length}</Text>
+  </View>
 
-        <View style={s.detailBox}>
-          <Text style={s.detailLabel}>Latitude</Text>
-          <Text style={s.detailValue}>
-            {coordinate ? coordinate.latitude.toFixed(5) : "--"}
-          </Text>
-        </View>
-
-        <View style={s.detailBox}>
-          <Text style={s.detailLabel}>Longitude</Text>
-          <Text style={s.detailValue}>
-            {coordinate ? coordinate.longitude.toFixed(5) : "--"}
-          </Text>
-        </View>
+  {isPathPreview ? (
+    <>
+      <View style={s.detailBox}>
+        <Text style={s.detailLabel}>Distance</Text>
+        <Text style={s.detailValue}>
+          {pathDistanceText || "--"}
+        </Text>
       </View>
+
+      <View style={s.detailBox}>
+        <Text style={s.detailLabel}>Points</Text>
+        <Text style={s.detailValue}>
+          {pathPointCount || "--"}
+        </Text>
+      </View>
+    </>
+  ) : (
+    <>
+      <View style={s.detailBox}>
+        <Text style={s.detailLabel}>Latitude</Text>
+        <Text style={s.detailValue}>
+          {coordinate ? coordinate.latitude.toFixed(5) : "--"}
+        </Text>
+      </View>
+
+      <View style={s.detailBox}>
+        <Text style={s.detailLabel}>Longitude</Text>
+        <Text style={s.detailValue}>
+          {coordinate ? coordinate.longitude.toFixed(5) : "--"}
+        </Text>
+      </View>
+    </>
+  )}
+</View>
 
       {detailRows.length > 0 ? (
         <View style={s.detailsBlock}>
@@ -956,6 +1269,52 @@ function SharedCardPreview({
           ))}
         </View>
       ) : null}
+
+      {dogWorkSummary ? (
+  <View style={s.dogWorkBlock}>
+    <View style={s.dogWorkHeader}>
+      <Text style={s.dogWorkTitle}>Dog Work</Text>
+      <Text style={s.dogWorkTotal}>
+        {dogWorkSummary.birdsRecovered} recovered
+      </Text>
+    </View>
+
+    {dogWorkSummary.entries.map((dog) => (
+      <View key={dog.dogId} style={s.dogWorkRow}>
+        <View style={{ flex: 1, minWidth: 0 }}>
+          <Text style={s.dogWorkName} numberOfLines={1}>
+            🐾 {dog.dogName}
+          </Text>
+
+          <Text style={s.dogWorkSub} numberOfLines={2}>
+            Ducks {dog.duckRetrieves} • Geese {dog.gooseRetrieves} • Cripples {dog.crippleRetrieves}
+          </Text>
+
+          <Text style={s.dogWorkSub} numberOfLines={2}>
+            Blind {dog.blindRetrieves} • Marked {dog.markedRetrieves} • Water {dog.waterRetrieves} • Land {dog.landRetrieves}
+          </Text>
+
+          {dog.longRetrieveYards > 0 ? (
+            <Text style={s.dogWorkSub} numberOfLines={1}>
+              Longest retrieve: {dog.longRetrieveYards} yd
+            </Text>
+          ) : null}
+
+          {dog.notes ? (
+            <Text style={s.dogWorkNotes} numberOfLines={2}>
+              {dog.notes}
+            </Text>
+          ) : null}
+        </View>
+
+        <View style={s.dogWorkTotalBox}>
+          <Text style={s.dogWorkTotalValue}>{dog.birdsRecovered}</Text>
+          <Text style={s.dogWorkTotalLabel}>Recovered</Text>
+        </View>
+      </View>
+    ))}
+  </View>
+) : null}
 
       {notes ? (
         <View style={s.notesBox}>
@@ -998,47 +1357,113 @@ export default function ShareScreen({
   } = usePremium();
 
   const params = route.params || {};
-const rawShareItem = getRouteShareItem(params);
-const sharedNotification = params.sharedNotification || null;
-const shareContainer = sharedNotification || rawShareItem || {};
-const shareItem = sharedNotification?.payload || rawShareItem?.payload || rawShareItem;
-const shareType = getRouteShareType(params);
+  const rawShareItem = getRouteShareItem(params);
+  const sharedNotification = params.sharedNotification || null;
+
 const readOnly = params.mode === "view_shared" || params.readOnly === true;
 
-const shareItemObject =
-  shareItem && typeof shareItem === "object" ? shareItem : {};
+const routeShareId = cleanString(
+  readOnly
+    ? (
+        params.shareId ||
+        sharedNotification?.shareId ||
+        sharedNotification?.relatedId ||
+        rawShareItem?.shareId ||
+        rawShareItem?.relatedId ||
+        ""
+      )
+    : (
+        params.shareId ||
+        ""
+      ),
+  220
+);
 
-const shareContainerObject =
-  shareContainer && typeof shareContainer === "object" ? shareContainer : {};
+  const [cloudSharedItem, setCloudSharedItem] = useState(null);
+  const [cloudShareLookupDone, setCloudShareLookupDone] = useState(false);
 
-const resolvedCoordinate =
-  getCoordinate(shareItemObject) ||
-  getCoordinate(shareContainerObject) ||
-  getCoordinate(rawShareItem || {}) ||
-  getCoordinate(sharedNotification || {});
+useEffect(() => {
+  setCloudSharedItem(null);
+  setCloudShareLookupDone(false);
+  setSavedSharedItem(false);
+  setSavingSharedItem(false);
+  setBusyUid(null);
+  shareLockRef.current = false;
+}, [
+  readOnly,
+  routeShareId,
+  params.shareSessionId,
+  rawShareItem?.id,
+  rawShareItem?.originalId,
+]);
 
-const resolvedShareItem = shareItem
-  ? {
-      ...shareContainerObject,
-      ...shareItemObject,
-      coordinate: resolvedCoordinate || shareItemObject.coordinate || shareContainerObject.coordinate || null,
-      coordinates: resolvedCoordinate || shareItemObject.coordinates || shareContainerObject.coordinates || null,
-      coords: resolvedCoordinate || shareItemObject.coords || shareContainerObject.coords || null,
-      location: shareItemObject.location || shareContainerObject.location || resolvedCoordinate || null,
-      latitude: resolvedCoordinate
-        ? resolvedCoordinate.latitude
-        : shareItemObject.latitude ?? shareContainerObject.latitude ?? null,
-      longitude: resolvedCoordinate
-        ? resolvedCoordinate.longitude
-        : shareItemObject.longitude ?? shareContainerObject.longitude ?? null,
-      locationLatitude: resolvedCoordinate
-        ? resolvedCoordinate.latitude
-        : shareItemObject.locationLatitude ?? shareContainerObject.locationLatitude ?? null,
-      locationLongitude: resolvedCoordinate
-        ? resolvedCoordinate.longitude
-        : shareItemObject.locationLongitude ?? shareContainerObject.locationLongitude ?? null,
-    }
-  : null;
+  const cloudPayload =
+    cloudSharedItem?.payload && typeof cloudSharedItem.payload === "object"
+      ? cloudSharedItem.payload
+      : null;
+
+  const shareContainer = cloudSharedItem || sharedNotification || rawShareItem || {};
+  const shareItem =
+    cloudPayload ||
+    (!readOnly ? rawShareItem?.payload || rawShareItem : null) ||
+    (!routeShareId ? sharedNotification?.payload || rawShareItem?.payload || rawShareItem : null);
+
+  const shareType = cleanString(
+    params.shareType ||
+      cloudSharedItem?.shareType ||
+      cloudSharedItem?.itemType ||
+      cloudSharedItem?.type ||
+      sharedNotification?.shareType ||
+      sharedNotification?.itemType ||
+      sharedNotification?.type ||
+      rawShareItem?.shareType ||
+      rawShareItem?.itemType ||
+      rawShareItem?.type ||
+      "pin",
+    80
+  ).toLowerCase();
+
+  const shareItemObject =
+    shareItem && typeof shareItem === "object" ? shareItem : {};
+
+  const shareContainerObject =
+    shareContainer && typeof shareContainer === "object" ? shareContainer : {};
+
+  const resolvedCoordinate =
+    getCoordinate(shareItemObject) ||
+    getCoordinate(shareContainerObject) ||
+    getCoordinate(rawShareItem || {}) ||
+    getCoordinate(sharedNotification || {}) ||
+    getCoordinate(cloudSharedItem || {});
+
+  const resolvedShareItem = shareItem
+    ? {
+        ...shareContainerObject,
+        ...shareItemObject,
+        shareId:
+          routeShareId ||
+          shareItemObject.shareId ||
+          shareContainerObject.shareId ||
+          shareContainerObject.id ||
+          null,
+        coordinate: resolvedCoordinate || shareItemObject.coordinate || shareContainerObject.coordinate || null,
+        coordinates: resolvedCoordinate || shareItemObject.coordinates || shareContainerObject.coordinates || null,
+        coords: resolvedCoordinate || shareItemObject.coords || shareContainerObject.coords || null,
+        location: resolvedCoordinate || shareItemObject.location || shareContainerObject.location || null,
+        latitude: resolvedCoordinate
+          ? resolvedCoordinate.latitude
+          : shareItemObject.latitude ?? shareContainerObject.latitude ?? null,
+        longitude: resolvedCoordinate
+          ? resolvedCoordinate.longitude
+          : shareItemObject.longitude ?? shareContainerObject.longitude ?? null,
+        locationLatitude: resolvedCoordinate
+          ? resolvedCoordinate.latitude
+          : shareItemObject.locationLatitude ?? shareContainerObject.locationLatitude ?? null,
+        locationLongitude: resolvedCoordinate
+          ? resolvedCoordinate.longitude
+          : shareItemObject.locationLongitude ?? shareContainerObject.locationLongitude ?? null,
+      }
+    : null;
 
   const memberFromParams =
     params.member ||
@@ -1055,6 +1480,7 @@ const resolvedShareItem = shareItem
   const [searchResults, setSearchResults] = useState([]);
 
   const [busyUid, setBusyUid] = useState(null);
+  const shareLockRef = useRef(false);
   const [savingSharedItem, setSavingSharedItem] = useState(false);
   const [savedSharedItem, setSavedSharedItem] = useState(false);
   const [removingShare, setRemovingShare] = useState(false);
@@ -1063,19 +1489,17 @@ const resolvedShareItem = shareItem
   const [safetyTarget, setSafetyTarget] = useState(null);
   const [reportMessage, setReportMessage] = useState("");
 
-const title = getItemTitle(resolvedShareItem || {}, shareType);
-const typeLabel = getShareTypeLabel(shareType);
-const notificationType = getNotificationType(shareType);
-const coordinate = resolvedCoordinate || getCoordinate(resolvedShareItem || {});
-const photos = getPhotos(resolvedShareItem || {});
+  const title = getItemTitle(resolvedShareItem || {}, shareType);
+  const typeLabel = getShareTypeLabel(shareType);
+  const notificationType = getNotificationType(shareType);
+  const coordinate = resolvedCoordinate || getCoordinate(resolvedShareItem || {});
+  const photos = getPhotos(resolvedShareItem || {});
   const shareId =
-    params.shareId ||
-    sharedNotification?.shareId ||
-    sharedNotification?.relatedId ||
+    routeShareId ||
     shareContainer?.shareId ||
     shareContainer?.relatedId ||
-resolvedShareItem?.shareId ||
-resolvedShareItem?.id ||
+    resolvedShareItem?.shareId ||
+    resolvedShareItem?.id ||
     "";
 
   const canShare = !!user?.uid && !!shareItem && !readOnly;
@@ -1151,6 +1575,45 @@ resolvedShareItem?.id ||
 
     return false;
   }, [user?.uid, shareId, shareContainer, params.direction]);
+
+  useEffect(() => {
+    if (!readOnly || !shareId) {
+      setCloudShareLookupDone(true);
+      return;
+    }
+
+    let mounted = true;
+
+    async function loadSharedItemFallback() {
+      setCloudShareLookupDone(false);
+
+      try {
+        const snap = await getDoc(doc(db, SHARED_COLLECTION, shareId));
+
+        if (!mounted) return;
+
+        if (snap.exists()) {
+          setCloudSharedItem({
+            id: snap.id,
+            shareId: snap.id,
+            ...snap.data(),
+          });
+        }
+      } catch (err) {
+        console.log("DuckSmart shared item fallback failed:", err?.message || err);
+      } finally {
+        if (mounted) {
+          setCloudShareLookupDone(true);
+        }
+      }
+    }
+
+    loadSharedItemFallback();
+
+    return () => {
+      mounted = false;
+    };
+  }, [readOnly, shareId]);
 
   useEffect(() => {
     let mounted = true;
@@ -1365,7 +1828,7 @@ resolvedShareItem?.id ||
   }
 
   async function shareWithUser(targetProfile) {
-    if (!canShare || !targetProfile?.uid || busyUid) return;
+    if (!canShare || !targetProfile?.uid || busyUid || shareLockRef.current) return;
 
     const targetUid = cleanString(targetProfile.uid, 160);
 
@@ -1376,19 +1839,67 @@ resolvedShareItem?.id ||
 
     assertFirebaseReady();
 
+    shareLockRef.current = true;
     setBusyUid(targetUid);
 
     try {
       const now = Date.now();
-      const itemId = cleanDocId(resolvedShareItem?.id || resolvedShareItem?.shareId || title);
-      const outboundShareId = `${notificationType}_${itemId}_${targetUid}_${now}`;
+
+      const publicShareRef = doc(collection(db, SHARED_COLLECTION));
+      const outboundShareId = publicShareRef.id;
+
       const senderName = getDisplayName(profile, user);
       const senderDuckId = getDuckId(profile);
+
       const payload = buildSharePayload(resolvedShareItem, shareType);
       const payloadCoordinate = getCoordinate(payload);
       const payloadPhotos = getPhotos(payload);
 
+      if (notificationType === "shared_pin" && !payloadCoordinate) {
+        Alert.alert(
+          "Missing GPS",
+          "This pin is missing GPS coordinates, so it cannot be shared as a working map pin."
+        );
+        return;
+      }
+
+      const publicShareType =
+        notificationType === "shared_pin"
+          ? "pin"
+          : notificationType === "shared_hunt_log"
+            ? "huntLog"
+            : notificationType === "shared_scouting_log"
+              ? "huntLog"
+              : null;
+
+      if (publicShareType) {
+        await setDoc(publicShareRef, {
+          version: 4,
+          id: outboundShareId,
+          shareId: outboundShareId,
+          type: publicShareType,
+          payload,
+          coordinate: payloadCoordinate,
+          coordinates: payloadCoordinate,
+          location: payloadCoordinate,
+          latitude: payloadCoordinate ? payloadCoordinate.latitude : null,
+          longitude: payloadCoordinate ? payloadCoordinate.longitude : null,
+          locationLatitude: payloadCoordinate ? payloadCoordinate.latitude : null,
+          locationLongitude: payloadCoordinate ? payloadCoordinate.longitude : null,
+          photoCount: payloadPhotos.length,
+          createdAt: now,
+          createdAtServer: serverTimestamp(),
+          createdBy: user.uid,
+          createdByEmail: user.email || null,
+          senderUid: user.uid,
+          senderName,
+          senderDuckId,
+          recipientUid: targetUid,
+        });
+      }
+
       const senderSharedRef = doc(db, "users", user.uid, "sharedItems", outboundShareId);
+      const notificationRef = doc(db, "users", targetUid, "inAppNotifications", outboundShareId);
 
       const sharedRecord = {
         id: outboundShareId,
@@ -1412,18 +1923,22 @@ resolvedShareItem?.id ||
         payload,
         photoCount: payloadPhotos.length,
         coordinate: payloadCoordinate,
+        coordinates: payloadCoordinate,
+        location: payloadCoordinate,
         latitude: payloadCoordinate ? payloadCoordinate.latitude : null,
         longitude: payloadCoordinate ? payloadCoordinate.longitude : null,
+        locationLatitude: payloadCoordinate ? payloadCoordinate.latitude : null,
+        locationLongitude: payloadCoordinate ? payloadCoordinate.longitude : null,
         status: "active",
+        direction: "shared_by_me",
         createdAt: now,
         createdAtServer: serverTimestamp(),
         updatedAt: now,
         updatedAtServer: serverTimestamp(),
       };
 
-      await setDoc(senderSharedRef, sharedRecord, { merge: true });
-
-      await addDoc(collection(db, "users", targetUid, "inAppNotifications"), {
+      const notificationRecord = {
+        id: outboundShareId,
         recipientUid: targetUid,
         senderUid: user.uid,
         senderName,
@@ -1441,13 +1956,22 @@ resolvedShareItem?.id ||
         payload,
         photoCount: payloadPhotos.length,
         coordinate: payloadCoordinate,
+        coordinates: payloadCoordinate,
+        location: payloadCoordinate,
         latitude: payloadCoordinate ? payloadCoordinate.latitude : null,
         longitude: payloadCoordinate ? payloadCoordinate.longitude : null,
+        locationLatitude: payloadCoordinate ? payloadCoordinate.latitude : null,
+        locationLongitude: payloadCoordinate ? payloadCoordinate.longitude : null,
         createdAt: now,
         createdAtServer: serverTimestamp(),
         updatedAt: now,
         updatedAtServer: serverTimestamp(),
-      });
+      };
+
+      await Promise.all([
+        setDoc(senderSharedRef, sharedRecord, { merge: true }),
+        setDoc(notificationRef, notificationRecord, { merge: true }),
+      ]);
 
       Alert.alert(
         "Shared",
@@ -1457,6 +1981,7 @@ resolvedShareItem?.id ||
       console.log("DuckSmart in-app share failed:", err?.message || err);
       Alert.alert("Share Failed", err?.message || "Could not share this item.");
     } finally {
+      shareLockRef.current = false;
       setBusyUid(null);
     }
   }
@@ -1565,13 +2090,13 @@ resolvedShareItem?.id ||
     }
   }
 
-  if (loading) {
+  if (loading || (readOnly && shareId && !cloudShareLookupDone)) {
     return (
       <SafeAreaView style={s.safe}>
         <StatusBar barStyle="light-content" />
         <View style={s.loadingCardFull}>
           <ActivityIndicator color={GOLD} />
-          <Text style={s.loadingText}>Loading share screen...</Text>
+          <Text style={s.loadingText}>Loading shared item...</Text>
         </View>
       </SafeAreaView>
     );
@@ -1902,6 +2427,94 @@ const s = StyleSheet.create({
     marginBottom: 12,
     gap: 10,
   },
+  dogWorkBlock: {
+  borderRadius: 16,
+  backgroundColor: "rgba(217,168,76,0.07)",
+  borderWidth: 1,
+  borderColor: GOLD_BORDER,
+  padding: 10,
+  marginBottom: 10,
+},
+
+dogWorkHeader: {
+  flexDirection: "row",
+  alignItems: "center",
+  justifyContent: "space-between",
+  marginBottom: 8,
+},
+
+dogWorkTitle: {
+  color: COLORS.white,
+  fontSize: 13,
+  fontWeight: "900",
+  textTransform: "uppercase",
+},
+
+dogWorkTotal: {
+  color: GOLD,
+  fontSize: 12,
+  fontWeight: "900",
+},
+
+dogWorkRow: {
+  flexDirection: "row",
+  alignItems: "center",
+  borderTopWidth: 1,
+  borderTopColor: "rgba(255,255,255,0.08)",
+  paddingTop: 9,
+  paddingBottom: 7,
+},
+
+dogWorkName: {
+  color: COLORS.white,
+  fontSize: 13,
+  fontWeight: "900",
+},
+
+dogWorkSub: {
+  color: MUTED,
+  fontSize: 11,
+  fontWeight: "800",
+  lineHeight: 16,
+  marginTop: 3,
+},
+
+dogWorkNotes: {
+  color: MUTED_DARK,
+  fontSize: 11,
+  fontWeight: "700",
+  lineHeight: 15,
+  marginTop: 5,
+  fontStyle: "italic",
+},
+
+dogWorkTotalBox: {
+  minWidth: 72,
+  borderRadius: 13,
+  backgroundColor: "rgba(5,9,10,0.56)",
+  borderWidth: 1,
+  borderColor: GOLD_BORDER,
+  alignItems: "center",
+  justifyContent: "center",
+  paddingVertical: 8,
+  paddingHorizontal: 8,
+  marginLeft: 10,
+},
+
+dogWorkTotalValue: {
+  color: GOLD,
+  fontSize: 22,
+  fontWeight: "900",
+},
+
+dogWorkTotalLabel: {
+  color: MUTED_DARK,
+  fontSize: 8,
+  fontWeight: "900",
+  textTransform: "uppercase",
+  marginTop: 2,
+},
+
   sectionEyebrow: {
     color: GOLD,
     fontSize: 10,

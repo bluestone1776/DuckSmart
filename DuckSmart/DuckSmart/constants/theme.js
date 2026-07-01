@@ -34,10 +34,10 @@ export const SPREADS = [
 ];
 
 export const PIN_TYPES = [
-  { key: "Spot", label: "Spot", color: "#2ECC71" },
-  { key: "Roost", label: "Roost", color: "#3498DB" },
-  { key: "Feed", label: "Feed", color: "#F1C40F" },
-  { key: "FlightLine", label: "Flight Line", color: "#E67E22" },
-  { key: "Parking", label: "Parking", color: "#9B59B6" },
-  { key: "Hazard", label: "Hazard", color: "#E74C3C" },
+  { key: "Spot", label: "Spot", color: "#39D96A" },
+  { key: "Pit", label: "Pit", color: "#D9A84C" },
+  { key: "Blind", label: "Blind", color: "#4DA3FF" },
+  { key: "Ramp", label: "Ramp", color: "#FF7A00" },
+  { key: "Access", label: "Access", color: "#B084F5" },
+  { key: "Hazard", label: "Hazard", color: "#FF4D4D" },
 ];

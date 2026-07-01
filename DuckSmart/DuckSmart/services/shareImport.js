@@ -1,3 +1,4 @@
+// services/shareImport.js
 // DuckSmart — Share / Import Service
 //
 // Creates shareable DuckSmart pin and hunt-log records in Firebase.

@@ -109,14 +109,60 @@ function normalizeSeasonState(value) {
   };
 }
 
+function getTimestampFromValue(value) {
+  if (!value) return null;
+
+  if (typeof value === "number") {
+    return Number.isFinite(value) ? value : null;
+  }
+
+  if (value?.seconds) {
+    const seconds = Number(value.seconds);
+    return Number.isFinite(seconds) ? seconds * 1000 : null;
+  }
+
+  const parsed = new Date(value).getTime();
+  return Number.isFinite(parsed) ? parsed : null;
+}
+
+function getLogDate(log) {
+  const timestamp =
+    getTimestampFromValue(log?.dateTime) ||
+    getTimestampFromValue(log?.huntDate) ||
+    getTimestampFromValue(log?.createdAt) ||
+    Date.now();
+
+  return new Date(timestamp);
+}
+
+function getLogTimestamp(log) {
+  return getLogDate(log).getTime();
+}
+
+function getLogSeasonTimestamp(log) {
+  return (
+    getTimestampFromValue(log?.createdAt) ||
+    getTimestampFromValue(log?.savedAt) ||
+    getTimestampFromValue(log?.dateTime) ||
+    getTimestampFromValue(log?.huntDate) ||
+    Date.now()
+  );
+}
+
+function isRealHuntLog(log) {
+  return !!log && log.itemKind !== "archivedPin";
+}
+
 function isCurrentSeasonLog(log, seasonState) {
-  return getLogTimestamp(log) >= Number(seasonState.currentSeasonStart || 0);
+  if (!isRealHuntLog(log)) return false;
+  return getLogSeasonTimestamp(log) >= Number(seasonState.currentSeasonStart || 0);
 }
 
 function isLastSeasonLog(log, seasonState) {
+  if (!isRealHuntLog(log)) return false;
   if (!seasonState.lastSeasonStart || !seasonState.lastSeasonClosedAt) return false;
 
-  const ts = getLogTimestamp(log);
+  const ts = getLogSeasonTimestamp(log);
   return ts >= Number(seasonState.lastSeasonStart) && ts < Number(seasonState.lastSeasonClosedAt);
 }
 
@@ -207,19 +253,14 @@ function hashString(value) {
   return Math.abs(hash);
 }
 
-function getLogDate(log) {
-  const raw = log?.dateTime || log?.createdAt || Date.now();
-  const date = typeof raw === "number" ? new Date(raw) : new Date(raw);
-
-  if (Number.isNaN(date.getTime())) {
-    return new Date();
-  }
-
-  return date;
-}
-
-function getLogTimestamp(log) {
-  return getLogDate(log).getTime();
+function getHistoryRowKey(log, index = 0) {
+  return String(
+    log?.id ||
+      log?.originalId ||
+      log?.dateTime ||
+      log?.createdAt ||
+      `history-row-${index}`
+  );
 }
 
 function formatDateTime(log) {
@@ -288,6 +329,92 @@ function getKillColor(kills) {
   return GREEN;
 }
 
+function getDogStatTotal(stats) {
+  return (
+    Number(stats?.duckRetrieves || 0) +
+    Number(stats?.gooseRetrieves || 0) +
+    Number(stats?.crippleRetrieves || 0) +
+    Number(stats?.blindRetrieves || 0) +
+    Number(stats?.markedRetrieves || 0) +
+    Number(stats?.waterRetrieves || 0) +
+    Number(stats?.landRetrieves || 0)
+  );
+}
+
+function getDogHistoryEntries(log) {
+  const rawList = Array.isArray(log?.dogStatsList)
+    ? log.dogStatsList
+    : log?.dogStats?.dogUsed
+      ? [log.dogStats]
+      : [];
+
+  const mergedByDogId = new Map();
+
+  rawList
+    .filter((item) => item?.dogId && item?.dogUsed !== false)
+    .forEach((item) => {
+      const dogId = String(item.dogId);
+      const existing = mergedByDogId.get(dogId);
+
+      const next = existing
+        ? {
+            ...existing,
+            duckRetrieves: Number(existing.duckRetrieves || 0) + Number(item.duckRetrieves || 0),
+            gooseRetrieves: Number(existing.gooseRetrieves || 0) + Number(item.gooseRetrieves || 0),
+            crippleRetrieves: Number(existing.crippleRetrieves || 0) + Number(item.crippleRetrieves || 0),
+            blindRetrieves: Number(existing.blindRetrieves || 0) + Number(item.blindRetrieves || 0),
+            markedRetrieves: Number(existing.markedRetrieves || 0) + Number(item.markedRetrieves || 0),
+            waterRetrieves: Number(existing.waterRetrieves || 0) + Number(item.waterRetrieves || 0),
+            landRetrieves: Number(existing.landRetrieves || 0) + Number(item.landRetrieves || 0),
+            longRetrieveYards: Math.max(
+              Number(existing.longRetrieveYards || 0),
+              Number(item.longRetrieveYards || 0)
+            ),
+          }
+        : {
+            dogId,
+            dogName: item.dogName || "Dog",
+            duckRetrieves: Number(item.duckRetrieves || 0),
+            gooseRetrieves: Number(item.gooseRetrieves || 0),
+            crippleRetrieves: Number(item.crippleRetrieves || 0),
+            blindRetrieves: Number(item.blindRetrieves || 0),
+            markedRetrieves: Number(item.markedRetrieves || 0),
+            waterRetrieves: Number(item.waterRetrieves || 0),
+            landRetrieves: Number(item.landRetrieves || 0),
+            longRetrieveYards: Number(item.longRetrieveYards || 0),
+          };
+
+      mergedByDogId.set(dogId, next);
+    });
+
+  return Array.from(mergedByDogId.values()).map((item) => ({
+    ...item,
+    birdsRecovered: getDogStatTotal(item),
+  }));
+}
+
+function getDogHistorySummary(log) {
+  const entries = getDogHistoryEntries(log);
+
+  if (!entries.length) return null;
+
+  const birdsRecovered = entries.reduce(
+    (sum, item) => sum + Number(item.birdsRecovered || 0),
+    0
+  );
+
+  const dogNames = entries
+    .map((item) => `${item.dogName}: ${item.birdsRecovered}`)
+    .join(" • ");
+
+  return {
+    dogsUsed: entries.length,
+    birdsRecovered,
+    dogNames,
+    entries,
+  };
+}
+
 function getLogAnalyticsParams(log, extra = {}) {
   if (!log) return cleanAnalyticsParams(extra);
 
@@ -310,28 +437,6 @@ function getLogAnalyticsParams(log, extra = {}) {
     hunt_age_days: ageDays,
     ...extra,
   });
-}
-
-function isThisSeason(log) {
-  const date = getLogDate(log);
-  const now = new Date();
-  const seasonStartYear = now.getMonth() >= 8 ? now.getFullYear() : now.getFullYear() - 1;
-  const seasonStart = new Date(seasonStartYear, 8, 1, 0, 0, 0, 0);
-
-  return date >= seasonStart;
-}
-
-function isThisYear(log) {
-  return getLogDate(log).getFullYear() === new Date().getFullYear();
-}
-
-function isCustomRange(log) {
-  const date = getLogDate(log);
-  const now = new Date();
-  const thirtyDaysAgo = new Date(now);
-  thirtyDaysAgo.setDate(now.getDate() - 30);
-
-  return date >= thirtyDaysAgo;
 }
 
 function PhotoViewerModal({ photos, index, onClose, onChangeIndex }) {
@@ -552,8 +657,9 @@ function SummaryBlock({ logs }) {
 
 function HuntRow({ log, index, onPress, onDelete }) {
   const source = getLogThumbnailSource(log, index);
-  const kills = Number(log.ducksHarvested || 0);
-  const score = formatScoreSmall(log.huntScore || 0);
+const kills = Number(log.ducksHarvested || 0);
+const score = formatScoreSmall(log.huntScore || 0);
+const dogSummary = getDogHistorySummary(log);
 
   return (
     <Pressable style={local.huntRow} onPress={onPress}>
@@ -569,6 +675,11 @@ function HuntRow({ log, index, onPress, onDelete }) {
         <Text style={local.huntSub} numberOfLines={1}>
           {log.environment || "Hunt"}{log.pinTitle ? "" : " Log"}
         </Text>
+        {dogSummary ? (
+  <Text style={local.huntDogSummary} numberOfLines={1}>
+    🐾 {dogSummary.dogNames} • {dogSummary.birdsRecovered} recovered
+  </Text>
+) : null}
       </View>
 
       <View style={local.huntNumbers}>
@@ -795,64 +906,7 @@ function normalizeHuntLogForHistoryShare(log, linkedPin) {
     coordinate
   );
 }
-function getPinTimestamp(pin) {
-  const raw =
-    pin?.archivedAt ||
-    pin?.updatedAt ||
-    pin?.createdAt ||
-    pin?.originalCreatedAt ||
-    Date.now();
 
-  const date = typeof raw === "number" ? new Date(raw) : new Date(raw);
-  return Number.isNaN(date.getTime()) ? Date.now() : date.getTime();
-}
-
-function isArchivedPinForLastSeason(pin, seasonState) {
-  if (!pin?.archivedAt || !seasonState.lastSeasonStart || !seasonState.lastSeasonClosedAt) {
-    return false;
-  }
-
-  const archivedAt = Number(pin.archivedAt);
-  return (
-    archivedAt >= Number(seasonState.lastSeasonStart) &&
-    archivedAt <= Number(seasonState.lastSeasonClosedAt)
-  );
-}
-
-function getArchivedPinCoordinate(pin) {
-  return (
-    pin?.coordinate ||
-    pin?.coordinates ||
-    pin?.coords ||
-    pin?.location ||
-    null
-  );
-}
-
-function archivedPinToHistoryItem(pin) {
-  const coordinate = getArchivedPinCoordinate(pin);
-
-  return {
-    id: `archived-pin-${pin.id}`,
-    itemKind: "archivedPin",
-    pinId: pin.id,
-    title: pin.title || pin.name || "Archived Pin",
-    pinTitle: pin.title || pin.name || "Archived Pin",
-    environment: "Archived Map Pin",
-    notes: pin.notes || "",
-    dateTime: new Date(getPinTimestamp(pin)).toISOString(),
-    createdAt: getPinTimestamp(pin),
-    location: coordinate,
-    type: pin.type || "Spot",
-    pinType: pin.type || "Spot",
-    archivedPin: pin,
-    ducksHarvested: 0,
-    crippledBirds: 0,
-    hunters: 1,
-    huntScore: 0,
-    photos: Array.isArray(pin.photos) ? pin.photos : [],
-  };
-} 
 export default function HistoryScreen({ logs, pins = [], setPins, deleteLog, updateLog, onLogout }) {
   const { isPro } = usePremium();
   const navigation = useNavigation();
@@ -862,18 +916,8 @@ export default function HistoryScreen({ logs, pins = [], setPins, deleteLog, upd
   const [filterMode, setFilterMode] = useState("currentSeason");
   const [viewAll, setViewAll] = useState(false);
 
-  const [selectedId, setSelectedId] = useState(null);
-  const selected = useMemo(() => {
-  const logMatch = logs.find((l) => l.id === selectedId);
-  if (logMatch) return logMatch;
-
-  const archivedPinMatch = pins
-    .filter((pin) => pin?.archivedAt)
-    .map(archivedPinToHistoryItem)
-    .find((item) => item.id === selectedId);
-
-  return archivedPinMatch || null;
-}, [logs, pins, selectedId]);
+  const [selectedLog, setSelectedLog] = useState(null);
+  const selected = selectedLog;
 
   const [viewerPhotos, setViewerPhotos] = useState(null);
   const [viewerIndex, setViewerIndex] = useState(0);
@@ -890,6 +934,13 @@ export default function HistoryScreen({ logs, pins = [], setPins, deleteLog, upd
   const [editPhotos, setEditPhotos] = useState([]);
   const [seasonState, setSeasonState] = useState(createDefaultSeasonState());
   const [seasonReady, setSeasonReady] = useState(false);
+
+  useEffect(() => {
+    if (!selectedLog?.id) return;
+
+    const stillExists = logs.some((log) => log.id === selectedLog.id);
+    if (!stillExists) setSelectedLog(null);
+  }, [logs, selectedLog?.id]);
 
   useEffect(() => {
     let mounted = true;
@@ -929,48 +980,40 @@ export default function HistoryScreen({ logs, pins = [], setPins, deleteLog, upd
     }
   }
 
-const filtered = useMemo(() => {
-  const q = (query || "").toLowerCase().trim();
+  const filtered = useMemo(() => {
+    const q = (query || "").toLowerCase().trim();
 
-  const filteredLogs = logs
-    .filter((log) => {
-      if (filterMode === "currentSeason") return isCurrentSeasonLog(log, seasonState);
-      if (filterMode === "lastSeason") return isLastSeasonLog(log, seasonState);
-      return true;
-    });
+    return logs
+      .filter(isRealHuntLog)
+      .filter((log) => {
+        if (filterMode === "currentSeason") return isCurrentSeasonLog(log, seasonState);
+        if (filterMode === "lastSeason") return isLastSeasonLog(log, seasonState);
+        return true;
+      })
+      .filter((item) => {
+        if (!q) return true;
 
-  const archivedPinItems = pins
-    .filter((pin) => {
-      if (!pin?.archivedAt) return false;
-      if (filterMode === "currentSeason") return false;
-      if (filterMode === "lastSeason") return isArchivedPinForLastSeason(pin, seasonState);
-      return true;
-    })
-    .map(archivedPinToHistoryItem);
+        const hay = [
+          item.environment,
+          item.spread,
+          item.spreadOtherText,
+          item.notes,
+          item.pinTitle,
+          item.title,
+          item.type,
+          item.pinType,
+          item.logType,
+          item.logMode,
+          formatDateTime(item),
+          getDisplayLocation(item),
+        ]
+          .join(" | ")
+          .toLowerCase();
 
-  return [...filteredLogs, ...archivedPinItems]
-    .filter((item) => {
-      if (!q) return true;
-
-      const hay = [
-        item.environment,
-        item.spread,
-        item.spreadOtherText,
-        item.notes,
-        item.pinTitle,
-        item.title,
-        item.type,
-        item.pinType,
-        formatDateTime(item),
-        getDisplayLocation(item),
-      ]
-        .join(" | ")
-        .toLowerCase();
-
-      return hay.includes(q);
-    })
-    .sort((a, b) => getLogTimestamp(b) - getLogTimestamp(a));
-}, [logs, pins, query, filterMode, seasonState]);
+        return hay.includes(q);
+      })
+      .sort((a, b) => getLogTimestamp(b) - getLogTimestamp(a));
+  }, [logs, query, filterMode, seasonState]);
 
   const visibleLogs = useMemo(() => {
     if (viewAll || query.trim()) return filtered;
@@ -1184,7 +1227,7 @@ const filtered = useMemo(() => {
       photo_count_new: Array.isArray(editPhotos) ? editPhotos.length : 0,
     });
 
-    updateLog(selected.id, {
+    const updates = {
       environment: editEnvironment,
       spread: editSpread,
       spreadOtherText: editSpread === "other" ? safeSpreadOtherText : "",
@@ -1204,116 +1247,119 @@ const filtered = useMemo(() => {
       notes: safeNotes,
       photos: editPhotos,
       updatedAt: Date.now(),
-    });
+    };
+
+    updateLog(selected.id, updates);
+    setSelectedLog((prev) => (prev ? { ...prev, ...updates } : prev));
 
     setEditVisible(false);
     Alert.alert("Updated", "Your hunt log has been updated.");
   }
 
   async function shareLog(log) {
-  if (!log || sharingLog) return;
+    if (!log || sharingLog) return;
 
-  const linkedPin =
-    log?.pinId && Array.isArray(pins)
-      ? pins.find((pin) => pin.id === log.pinId)
-      : null;
+    const linkedPin =
+      log?.pinId && Array.isArray(pins)
+        ? pins.find((pin) => pin.id === log.pinId)
+        : null;
 
-  const normalizedLinkedPin = normalizeLinkedPinForHistoryShare(linkedPin, log);
-  const normalizedLog = normalizeHuntLogForHistoryShare(log, normalizedLinkedPin);
+    const normalizedLinkedPin = normalizeLinkedPinForHistoryShare(linkedPin, log);
+    const normalizedLog = normalizeHuntLogForHistoryShare(log, normalizedLinkedPin);
 
-  void logAnalyticsEvent("history_share_options_opened", {
-    ...analyticsBase,
-    ...getLogAnalyticsParams(normalizedLog),
-    has_linked_pin: normalizedLinkedPin ? 1 : 0,
-  });
+    void logAnalyticsEvent("history_share_options_opened", {
+      ...analyticsBase,
+      ...getLogAnalyticsParams(normalizedLog),
+      has_linked_pin: normalizedLinkedPin ? 1 : 0,
+    });
 
-  Alert.alert(
-    "Share Hunt Log",
-    "How do you want to share this hunt log?",
-    [
-      {
-        text: "Share within App",
-        onPress: () => {
-          void logAnalyticsEvent("history_share_within_app_selected", {
-            ...analyticsBase,
-            ...getLogAnalyticsParams(normalizedLog),
-            has_linked_pin: normalizedLinkedPin ? 1 : 0,
-          });
-
-          navigation.navigate("ShareScreen", {
-            shareType: "hunt_log",
-            item: normalizedLog,
-          });
-        },
-      },
-      {
-        text: "Share Other Ways",
-        onPress: async () => {
-          void logAnalyticsEvent("history_share_other_ways_start", {
-            ...analyticsBase,
-            ...getLogAnalyticsParams(normalizedLog),
-            has_linked_pin: normalizedLinkedPin ? 1 : 0,
-          });
-
-          setSharingLog(true);
-
-          try {
-            const shareResult = await createSharedHuntLog(
-              normalizedLog,
-              normalizedLinkedPin
-            );
-
-            const firstHuntPhotoUri =
-              Array.isArray(normalizedLog.photos) && normalizedLog.photos.length > 0
-                ? getPhotoUri(normalizedLog.photos[0])
-                : null;
-
-            const spreadPhotoUri = getPhotoUri(normalizedLog.spreadPhoto);
-            const shareImageUri =
-              firstHuntPhotoUri || spreadPhotoUri || shareResult.imageUrl || undefined;
-
-            const nativeShareResult = await Share.share({
-              message: shareResult.message,
-              url: shareImageUri,
-            });
-
-            void logAnalyticsEvent("history_share_other_ways_result", {
+    Alert.alert(
+      "Share Hunt Log",
+      "How do you want to share this hunt log?",
+      [
+        {
+          text: "Share within App",
+          onPress: () => {
+            void logAnalyticsEvent("history_share_within_app_selected", {
               ...analyticsBase,
               ...getLogAnalyticsParams(normalizedLog),
-              action: nativeShareResult?.action || "unknown",
-              activity_type: nativeShareResult?.activityType || "unknown",
-              has_message: shareResult?.message ? 1 : 0,
-            });
-          } catch (err) {
-            void logAnalyticsEvent("history_share_other_ways_error", {
-              ...analyticsBase,
-              ...getLogAnalyticsParams(normalizedLog),
-              error_message: err?.message || "unknown",
+              has_linked_pin: normalizedLinkedPin ? 1 : 0,
             });
 
-            console.error("DuckSmart share hunt log error:", err);
-            Alert.alert(
-              "Share Failed",
-              err.message || "Could not create a share link for this hunt log. Please try again."
-            );
-          } finally {
-            setSharingLog(false);
-          }
+            navigation.navigate("ShareScreen", {
+              shareType: "hunt_log",
+              item: normalizedLog,
+            });
+          },
         },
-      },
-      {
-        text: "Cancel",
-        style: "cancel",
-        onPress: () => {
-          void logAnalyticsEvent("history_share_options_cancelled", {
-            ...analyticsBase,
-            ...getLogAnalyticsParams(normalizedLog),
-          });
+        {
+          text: "Share Other Ways",
+          onPress: async () => {
+            void logAnalyticsEvent("history_share_other_ways_start", {
+              ...analyticsBase,
+              ...getLogAnalyticsParams(normalizedLog),
+              has_linked_pin: normalizedLinkedPin ? 1 : 0,
+            });
+
+            setSharingLog(true);
+
+            try {
+              const shareResult = await createSharedHuntLog(
+                normalizedLog,
+                normalizedLinkedPin
+              );
+
+              const firstHuntPhotoUri =
+                Array.isArray(normalizedLog.photos) && normalizedLog.photos.length > 0
+                  ? getPhotoUri(normalizedLog.photos[0])
+                  : null;
+
+              const spreadPhotoUri = getPhotoUri(normalizedLog.spreadPhoto);
+              const shareImageUri =
+                firstHuntPhotoUri || spreadPhotoUri || shareResult.imageUrl || undefined;
+
+              const nativeShareResult = await Share.share({
+                message: shareResult.message,
+                url: shareImageUri,
+              });
+
+              void logAnalyticsEvent("history_share_other_ways_result", {
+                ...analyticsBase,
+                ...getLogAnalyticsParams(normalizedLog),
+                action: nativeShareResult?.action || "unknown",
+                activity_type: nativeShareResult?.activityType || "unknown",
+                has_message: shareResult?.message ? 1 : 0,
+              });
+            } catch (err) {
+              void logAnalyticsEvent("history_share_other_ways_error", {
+                ...analyticsBase,
+                ...getLogAnalyticsParams(normalizedLog),
+                error_message: err?.message || "unknown",
+              });
+
+              console.error("DuckSmart share hunt log error:", err);
+              Alert.alert(
+                "Share Failed",
+                err.message || "Could not create a share link for this hunt log. Please try again."
+              );
+            } finally {
+              setSharingLog(false);
+            }
+          },
         },
-      },
-    ]
-  );
-}
+        {
+          text: "Cancel",
+          style: "cancel",
+          onPress: () => {
+            void logAnalyticsEvent("history_share_options_cancelled", {
+              ...analyticsBase,
+              ...getLogAnalyticsParams(normalizedLog),
+            });
+          },
+        },
+      ]
+    );
+  }
 
   function confirmDelete(id) {
     const log = logs.find((l) => l.id === id);
@@ -1344,7 +1390,7 @@ const filtered = useMemo(() => {
           });
 
           deleteLog(id);
-          if (selectedId === id) setSelectedId(null);
+          if (selected?.id === id) setSelectedLog(null);
         },
       },
     ]);
@@ -1357,7 +1403,7 @@ const filtered = useMemo(() => {
         ...getLogAnalyticsParams(selected),
       });
 
-      setSelectedId(null);
+      setSelectedLog(null);
       return;
     }
 
@@ -1408,7 +1454,7 @@ const filtered = useMemo(() => {
       ...getLogAnalyticsParams(log),
     });
 
-    setSelectedId(log.id);
+    setSelectedLog(log);
   }
 
   function handleViewAllToggle() {
@@ -1455,34 +1501,34 @@ const filtered = useMemo(() => {
               },
             };
 
-void logAnalyticsEvent("history_close_season", {
-  ...analyticsBase,
-  current_season_logs: currentSeasonLogs.length,
-});
+            void logAnalyticsEvent("history_close_season", {
+              ...analyticsBase,
+              current_season_logs: currentSeasonLogs.length,
+            });
 
-const currentSeasonPinIds = new Set(
-  currentSeasonLogs
-    .map((log) => log.pinId)
-    .filter(Boolean)
-);
+            const currentSeasonPinIds = new Set(
+              currentSeasonLogs
+                .map((log) => log.pinId)
+                .filter(Boolean)
+            );
 
-if (typeof setPins === "function" && currentSeasonPinIds.size > 0) {
-  setPins((prevPins) =>
-    prevPins.map((pin) =>
-      currentSeasonPinIds.has(pin.id)
-        ? {
-            ...pin,
-            archivedAt: closedAt,
-            archivedSeason: "lastSeason",
-            archivedSeasonStart: seasonState.currentSeasonStart,
-            archivedSeasonClosedAt: closedAt,
-          }
-        : pin
-    )
-  );
-}
+            if (typeof setPins === "function" && currentSeasonPinIds.size > 0) {
+              setPins((prevPins) =>
+                prevPins.map((pin) =>
+                  currentSeasonPinIds.has(pin.id)
+                    ? {
+                        ...pin,
+                        archivedAt: closedAt,
+                        archivedSeason: "lastSeason",
+                        archivedSeasonStart: seasonState.currentSeasonStart,
+                        archivedSeasonClosedAt: closedAt,
+                      }
+                    : pin
+                )
+              );
+            }
 
-await saveSeasonState(nextState);
+            await saveSeasonState(nextState);
             setFilterMode("lastSeason");
             setViewAll(true);
           },
@@ -1510,32 +1556,32 @@ await saveSeasonState(nextState);
               undo: null,
             });
 
-void logAnalyticsEvent("history_undo_close_season", analyticsBase);
+            void logAnalyticsEvent("history_undo_close_season", analyticsBase);
 
-if (typeof setPins === "function") {
-  setPins((prevPins) =>
-    prevPins.map((pin) => {
-      if (
-        pin?.archivedSeason === "lastSeason" &&
-        Number(pin.archivedSeasonClosedAt) === Number(seasonState.lastSeasonClosedAt)
-      ) {
-        const {
-          archivedAt,
-          archivedSeason,
-          archivedSeasonStart,
-          archivedSeasonClosedAt,
-          ...rest
-        } = pin;
+            if (typeof setPins === "function") {
+              setPins((prevPins) =>
+                prevPins.map((pin) => {
+                  if (
+                    pin?.archivedSeason === "lastSeason" &&
+                    Number(pin.archivedSeasonClosedAt) === Number(seasonState.lastSeasonClosedAt)
+                  ) {
+                    const {
+                      archivedAt,
+                      archivedSeason,
+                      archivedSeasonStart,
+                      archivedSeasonClosedAt,
+                      ...rest
+                    } = pin;
 
-        return rest;
-      }
+                    return rest;
+                  }
 
-      return pin;
-    })
-  );
-}
+                  return pin;
+                })
+              );
+            }
 
-await saveSeasonState(restoredState);
+            await saveSeasonState(restoredState);
             setFilterMode("currentSeason");
             setViewAll(false);
           },
@@ -1839,15 +1885,15 @@ await saveSeasonState(restoredState);
                     </Text>
                   </View>
                 ) : (
-visibleLogs.map((log, index) => (
-  <HuntRow
-    key={log.id}
-    log={log}
-    index={index}
-    onPress={() => handleOpenLog(log, index)}
-    onDelete={log.itemKind === "archivedPin" ? null : () => confirmDelete(log.id)}
-  />
-))
+                  visibleLogs.map((log, index) => (
+                    <HuntRow
+                      key={getHistoryRowKey(log, index)}
+                      log={log}
+                      index={index}
+                      onPress={() => handleOpenLog(log, index)}
+                      onDelete={() => confirmDelete(log.id)}
+                    />
+                  ))
                 )}
 
                 {filtered.length > 4 && !query.trim() ? (
@@ -1858,42 +1904,42 @@ visibleLogs.map((log, index) => (
                   </Pressable>
                 ) : null}
 
-                <View style={local.seasonActionBox}>
-                  {filterMode === "lastSeason" ? (
-                    <>
-                      <Text style={local.seasonActionTitle}>Last Season</Text>
-                      <Text style={local.seasonActionText}>
-                        {seasonState.lastSeasonClosedAt
-                          ? `Closed ${formatSeasonDate(seasonState.lastSeasonClosedAt)}. These logs stay here unless you undo the most recent close.`
-                          : "No season has been closed yet."}
-                      </Text>
+                {filterMode === "currentSeason" ? (
+                  <View style={local.seasonActionBox}>
+                    <Text style={local.seasonActionTitle}>Current Season</Text>
+                    <Text style={local.seasonActionText}>
+                      Close the season only when you are ready to move these logs into Last Season.
+                    </Text>
 
-                      {seasonState.lastSeasonClosedAt && seasonState.undo ? (
-                        <Pressable style={local.undoSeasonBtn} onPress={undoCloseSeason}>
-                          <Text style={local.undoSeasonBtnText}>Undo Most Recent Close Season</Text>
-                        </Pressable>
-                      ) : null}
-                    </>
-                  ) : (
-                    <>
-                      <Text style={local.seasonActionTitle}>Season Controls</Text>
-                      <Text style={local.seasonActionText}>
-                        Close Current Season when your season is over. Current Season resets and these results move to Last Season.
-                      </Text>
+                    <Pressable
+                      style={[
+                        local.undoSeasonBtn,
+                        (!seasonReady || filtered.length === 0) ? { opacity: 0.45 } : null,
+                      ]}
+                      onPress={closeCurrentSeason}
+                      disabled={!seasonReady || filtered.length === 0}
+                    >
+                      <Text style={local.undoSeasonBtnText}>Close Current Season</Text>
+                    </Pressable>
+                  </View>
+                ) : null}
 
-                      <Pressable
-                        style={[
-                          local.closeSeasonBtn,
-                          (!seasonReady || filtered.length === 0) ? local.closeSeasonBtnDisabled : null,
-                        ]}
-                        onPress={closeCurrentSeason}
-                        disabled={!seasonReady || filtered.length === 0}
-                      >
-                        <Text style={local.closeSeasonBtnText}>Close Current Season</Text>
+                {filterMode === "lastSeason" ? (
+                  <View style={local.seasonActionBox}>
+                    <Text style={local.seasonActionTitle}>Last Season</Text>
+                    <Text style={local.seasonActionText}>
+                      {seasonState.lastSeasonClosedAt
+                        ? `Closed ${formatSeasonDate(seasonState.lastSeasonClosedAt)}. These logs stay here unless you undo the most recent close.`
+                        : "No season has been closed yet."}
+                    </Text>
+
+                    {seasonState.lastSeasonClosedAt && seasonState.undo ? (
+                      <Pressable style={local.undoSeasonBtn} onPress={undoCloseSeason}>
+                        <Text style={local.undoSeasonBtnText}>Undo Most Recent Close Season</Text>
                       </Pressable>
-                    </>
-                  )}
-                </View>
+                    ) : null}
+                  </View>
+                ) : null}
               </>
             ) : (
               <>
@@ -1916,12 +1962,53 @@ visibleLogs.map((log, index) => (
                   </View>
                 </View>
 
-                <View style={local.detailStatsGrid}>
-                  <DetailStat label="Ducks" value={selected.ducksHarvested ?? 0} color={GREEN} />
-                  <DetailStat label="Score" value={formatScoreSmall(selected.huntScore)} color={getScoreColor(selected.huntScore)} />
-                  <DetailStat label="Hunters" value={selected.hunters || 1} />
-                  <DetailStat label="Crippled" value={selected.crippledBirds ?? 0} color={(selected.crippledBirds ?? 0) > 0 ? RED : MUTED} />
-                </View>
+<View style={local.detailStatsGrid}>
+  <DetailStat label="Ducks" value={selected.ducksHarvested ?? 0} color={GREEN} />
+  <DetailStat
+    label="Score"
+    value={formatScoreSmall(selected.huntScore)}
+    color={getScoreColor(selected.huntScore)}
+  />
+  <DetailStat label="Hunters" value={selected.hunters || 1} />
+  <DetailStat
+    label="Crippled"
+    value={selected.crippledBirds ?? 0}
+    color={(selected.crippledBirds ?? 0) > 0 ? RED : MUTED}
+  />
+</View>
+
+                {getDogHistorySummary(selected) ? (
+  <DetailCard title="DOG WORK">
+    {getDogHistorySummary(selected).entries.map((dog) => (
+      <View key={dog.dogId} style={local.dogHistoryRow}>
+        <View style={{ flex: 1, minWidth: 0 }}>
+          <Text style={local.dogHistoryName} numberOfLines={1}>
+            🐾 {dog.dogName}
+          </Text>
+
+          <Text style={local.dogHistorySub} numberOfLines={2}>
+            Ducks {dog.duckRetrieves} • Geese {dog.gooseRetrieves} • Cripples {dog.crippleRetrieves}
+          </Text>
+
+          <Text style={local.dogHistorySub} numberOfLines={2}>
+            Blind {dog.blindRetrieves} • Marked {dog.markedRetrieves} • Water {dog.waterRetrieves} • Land {dog.landRetrieves}
+          </Text>
+        </View>
+
+        <View style={local.dogHistoryTotalBox}>
+          <Text style={local.dogHistoryTotal}>{dog.birdsRecovered}</Text>
+          <Text style={local.dogHistoryTotalLabel}>Recovered</Text>
+        </View>
+      </View>
+    ))}
+
+    <View style={local.dogHistoryFooter}>
+      <Text style={local.dogHistoryFooterText}>
+        Total Dog Birds Recovered: {getDogHistorySummary(selected).birdsRecovered}
+      </Text>
+    </View>
+  </DetailCard>
+) : null}
 
                 {hasSelectedLocation ? (
                   <DetailCard title="GPS LOCATION">
@@ -2031,31 +2118,23 @@ visibleLogs.map((log, index) => (
                   </DetailCard>
                 ) : null}
 
-{selected.itemKind === "archivedPin" ? (
-  <View style={local.detailBtnRow}>
-    <Pressable style={local.primaryBtn} onPress={() => setSelectedId(null)}>
-      <Text style={local.primaryBtnText}>Back to History</Text>
-    </Pressable>
-  </View>
-) : (
-  <View style={local.detailBtnRow}>
-    <Pressable style={local.secondaryBtn} onPress={() => confirmDelete(selected.id)}>
-      <Text style={local.secondaryBtnText}>Delete</Text>
-    </Pressable>
+                <View style={local.detailBtnRow}>
+                  <Pressable style={local.secondaryBtn} onPress={() => confirmDelete(selected.id)}>
+                    <Text style={local.secondaryBtnText}>Delete</Text>
+                  </Pressable>
 
-    <Pressable style={local.secondaryBtn} onPress={openEditModal}>
-      <Text style={local.secondaryBtnText}>Edit</Text>
-    </Pressable>
+                  <Pressable style={local.secondaryBtn} onPress={openEditModal}>
+                    <Text style={local.secondaryBtnText}>Edit</Text>
+                  </Pressable>
 
-    <Pressable
-      style={[local.primaryBtn, sharingLog ? { opacity: 0.55 } : null]}
-      onPress={() => shareLog(selected)}
-      disabled={sharingLog}
-    >
-      <Text style={local.primaryBtnText}>{sharingLog ? "Sharing..." : "Share"}</Text>
-    </Pressable>
-  </View>
-)}
+                  <Pressable
+                    style={[local.primaryBtn, sharingLog ? { opacity: 0.55 } : null]}
+                    onPress={() => shareLog(selected)}
+                    disabled={sharingLog}
+                  >
+                    <Text style={local.primaryBtnText}>{sharingLog ? "Sharing..." : "Share"}</Text>
+                  </Pressable>
+                </View>
               </>
             )}
 
@@ -2278,7 +2357,78 @@ const local = StyleSheet.create({
     marginTop: 5,
     lineHeight: 17,
   },
+huntDogSummary: {
+  color: GOLD,
+  fontSize: 11,
+  fontWeight: "900",
+  marginTop: 3,
+},
 
+dogHistoryRow: {
+  flexDirection: "row",
+  alignItems: "center",
+  borderRadius: 14,
+  backgroundColor: "rgba(255,255,255,0.04)",
+  borderWidth: 1,
+  borderColor: "rgba(255,255,255,0.08)",
+  padding: 10,
+  marginBottom: 8,
+},
+
+dogHistoryName: {
+  color: COLORS.white,
+  fontSize: 14,
+  fontWeight: "900",
+},
+
+dogHistorySub: {
+  color: MUTED,
+  fontSize: 11,
+  fontWeight: "700",
+  lineHeight: 16,
+  marginTop: 3,
+},
+
+dogHistoryTotalBox: {
+  minWidth: 74,
+  borderRadius: 13,
+  backgroundColor: "rgba(217,168,76,0.10)",
+  borderWidth: 1,
+  borderColor: GOLD_BORDER,
+  alignItems: "center",
+  justifyContent: "center",
+  paddingVertical: 8,
+  paddingHorizontal: 8,
+  marginLeft: 10,
+},
+
+dogHistoryTotal: {
+  color: GOLD,
+  fontSize: 22,
+  fontWeight: "900",
+},
+
+dogHistoryTotalLabel: {
+  color: MUTED_DARK,
+  fontSize: 8,
+  fontWeight: "900",
+  textTransform: "uppercase",
+  marginTop: 2,
+},
+
+dogHistoryFooter: {
+  borderTopWidth: 1,
+  borderTopColor: "rgba(255,255,255,0.08)",
+  paddingTop: 9,
+  marginTop: 2,
+},
+
+dogHistoryFooterText: {
+  color: GOLD,
+  fontSize: 13,
+  fontWeight: "900",
+  textAlign: "center",
+},
   summaryBlock: {
     marginBottom: 10,
   },

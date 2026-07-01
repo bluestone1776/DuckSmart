@@ -1,3 +1,4 @@
+// context/AuthContext.js
 // DuckSmart — Auth Context
 //
 // Provides authentication state and actions to all screens via React Context.
@@ -127,6 +128,10 @@ function formatAppleFullName(fullName) {
     .trim();
 }
 
+function hasExplicitMarketingValue(profile = {}) {
+  return typeof profile.marketingOptIn === "boolean";
+}
+
 async function saveUserProfile(firebaseUser, provider = "unknown", profile = {}) {
   if (!firebaseUser?.uid || !isFirebaseConfigValid) return;
 
@@ -135,8 +140,13 @@ async function saveUserProfile(firebaseUser, provider = "unknown", profile = {})
     const publicRef = doc(db, "users_public", uid);
     const privateRef = doc(db, "users", uid, "profile", "private");
 
-    const existingPublicSnap = await getDoc(publicRef);
+    const [existingPublicSnap, existingPrivateSnap] = await Promise.all([
+      getDoc(publicRef),
+      getDoc(privateRef),
+    ]);
+
     const existingPublic = existingPublicSnap.exists() ? existingPublicSnap.data() : {};
+    const existingPrivate = existingPrivateSnap.exists() ? existingPrivateSnap.data() : {};
 
     const displayName = buildFallbackName(
       firebaseUser,
@@ -154,6 +164,13 @@ async function saveUserProfile(firebaseUser, provider = "unknown", profile = {})
       cleanDuckId(existingPublic.duckIdLower || profile.duckId || "") ||
       buildFallbackDuckId(firebaseUser, displayName);
 
+    const explicitMarketingValue = hasExplicitMarketingValue(profile);
+    const marketingOptIn = explicitMarketingValue
+      ? profile.marketingOptIn === true
+      : existingPrivate.marketingOptIn === true;
+
+    const now = Date.now();
+
     const publicPayload = {
       uid,
       displayName,
@@ -170,32 +187,54 @@ async function saveUserProfile(firebaseUser, provider = "unknown", profile = {})
         .join(" ")
         .toLowerCase(),
       provider,
-      updatedAt: Date.now(),
+      updatedAt: now,
       updatedAtServer: serverTimestamp(),
     };
 
     if (!existingPublicSnap.exists()) {
-      publicPayload.createdAt = Date.now();
+      publicPayload.createdAt = now;
       publicPayload.createdAtServer = serverTimestamp();
     }
 
     await setDoc(publicRef, publicPayload, { merge: true });
 
-    await setDoc(
-      privateRef,
-      {
-        uid,
-        email,
-        emailLower,
-        displayName,
-        photoURL,
-        duckIdLower,
-        provider,
-        updatedAt: Date.now(),
-        updatedAtServer: serverTimestamp(),
-      },
-      { merge: true }
-    );
+    const privatePayload = {
+      uid,
+      email,
+      emailLower,
+      displayName,
+      photoURL,
+      duckIdLower,
+      provider,
+      marketingOptIn,
+      marketingOptInSource:
+        explicitMarketingValue
+          ? "signup"
+          : existingPrivate.marketingOptInSource || "",
+      updatedAt: now,
+      updatedAtServer: serverTimestamp(),
+    };
+
+    if (!existingPrivateSnap.exists()) {
+      privatePayload.createdAt = now;
+      privatePayload.createdAtServer = serverTimestamp();
+    }
+
+    if (explicitMarketingValue) {
+      privatePayload.marketingOptInUpdatedAt = now;
+      privatePayload.marketingOptInUpdatedAtServer = serverTimestamp();
+
+      if (marketingOptIn) {
+        privatePayload.marketingOptInAt = existingPrivate.marketingOptInAt || now;
+        privatePayload.marketingOptInAtServer =
+          existingPrivate.marketingOptInAtServer || serverTimestamp();
+      }
+    } else if (existingPrivate.marketingOptInAt) {
+      privatePayload.marketingOptInAt = existingPrivate.marketingOptInAt;
+      privatePayload.marketingOptInAtServer = existingPrivate.marketingOptInAtServer || null;
+    }
+
+    await setDoc(privateRef, privatePayload, { merge: true });
   } catch (err) {
     console.log("DuckSmart profile save failed:", err?.message || err);
   }
@@ -264,6 +303,7 @@ export function AuthProvider({ children }) {
       const result = await createUserWithEmailAndPassword(auth, email, password);
 
       const displayName = cleanString(profile.displayName, 80);
+      const marketingOptIn = profile.marketingOptIn === true;
 
       if (displayName) {
         await updateProfile(result.user, {
@@ -273,6 +313,7 @@ export function AuthProvider({ children }) {
 
       await saveUserProfile(result.user, "email", {
         displayName,
+        marketingOptIn,
       });
 
       await sendEmailVerification(result.user);

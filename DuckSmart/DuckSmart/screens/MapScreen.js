@@ -14,9 +14,25 @@ import {
   Image,
   Linking,
   Share,
+  Keyboard,
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
-import MapView, { Geojson, Marker, UrlTile } from "react-native-maps";
+import {
+  deleteWaypointPath,
+  getFollowBackCoordinates,
+  getWaypointSummary,
+  loadWaypointPaths,
+  startWaypointRecording,
+  stopWaypointRecording,
+  syncOfflineWaypointPaths,
+} from "../services/waypoint_helper";
+import {
+  fetchWaterLevelsForRegion,
+  getWaterLevelMarkerColor,
+  getWaterLevelMarkerIcon,
+  formatWaterLevelCallout,
+} from "../services/waterLevels";
+import MapView, { Callout, Circle as MapCircle, Geojson, Marker, Polyline, UrlTile } from "react-native-maps";
 import * as Location from "expo-location";
 import * as FileSystem from "expo-file-system";
 import AsyncStorage from "@react-native-async-storage/async-storage";
@@ -36,11 +52,13 @@ import { GET_REGRID_TILE_URL, LOOKUP_REGRID_PARCEL_URL } from "../config";
 import { getRadarTileUrl } from "../services/radar";
 import { createSharedPin } from "../services/shareImport";
 import { getPropertyFeatureRegion } from "../services/mapSearch";
+import { fetchPublicPropertyGeojson } from "../services/public_property";
 
 const FREE_PIN_LIMIT = 5;
 const RADAR_REGION_DELTA = 3.0;
 const PIN_STAT_RESETS_KEY = "@ducksmart_pin_stat_resets_v1";
 const PIN_SEASON_ARCHIVES_KEY = "@ducksmart_pin_season_archives_v1";
+const HISTORY_SEASON_STATE_KEY = "@ducksmart_history_season_state_v1";
 
 const HUNT_BROWN = "#21150D";
 const HUNT_BROWN_CARD = "#2B1C11";
@@ -75,6 +93,43 @@ const MAP_ENGAGEMENT_INTERVAL_MS = 12000;
 const SNAP_COLLAPSED = 0;
 const SNAP_PEEK = 1;
 const SNAP_EXPANDED = 2;
+
+function getDefaultSeasonStartTimestamp() {
+  const now = new Date();
+  const seasonStartYear = now.getMonth() >= 8 ? now.getFullYear() : now.getFullYear() - 1;
+  return new Date(seasonStartYear, 8, 1, 0, 0, 0, 0).getTime();
+}
+
+function createDefaultHistorySeasonState() {
+  return {
+    currentSeasonStart: getDefaultSeasonStartTimestamp(),
+    lastSeasonStart: null,
+    lastSeasonClosedAt: null,
+    undo: null,
+  };
+}
+
+function normalizeHistorySeasonState(value) {
+  const fallback = createDefaultHistorySeasonState();
+
+  if (!value || typeof value !== "object") return fallback;
+
+  return {
+    currentSeasonStart:
+      Number.isFinite(Number(value.currentSeasonStart))
+        ? Number(value.currentSeasonStart)
+        : fallback.currentSeasonStart,
+    lastSeasonStart:
+      Number.isFinite(Number(value.lastSeasonStart))
+        ? Number(value.lastSeasonStart)
+        : null,
+    lastSeasonClosedAt:
+      Number.isFinite(Number(value.lastSeasonClosedAt))
+        ? Number(value.lastSeasonClosedAt)
+        : null,
+    undo: value.undo || null,
+  };
+}
 
 function getParcelValue(feature, keys) {
   const props = feature?.properties || {};
@@ -184,6 +239,21 @@ function summarizePinLogs(pinLogs) {
   };
 }
 
+function normalizePinTypeName(type) {
+  switch (type) {
+    case "Roost":
+      return "Pit";
+    case "Feed":
+      return "Blind";
+    case "Flight Line":
+      return "Ramp";
+    case "Parking":
+      return "Access";
+    default:
+      return type || "Spot";
+  }
+}
+
 function formatResetDate(timestamp) {
   if (!timestamp) return "";
   return new Date(timestamp).toLocaleDateString(undefined, {
@@ -283,6 +353,83 @@ function cleanCoordinateNumber(value) {
   return Number.isFinite(n) ? n : null;
 }
 
+function getDistanceMiles(a, b) {
+  if (!a || !b) return null;
+
+  const lat1 = Number(a.latitude);
+  const lon1 = Number(a.longitude);
+  const lat2 = Number(b.latitude);
+  const lon2 = Number(b.longitude);
+
+  if (
+    !Number.isFinite(lat1) ||
+    !Number.isFinite(lon1) ||
+    !Number.isFinite(lat2) ||
+    !Number.isFinite(lon2)
+  ) {
+    return null;
+  }
+
+  const toRad = (value) => (value * Math.PI) / 180;
+  const earthRadiusMiles = 3958.8;
+
+  const dLat = toRad(lat2 - lat1);
+  const dLon = toRad(lon2 - lon1);
+
+  const rLat1 = toRad(lat1);
+  const rLat2 = toRad(lat2);
+
+  const hav =
+    Math.sin(dLat / 2) * Math.sin(dLat / 2) +
+    Math.cos(rLat1) *
+      Math.cos(rLat2) *
+      Math.sin(dLon / 2) *
+      Math.sin(dLon / 2);
+
+  const c = 2 * Math.atan2(Math.sqrt(hav), Math.sqrt(1 - hav));
+
+  return earthRadiusMiles * c;
+}
+
+function formatDistanceYards(miles) {
+  if (!Number.isFinite(Number(miles))) return "";
+
+  const yards = Math.round(Number(miles) * 1760);
+
+  if (yards < 1) return "0 yd";
+  if (yards === 1) return "1 yd";
+
+  return `${yards.toLocaleString()} yds`;
+}
+
+const MEASURE_MARKER_PRESS_SUPPRESS_MS = 450;
+const MEASURE_SAME_POINT_EPSILON = 0.00001;
+
+function getCleanMeasureCoordinate(coordinate) {
+  if (!coordinate) return null;
+
+  const latitude = cleanCoordinateNumber(coordinate.latitude ?? coordinate.lat);
+  const longitude = cleanCoordinateNumber(
+    coordinate.longitude ?? coordinate.lng ?? coordinate.lon
+  );
+
+  if (latitude === null || longitude === null) return null;
+
+  return { latitude, longitude };
+}
+
+function areSameMeasureCoordinate(a, b) {
+  const first = getCleanMeasureCoordinate(a);
+  const second = getCleanMeasureCoordinate(b);
+
+  if (!first || !second) return false;
+
+  return (
+    Math.abs(first.latitude - second.latitude) <= MEASURE_SAME_POINT_EPSILON &&
+    Math.abs(first.longitude - second.longitude) <= MEASURE_SAME_POINT_EPSILON
+  );
+}
+
 function getPinCoordinate(pin) {
   if (!pin) return null;
 
@@ -337,8 +484,10 @@ function normalizePin(pin) {
   if (!coordinate) return null;
 
   return {
-    ...pin,
-    coordinate,
+  ...pin,
+  type: normalizePinTypeName(pin.type),
+  pinType: normalizePinTypeName(pin.pinType || pin.type),
+  coordinate,
     coordinates: coordinate,
     coords: coordinate,
     location: coordinate,
@@ -356,16 +505,46 @@ function normalizePinForShare(pin) {
     return null;
   }
 
+  const isPathPin = isWaypointPathPin(pin);
+  const waypointPath = isPathPin ? getWaypointPathFromPin(pin) : null;
+  const pathCoordinates = waypointPath?.coordinates || getWaypointPathCoordinatesFromPin(pin);
+  const pathSummary = waypointPath ? getWaypointSummary(waypointPath) : null;
+
   return {
     ...pin,
     shareType: "pin",
     itemType: "shared_pin",
-    title: pin.title || pin.name || "Shared Pin",
-    name: pin.name || pin.title || "Shared Pin",
-    type: pin.type || "Spot",
-    pinType: pin.type || "Spot",
-    notes: pin.notes || pin.description || "",
-    description: pin.description || pin.notes || "",
+
+    itemKind: isPathPin ? "waypointPath" : pin.itemKind || "pin",
+    type: isPathPin ? "Path" : pin.type || "Spot",
+    pinType: isPathPin ? "Path" : pin.pinType || pin.type || "Spot",
+
+    title:
+      pin.title ||
+      pin.name ||
+      pathSummary?.title ||
+      (isPathPin ? "Mapped Path" : "Shared Pin"),
+
+    name:
+      pin.name ||
+      pin.title ||
+      pathSummary?.title ||
+      (isPathPin ? "Mapped Path" : "Shared Pin"),
+
+    notes:
+      pin.notes ||
+      pin.description ||
+      (pathSummary
+        ? `${pathSummary.distanceText} • ${pathSummary.pointCount} points`
+        : ""),
+
+    description:
+      pin.description ||
+      pin.notes ||
+      (pathSummary
+        ? `${pathSummary.distanceText} • ${pathSummary.pointCount} points`
+        : ""),
+
     coordinate,
     coordinates: coordinate,
     coords: coordinate,
@@ -374,15 +553,153 @@ function normalizePinForShare(pin) {
     longitude: coordinate.longitude,
     locationLatitude: coordinate.latitude,
     locationLongitude: coordinate.longitude,
+
+    waypointPathId:
+      pin.waypointPathId ||
+      waypointPath?.id ||
+      pin.waypointPath?.id ||
+      null,
+
+    waypointPath: waypointPath
+      ? {
+          ...waypointPath,
+          coordinates: pathCoordinates,
+        }
+      : pin.waypointPath || null,
+
+    pathCoordinates: Array.isArray(pathCoordinates) ? pathCoordinates : [],
+    pathPoints: Array.isArray(waypointPath?.points)
+      ? waypointPath.points
+      : Array.isArray(pin.pathPoints)
+        ? pin.pathPoints
+        : Array.isArray(pathCoordinates)
+          ? pathCoordinates
+          : [],
+
+    distanceMiles:
+      waypointPath?.distanceMiles ??
+      pin.distanceMiles ??
+      0,
+
+    pointCount:
+      waypointPath?.pointCount ??
+      pin.pointCount ??
+      (Array.isArray(pathCoordinates) ? pathCoordinates.length : 0),
+
     photos: Array.isArray(pin.photos) ? pin.photos : [],
     images: Array.isArray(pin.images)
       ? pin.images
       : Array.isArray(pin.photos)
         ? pin.photos
         : [],
+
     originalId: pin.id || null,
     originalCreatedAt: pin.createdAt || null,
     originalUpdatedAt: pin.updatedAt || null,
+  };
+}
+
+function isWaypointPathPin(pin) {
+  return (
+    pin?.itemKind === "waypointPath" ||
+    pin?.type === "Path" ||
+    pin?.pinType === "Path" ||
+    Array.isArray(pin?.pathCoordinates) ||
+    Array.isArray(pin?.waypointPath?.coordinates)
+  );
+}
+
+function getWaypointPathCoordinatesFromPin(pin) {
+  const raw =
+    Array.isArray(pin?.pathCoordinates)
+      ? pin.pathCoordinates
+      : Array.isArray(pin?.waypointPath?.coordinates)
+        ? pin.waypointPath.coordinates
+        : Array.isArray(pin?.waypointPath?.points)
+          ? pin.waypointPath.points
+          : Array.isArray(pin?.pathPoints)
+            ? pin.pathPoints
+            : [];
+
+  return raw.map(getCleanMeasureCoordinate).filter(Boolean);
+}
+
+function getWaypointPathFromPin(pin) {
+  if (!isWaypointPathPin(pin)) return null;
+
+  const coordinates = getWaypointPathCoordinatesFromPin(pin);
+
+  if (coordinates.length < 2) return null;
+
+  return {
+    ...(pin.waypointPath || {}),
+    id: pin.waypointPathId || pin.waypointPath?.id || pin.id,
+    pathId: pin.waypointPathId || pin.waypointPath?.id || pin.id,
+    title: pin.title || pin.waypointPath?.title || "Mapped Path",
+    points: Array.isArray(pin.pathPoints) ? pin.pathPoints : coordinates,
+    coordinates,
+    distanceMiles: Number.isFinite(Number(pin.distanceMiles))
+      ? Number(pin.distanceMiles)
+      : pin.waypointPath?.distanceMiles,
+    pointCount: Number.isFinite(Number(pin.pointCount))
+      ? Number(pin.pointCount)
+      : coordinates.length,
+    startedAt: pin.waypointPath?.startedAt || pin.createdAt || Date.now(),
+    createdAt: pin.createdAt || pin.waypointPath?.createdAt || Date.now(),
+    updatedAt: pin.updatedAt || Date.now(),
+  };
+}
+
+function buildWaypointPathPin(path) {
+  const coordinates = Array.isArray(path?.coordinates)
+    ? path.coordinates.map(getCleanMeasureCoordinate).filter(Boolean)
+    : Array.isArray(path?.points)
+      ? path.points.map(getCleanMeasureCoordinate).filter(Boolean)
+      : [];
+
+  if (!path?.id || coordinates.length < 2) return null;
+
+  const summary = getWaypointSummary(path);
+  const start = coordinates[0];
+  const title = summary?.title || path.title || "Mapped Path";
+
+  return {
+    id: `path-pin-${path.id}`,
+    itemKind: "waypointPath",
+    type: "Path",
+    pinType: "Path",
+    title,
+    name: title,
+    notes: `${summary.distanceText} • ${summary.pointCount} points`,
+    description: `${summary.distanceText} • ${summary.pointCount} points`,
+
+    coordinate: start,
+    coordinates: start,
+    coords: start,
+    location: start,
+    latitude: start.latitude,
+    longitude: start.longitude,
+    locationLatitude: start.latitude,
+    locationLongitude: start.longitude,
+
+    waypointPathId: path.id,
+    waypointPath: {
+      ...path,
+      coordinates,
+    },
+    pathPoints: Array.isArray(path.points) ? path.points : coordinates,
+    pathCoordinates: coordinates,
+
+    distanceMiles: path.distanceMiles || 0,
+    pointCount: summary.pointCount || coordinates.length,
+
+    shareType: "pin",
+    itemType: "shared_pin",
+    icon: "👣",
+    emoji: "👣",
+
+    createdAt: path.createdAt || path.startedAt || Date.now(),
+    updatedAt: Date.now(),
   };
 }
 
@@ -407,6 +724,57 @@ function getPropertyFeatureId(feature, index = 0) {
     feature?.properties?.ducksmartParcelNumber ||
     `property-result-${index}`
   );
+}
+
+function getPropertyFeatureCoordinate(feature) {
+  const props = feature?.properties || {};
+  const fields = props.fields || {};
+  const center = props.ducksmartCenter;
+
+  const sources = [center, props, fields, feature].filter(Boolean);
+
+  for (const source of sources) {
+    const latitude =
+      source.latitude ??
+      source.lat ??
+      source.locationLatitude ??
+      source.centerLatitude;
+
+    const longitude =
+      source.longitude ??
+      source.lng ??
+      source.lon ??
+      source.locationLongitude ??
+      source.centerLongitude;
+
+    const latNum = cleanCoordinateNumber(latitude);
+    const lngNum = cleanCoordinateNumber(longitude);
+
+    if (latNum !== null && lngNum !== null) {
+      return {
+        latitude: latNum,
+        longitude: lngNum,
+      };
+    }
+  }
+
+  if (
+    feature?.geometry?.type === "Point" &&
+    Array.isArray(feature.geometry.coordinates) &&
+    feature.geometry.coordinates.length >= 2
+  ) {
+    const lngNum = cleanCoordinateNumber(feature.geometry.coordinates[0]);
+    const latNum = cleanCoordinateNumber(feature.geometry.coordinates[1]);
+
+    if (latNum !== null && lngNum !== null) {
+      return {
+        latitude: latNum,
+        longitude: lngNum,
+      };
+    }
+  }
+
+  return null;
 }
 
 function getPropertyDetailRows(feature) {
@@ -461,7 +829,13 @@ function normalizeFeatureCollection(result) {
 
 export default function MapScreen({ pins = [], setPins, logs = [] }) {
   const navigation = useNavigation();
-  const { isPro, purchase } = usePremium();
+  const {
+  isPro,
+  purchase,
+  loading: premiumLoading,
+  annualPackage,
+  monthlyPackage,
+} = usePremium();
   const { user } = useAuth();
 
   const mapRef = useRef(null);
@@ -470,10 +844,16 @@ export default function MapScreen({ pins = [], setPins, logs = [] }) {
   const screenViewLoggedRef = useRef(false);
   const mapMoveCountRef = useRef(0);
   const lastMapMoveLoggedAtRef = useRef(0);
-  const mapSessionStartedAtRef = useRef(Date.now());
-  const lastPinsCountRef = useRef(pins.length);
-
-  const snapPoints = useMemo(() => [128, 240, "60%"], []);
+const mapSessionStartedAtRef = useRef(Date.now());
+const lastPinsCountRef = useRef(pins.length);
+const ignoreNextMeasureMapPressUntilRef = useRef(0);
+const measureStartRef = useRef(null);
+const measurePointsRef = useRef([]);
+const waypointControllerRef = useRef(null);
+const mapToolLabelTimerRef = useRef(null);
+const toggleRefreshNoticeTimerRef = useRef(null);
+const initialLocationCenteredRef = useRef(false);
+  const snapPoints = useMemo(() => [118, 260, "65%"], []);
 
   const [sheetIndex, setSheetIndex] = useState(SNAP_COLLAPSED);
   const [permissionState, setPermissionState] = useState("unknown");
@@ -497,15 +877,44 @@ export default function MapScreen({ pins = [], setPins, logs = [] }) {
   const [showRadar, setShowRadar] = useState(false);
   const [radarTileUrl, setRadarTileUrl] = useState(null);
 
-  const [propertySearchVisible, setPropertySearchVisible] = useState(false);
-  const [propertySearchResults, setPropertySearchResults] = useState(null);
-  const [selectedPropertyFeatureId, setSelectedPropertyFeatureId] = useState(null);
-  const [expandedPropertyFeatureId, setExpandedPropertyFeatureId] = useState(null);
-  const [parcelLookupLoading, setParcelLookupLoading] = useState(false);
+const [propertySearchVisible, setPropertySearchVisible] = useState(false);
+const [propertySearchResults, setPropertySearchResults] = useState(null);
+const [selectedPropertyFeatureId, setSelectedPropertyFeatureId] = useState(null);
+const [expandedPropertyFeatureId, setExpandedPropertyFeatureId] = useState(null);
+const [parcelLookupLoading, setParcelLookupLoading] = useState(false);
+const [showPropertyHint, setShowPropertyHint] = useState(false);
+
+const [showPublicLand, setShowPublicLand] = useState(false);
+const [publicLandGeojson, setPublicLandGeojson] = useState(null);
+const [publicLandLoading, setPublicLandLoading] = useState(false);
+const [showPublicLandHint, setShowPublicLandHint] = useState(false);
+
+const [showWaterLevels, setShowWaterLevels] = useState(false);
+const [waterLevelStations, setWaterLevelStations] = useState([]);
+const [waterLevelLoading, setWaterLevelLoading] = useState(false);
+const [showWaterLevelHint, setShowWaterLevelHint] = useState(false);
+const [selectedWaterLevelStation, setSelectedWaterLevelStation] = useState(null);
+
+const [measureMode, setMeasureMode] = useState(false);
+const [measurePoints, setMeasurePoints] = useState([]);
+const [measureLabel, setMeasureLabel] = useState("");
+
+const [waypointMode, setWaypointMode] = useState(false);
+const [waypointLivePoints, setWaypointLivePoints] = useState([]);
+const [waypointSavedPaths, setWaypointSavedPaths] = useState([]);
+const [showWaypoints, setShowWaypoints] = useState(true);
+const [selectedWaypointPathId, setSelectedWaypointPathId] = useState(null);
+const [followBackMode, setFollowBackMode] = useState(false);
+const [waypointStatus, setWaypointStatus] = useState("");
+const [waypointSaving, setWaypointSaving] = useState(false);
+const [mapToolLabel, setMapToolLabel] = useState(null);
+const [toggleRefreshNotice, setToggleRefreshNotice] = useState(false);
+
 
   const [sharingPin, setSharingPin] = useState(false);
   const [pinStatResets, setPinStatResets] = useState({});
   const [pinSeasonArchives, setPinSeasonArchives] = useState({});
+  const [historySeasonState, setHistorySeasonState] = useState(createDefaultHistorySeasonState());
   const [selectedPinId, setSelectedPinId] = useState(null);
 
   const activePins = useMemo(
@@ -513,7 +922,7 @@ export default function MapScreen({ pins = [], setPins, logs = [] }) {
       pins
         .map(normalizePin)
         .filter(Boolean)
-        .filter((pin) => !pin?.archivedAt),
+        .filter((pin) => !pin?.deletedAt && !pin?.removedAt),
     [pins]
   );
 
@@ -521,6 +930,73 @@ export default function MapScreen({ pins = [], setPins, logs = [] }) {
     () => activePins.find((p) => p.id === selectedPinId) || null,
     [activePins, selectedPinId]
   );
+
+const selectedWaypointPath = useMemo(
+  () => waypointSavedPaths.find((path) => path.id === selectedWaypointPathId) || null,
+  [waypointSavedPaths, selectedWaypointPathId]
+);
+
+const selectedWaypointCoordinates = useMemo(() => {
+  if (!selectedWaypointPath) return [];
+
+  return followBackMode
+    ? getFollowBackCoordinates(selectedWaypointPath)
+    : selectedWaypointPath.coordinates || [];
+}, [selectedWaypointPath, followBackMode]);
+
+const waypointPathPins = useMemo(
+  () => activePins.filter(isWaypointPathPin),
+  [activePins]
+);
+
+const normalPinRows = useMemo(
+  () => activePins.filter((pin) => !isWaypointPathPin(pin)),
+  [activePins]
+);
+
+const mappedPathRows = useMemo(() => {
+  const rowsById = new Map();
+
+  const addPathRow = (path, source = "saved") => {
+    if (!path?.id) return;
+
+    const id = String(path.id);
+    const existing = rowsById.get(id);
+
+    const nextRow = {
+      id,
+      path,
+      source,
+      summary: getWaypointSummary(path),
+      updatedAt: Number(path.updatedAt || path.createdAt || path.startedAt || 0),
+    };
+
+    if (!existing || nextRow.updatedAt > existing.updatedAt) {
+      rowsById.set(id, nextRow);
+    }
+  };
+
+  waypointSavedPaths.forEach((path) => {
+    addPathRow(path, "saved");
+  });
+
+  waypointPathPins
+    .map(getWaypointPathFromPin)
+    .filter(Boolean)
+    .forEach((path) => {
+      addPathRow(path, "pin");
+    });
+
+  return Array.from(rowsById.values()).sort(
+    (a, b) => Number(b.updatedAt || 0) - Number(a.updatedAt || 0)
+  );
+}, [waypointSavedPaths, waypointPathPins]);
+
+const selectedPinIsWaypointPath = isWaypointPathPin(selectedPin);
+
+const selectedPinWaypointPath = useMemo(() => {
+  return selectedPinIsWaypointPath ? getWaypointPathFromPin(selectedPin) : null;
+}, [selectedPinIsWaypointPath, selectedPin]);
 
   const propertySearchFeatures = useMemo(
     () =>
@@ -545,62 +1021,129 @@ export default function MapScreen({ pins = [], setPins, logs = [] }) {
     [selectedPropertyFeature]
   );
 
-    const selectedPinHuntLogs = useMemo(() => {
-    if (!selectedPinId) return [];
+const selectedPinHuntLogs = useMemo(() => {
+  if (!selectedPinId) return [];
 
-    return logs
-      .filter((log) => log.pinId === selectedPinId)
-      .filter(isHuntLogEntry)
-      .sort((a, b) => getLogTimestamp(b) - getLogTimestamp(a))
-      .slice(0, 4);
-  }, [logs, selectedPinId]);
+  const currentSeasonStart = Number(
+    historySeasonState.currentSeasonStart || getDefaultSeasonStartTimestamp()
+  );
 
-  const selectedPinScoutLogs = useMemo(() => {
-    if (!selectedPinId) return [];
+  return logs
+    .filter((log) => log.pinId === selectedPinId)
+    .filter(isHuntLogEntry)
+    .filter((log) => getLogTimestamp(log) >= currentSeasonStart)
+    .sort((a, b) => getLogTimestamp(b) - getLogTimestamp(a))
+    .slice(0, 4);
+}, [logs, selectedPinId, historySeasonState.currentSeasonStart]);
 
-    return logs
-      .filter((log) => log.pinId === selectedPinId)
-      .filter(isScoutLogEntry)
-      .sort((a, b) => getLogTimestamp(b) - getLogTimestamp(a))
-      .slice(0, 4);
-  }, [logs, selectedPinId]);
+const selectedPinScoutLogs = useMemo(() => {
+  if (!selectedPinId) return [];
 
-  const pinStats = useMemo(() => {
-    if (!selectedPinId) return null;
+  const currentSeasonStart = Number(
+    historySeasonState.currentSeasonStart || getDefaultSeasonStartTimestamp()
+  );
 
-    const nowYear = new Date().getFullYear();
-    const lastYear = nowYear - 1;
-    const resetAt = pinStatResets[selectedPinId] || null;
-    const archivedLastSeason = pinSeasonArchives[selectedPinId]?.lastSeason || null;
+  return logs
+    .filter((log) => log.pinId === selectedPinId)
+    .filter(isScoutLogEntry)
+    .filter((log) => getLogTimestamp(log) >= currentSeasonStart)
+    .sort((a, b) => getLogTimestamp(b) - getLogTimestamp(a))
+    .slice(0, 4);
+}, [logs, selectedPinId, historySeasonState.currentSeasonStart]);
+  
+const pinStats = useMemo(() => {
+  if (!selectedPinId || selectedPinIsWaypointPath) return null;
 
-        const pinLogs = logs
-      .filter((log) => log.pinId === selectedPinId)
-      .filter(isHuntLogEntry);
+  const currentSeasonStart = Number(
+    historySeasonState.currentSeasonStart || getDefaultSeasonStartTimestamp()
+  );
 
-    const currentSeasonLogs = resetAt
-      ? pinLogs.filter((log) => getLogTimestamp(log) >= resetAt)
-      : pinLogs.filter((log) => getLogYear(log) === nowYear);
+  const lastSeasonStart = historySeasonState.lastSeasonStart
+    ? Number(historySeasonState.lastSeasonStart)
+    : null;
 
-    const lastYearLogs = pinLogs.filter((log) => getLogYear(log) === lastYear);
+  const lastSeasonClosedAt = historySeasonState.lastSeasonClosedAt
+    ? Number(historySeasonState.lastSeasonClosedAt)
+    : null;
 
-    const previousSummary =
-      archivedLastSeason?.summary && typeof archivedLastSeason.summary === "object"
-        ? archivedLastSeason.summary
-        : summarizePinLogs(lastYearLogs);
+  const pinLogs = logs
+    .filter((log) => log.pinId === selectedPinId)
+    .filter(isHuntLogEntry);
 
-    return {
-      currentYear: nowYear,
-      lastYear,
-      resetAt,
-      lastSeasonClosedAt: archivedLastSeason?.closedAt || null,
-      current: summarizePinLogs(currentSeasonLogs),
-      previous: previousSummary,
-    };
-  }, [selectedPinId, logs, pinStatResets, pinSeasonArchives]);
+  const currentSeasonLogs = pinLogs.filter(
+    (log) => getLogTimestamp(log) >= currentSeasonStart
+  );
 
-  const showFloatingAddButton = !isAddMode && !selectedPin;
-  const floatingAddBottom = sheetIndex === SNAP_COLLAPSED ? 142 : 292;
-  const overlayBadgeBottom = sheetIndex === SNAP_COLLAPSED ? 96 : 248;
+  const lastSeasonLogs =
+    lastSeasonStart && lastSeasonClosedAt
+      ? pinLogs.filter((log) => {
+          const ts = getLogTimestamp(log);
+          return ts >= lastSeasonStart && ts < lastSeasonClosedAt;
+        })
+      : [];
+
+  return {
+    currentYear: new Date(currentSeasonStart).getFullYear(),
+    lastYear: lastSeasonStart
+      ? new Date(lastSeasonStart).getFullYear()
+      : new Date().getFullYear() - 1,
+    resetAt: currentSeasonStart,
+    lastSeasonClosedAt: lastSeasonClosedAt || null,
+    current: summarizePinLogs(currentSeasonLogs),
+    previous: summarizePinLogs(lastSeasonLogs),
+  };
+}, [selectedPinId, selectedPinIsWaypointPath, logs, historySeasonState]);
+
+const showFloatingAddButton = !isAddMode && !selectedPin;
+const floatingAddBottom = sheetIndex === SNAP_COLLAPSED ? 142 : 292;
+const overlayBadgeBottom = sheetIndex === SNAP_COLLAPSED ? 96 : 248;
+const publicLandRegularGeojson = useMemo(() => {
+  const features = Array.isArray(publicLandGeojson?.features)
+    ? publicLandGeojson.features
+    : [];
+
+  return {
+    type: "FeatureCollection",
+    features: features.filter(
+      (feature) => feature?.properties?.ducksmartLandCategory !== "wma"
+    ),
+  };
+}, [publicLandGeojson]);
+
+const publicLandWmaGeojson = useMemo(() => {
+  const features = Array.isArray(publicLandGeojson?.features)
+    ? publicLandGeojson.features
+    : [];
+
+  return {
+    type: "FeatureCollection",
+    features: features.filter(
+      (feature) => feature?.properties?.ducksmartLandCategory === "wma"
+    ),
+  };
+}, [publicLandGeojson]);
+
+const publicLandCount = Array.isArray(publicLandRegularGeojson?.features)
+  ? publicLandRegularGeojson.features.length
+  : 0;
+
+const publicWmaCount = Array.isArray(publicLandWmaGeojson?.features)
+  ? publicLandWmaGeojson.features.length
+  : 0;
+
+const hideMapToolsForSheet =
+  sheetIndex !== SNAP_COLLAPSED || isAddMode || !!selectedPin;
+const propertyTileOpacity = useMemo(() => {
+  const delta = Number(region?.latitudeDelta || 0);
+
+  if (!Number.isFinite(delta) || delta <= 0) return 0.65;
+  if (delta > 0.25) return 0.18;
+  if (delta > 0.12) return 0.28;
+  if (delta > 0.06) return 0.42;
+  if (delta > 0.025) return 0.62;
+
+  return 0.88;
+}, [region?.latitudeDelta]);
 
   const logoSource =
     ASSETS?.logo ||
@@ -706,49 +1249,71 @@ export default function MapScreen({ pins = [], setPins, logs = [] }) {
     }
   }, [pins.length, trackMapEvent]);
 
+useEffect(() => {
+  if (!isPro && showParcels) {
+    setShowParcels(false);
+    setPropertySearchResults(null);
+    setSelectedPropertyFeatureId(null);
+    setExpandedPropertyFeatureId(null);
+    setPropertySearchVisible(false);
+    trackMapEvent("property_lines_auto_disabled_free");
+  }
+  if (!isPro && showWaterLevels) {
+    setShowWaterLevels(false);
+    setShowWaterLevelHint(false);
+    setSelectedWaterLevelStation(null);
+    setWaterLevelStations([]);
+    trackMapEvent("water_levels_auto_disabled_free");
+  }
+  if (!isPro && showPublicLand) {
+    setShowPublicLand(false);
+    setPublicLandGeojson(null);
+    trackMapEvent("public_land_auto_disabled_free");
+  }
+}, [isPro, showParcels, showPublicLand, trackMapEvent]);
+
   useEffect(() => {
-    if (!isPro && showParcels) {
-      setShowParcels(false);
-      setPropertySearchResults(null);
-      setSelectedPropertyFeatureId(null);
-      setExpandedPropertyFeatureId(null);
-      setPropertySearchVisible(false);
-      trackMapEvent("property_lines_auto_disabled_free");
+  let mounted = true;
+
+  async function loadMapSeasonData() {
+    try {
+      const [rawResets, rawArchives, rawHistorySeason] = await Promise.all([
+        AsyncStorage.getItem(PIN_STAT_RESETS_KEY),
+        AsyncStorage.getItem(PIN_SEASON_ARCHIVES_KEY),
+        AsyncStorage.getItem(HISTORY_SEASON_STATE_KEY),
+      ]);
+
+      const parsedResets = rawResets ? JSON.parse(rawResets) : {};
+      const parsedArchives = rawArchives ? JSON.parse(rawArchives) : {};
+      const parsedHistorySeason = rawHistorySeason ? JSON.parse(rawHistorySeason) : null;
+
+      if (!mounted) return;
+
+      setPinStatResets(
+        parsedResets && typeof parsedResets === "object" ? parsedResets : {}
+      );
+      setPinSeasonArchives(
+        parsedArchives && typeof parsedArchives === "object" ? parsedArchives : {}
+      );
+      setHistorySeasonState(normalizeHistorySeasonState(parsedHistorySeason));
+    } catch {
+      if (!mounted) return;
+
+      setPinStatResets({});
+      setPinSeasonArchives({});
+      setHistorySeasonState(createDefaultHistorySeasonState());
     }
-  }, [isPro, showParcels, trackMapEvent]);
+  }
 
-  useEffect(() => {
-    let mounted = true;
+  loadMapSeasonData();
 
-    (async () => {
-      try {
-        const [rawResets, rawArchives] = await Promise.all([
-          AsyncStorage.getItem(PIN_STAT_RESETS_KEY),
-          AsyncStorage.getItem(PIN_SEASON_ARCHIVES_KEY),
-        ]);
+  const unsubscribe = navigation.addListener?.("focus", loadMapSeasonData);
 
-        const parsedResets = rawResets ? JSON.parse(rawResets) : {};
-        const parsedArchives = rawArchives ? JSON.parse(rawArchives) : {};
-
-        if (!mounted) return;
-
-        setPinStatResets(
-          parsedResets && typeof parsedResets === "object" ? parsedResets : {}
-        );
-        setPinSeasonArchives(
-          parsedArchives && typeof parsedArchives === "object" ? parsedArchives : {}
-        );
-      } catch {
-        if (!mounted) return;
-        setPinStatResets({});
-        setPinSeasonArchives({});
-      }
-    })();
-
-    return () => {
-      mounted = false;
-    };
-  }, []);
+  return () => {
+    mounted = false;
+    if (typeof unsubscribe === "function") unsubscribe();
+  };
+}, [navigation]);
 
   const loadRadar = useCallback(async () => {
     try {
@@ -774,6 +1339,9 @@ export default function MapScreen({ pins = [], setPins, logs = [] }) {
   }, [loadRadar]);
 
   useEffect(() => {
+  if (initialLocationCenteredRef.current) return;
+  initialLocationCenteredRef.current = true;
+
     (async () => {
       try {
         const { status } = await Location.requestForegroundPermissionsAsync();
@@ -823,10 +1391,12 @@ export default function MapScreen({ pins = [], setPins, logs = [] }) {
     })();
   }, [trackMapEvent]);
   const lookupParcelAtCoordinate = useCallback(
-    async (coordinate) => {
-      if (!coordinate || parcelLookupLoading) return;
+async (coordinate) => {
+  if (showPropertyHint) setShowPropertyHint(false);
 
-      if (!showParcels) return;
+  if (!coordinate || parcelLookupLoading) return;
+
+  if (!showParcels) return;
 
       if (!isPro) {
         setShowParcels(false);
@@ -980,6 +1550,225 @@ export default function MapScreen({ pins = [], setPins, logs = [] }) {
     [trackMapEvent, userLoc, region]
   );
 
+function openProPurchase() {
+  purchase(annualPackage || monthlyPackage);
+}
+
+function blockPremiumMapFeature(featureName) {
+  if (premiumLoading) {
+    Alert.alert(
+      "Checking Subscription",
+      "DuckSmart is still checking your subscription. Please try again in a second."
+    );
+    return true;
+  }
+
+  if (!isPro) {
+    trackMapEvent("premium_map_feature_paywall_hit", {
+      featureName,
+      ...getRegionAnalytics(region),
+    });
+
+    Alert.alert(
+      "Pro Feature",
+      `${featureName} is included with DuckSmart Pro.`,
+      [
+        { text: "Not Now", style: "cancel" },
+        { text: "Upgrade to Pro", onPress: openProPurchase },
+      ]
+    );
+
+    return true;
+  }
+
+  return false;
+}
+
+async function togglePublicLand() {
+  async function togglePublicLand() {
+  if (blockPremiumMapFeature("Public land overlays")) return;
+
+  if (showPublicLand) {
+    setShowPublicLand(false);
+    setShowPublicLandHint(false);
+
+    trackMapEvent("public_land_disabled", {
+      source: "map_button",
+      ...getRegionAnalytics(region),
+    });
+
+    return;
+  }
+
+    Alert.alert(
+      "Pro Feature",
+      "Public land overlays are included with DuckSmart Pro.",
+      [
+        { text: "Not Now", style: "cancel" },
+        { text: "Upgrade to Pro", onPress: purchase },
+      ]
+    );
+
+    return;
+  }
+
+if (showPublicLand) {
+  setShowPublicLand(false);
+  setShowPublicLandHint(false);
+
+  trackMapEvent("public_land_disabled", {
+    source: "map_button",
+    ...getRegionAnalytics(region),
+  });
+
+  return;
+}
+
+  try {
+    setPublicLandLoading(true);
+
+    const geojson = await fetchPublicPropertyGeojson(region);
+
+setPublicLandGeojson(geojson);
+setShowPublicLand(true);
+setShowPublicLandHint(true);
+
+    trackMapEvent("public_land_enabled", {
+      source: "map_button",
+      featuresCount: geojson?.features?.length || 0,
+      ...getRegionAnalytics(region),
+    });
+  } catch (err) {
+    console.error("DuckSmart public land overlay error:", err);
+
+    setPublicLandGeojson({
+      type: "FeatureCollection",
+      features: [],
+    });
+
+    setShowPublicLand(true);
+setShowPublicLandHint(true);
+
+    trackMapEvent("public_land_failed", {
+      message: err?.message || "Unknown error",
+    });
+  } finally {
+    setPublicLandLoading(false);
+  }
+}
+
+function clearMeasure() {
+  ignoreNextMeasureMapPressUntilRef.current = 0;
+  measureStartRef.current = null;
+  measurePointsRef.current = [];
+  setMeasurePoints([]);
+  setMeasureLabel("");
+}
+
+function toggleMeasureMode() {
+  const next = !measureMode;
+
+  if (!next) {
+    clearMeasure();
+  } else {
+ignoreNextMeasureMapPressUntilRef.current = 0;
+measureStartRef.current = null;
+measurePointsRef.current = [];
+setMeasurePoints([]);
+setMeasureLabel("Tap start point");
+setSelectedPinId(null);
+setIsAddMode(false);
+setDraftCoord(null);
+  }
+
+  setMeasureMode(next);
+
+  trackMapEvent(next ? "measure_mode_enabled" : "measure_mode_disabled", {
+    source: "map_button",
+    ...getRegionAnalytics(region),
+  });
+}
+
+function addMeasureCoordinate(coordinate, source = "map") {
+  const cleanCoordinate = getCleanMeasureCoordinate(coordinate);
+  if (!cleanCoordinate) return;
+
+  const existingPoints = Array.isArray(measurePointsRef.current)
+    ? measurePointsRef.current
+    : [];
+
+  const start =
+    measureStartRef.current ||
+    existingPoints[0] ||
+    measurePoints[0] ||
+    null;
+
+  if (!start) {
+    measureStartRef.current = cleanCoordinate;
+    measurePointsRef.current = [cleanCoordinate];
+    setMeasurePoints([cleanCoordinate]);
+    setMeasureLabel("Start set — tap end point");
+
+    trackMapEvent("measure_first_point_selected", {
+      source,
+      ...getRegionAnalytics(region),
+    });
+
+    return;
+  }
+
+  if (areSameMeasureCoordinate(start, cleanCoordinate)) {
+    setMeasureLabel("Tap a different end point");
+    return;
+  }
+
+  const miles = getDistanceMiles(start, cleanCoordinate);
+  const yards = Number.isFinite(miles) ? Math.round(miles * 1760) : null;
+  const label = yards === null ? "Distance unavailable" : `${yards.toLocaleString()} yds`;
+
+  const nextPoints = [start, cleanCoordinate];
+
+  measureStartRef.current = null;
+  measurePointsRef.current = nextPoints;
+  setMeasurePoints(nextPoints);
+  setMeasureLabel(label);
+
+  trackMapEvent("measure_completed", {
+    source,
+    distanceMiles: Number.isFinite(miles) ? Number(miles.toFixed(3)) : null,
+    distanceYards: yards,
+    ...getRegionAnalytics(region),
+  });
+}
+
+function measureCurrentLocationToPin(pin) {
+  const start = getCleanMeasureCoordinate(userLoc);
+  const end = getCleanMeasureCoordinate(getPinCoordinate(pin));
+
+  if (!start || !end) {
+    Alert.alert(
+      "Distance Unavailable",
+      "Current location or pin GPS is missing."
+    );
+    return;
+  }
+
+  const miles = getDistanceMiles(start, end);
+
+  const nextPoints = [start, end];
+
+setMeasureMode(true);
+measurePointsRef.current = nextPoints;
+setMeasurePoints(nextPoints);
+setMeasureLabel(formatDistanceYards(miles) || "Distance unavailable");
+
+  trackMapEvent("measure_user_to_pin", {
+    distanceMiles: Number.isFinite(miles) ? Number(miles.toFixed(3)) : null,
+    distanceYards: Number.isFinite(miles) ? Math.round(miles * 1760) : null,
+    ...getRegionAnalytics(region),
+  });
+}
+
   async function toggleRadar() {
     if (showRadar) {
       closeRadar("top_button");
@@ -1007,6 +1796,440 @@ export default function MapScreen({ pins = [], setPins, logs = [] }) {
     });
   }
 
+
+async function toggleWaterLevels() {
+  if (showWaterLevels) {
+  setShowWaterLevels(false);
+  setShowWaterLevelHint(false);
+  setSelectedWaterLevelStation(null);
+
+    trackMapEvent("water_levels_disabled", {
+      source: "map_button",
+      ...getRegionAnalytics(region),
+    });
+
+    return;
+  }
+
+  try {
+    setWaterLevelLoading(true);
+    setShowPublicLandHint(false);
+
+    const result = await fetchWaterLevelsForRegion(region, {
+      maxSites: 20,
+      maxStations: 8,
+      timeoutMs: 9000,
+    });
+
+    const stations = Array.isArray(result?.stations) ? result.stations : [];
+
+    setWaterLevelStations(stations);
+    setShowWaterLevels(true);
+    setShowWaterLevelHint(true);
+
+    trackMapEvent("water_levels_enabled", {
+      source: "map_button",
+      stationsCount: stations.length,
+      freshwaterCount: result?.freshwater?.length || 0,
+      tideCount: result?.tides?.length || 0,
+      errorsCount: result?.errors?.length || 0,
+      ...getRegionAnalytics(region),
+    });
+
+    if (stations.length === 0) {
+      Alert.alert(
+        "No Water Levels Found",
+        "No USGS or NOAA water-level stations were found in this map area. Try zooming out or moving near a river, lake, reservoir, or coast."
+      );
+    }
+  } catch (err) {
+    console.error("DuckSmart water levels error:", err);
+
+    setWaterLevelStations([]);
+    setShowWaterLevels(true);
+    setShowWaterLevelHint(true);
+
+    trackMapEvent("water_levels_failed", {
+      message: err?.message || "Unknown error",
+      ...getRegionAnalytics(region),
+    });
+
+    Alert.alert(
+      "Water Levels Failed",
+      err?.message || "Could not load water levels right now."
+    );
+  } finally {
+    setWaterLevelLoading(false);
+  }
+}
+
+async function toggleWaypointMapping() {
+  if (waypointSaving) return;
+
+  if (waypointMode) {
+    await stopWaypointMapping();
+    return;
+  }
+
+  Alert.alert(
+    "Start Mapping Path?",
+    "Are you sure you want to begin mapping a path?",
+    [
+      {
+        text: "Cancel",
+        style: "cancel",
+      },
+      {
+        text: "Start",
+        onPress: async () => {
+          await startWaypointMapping();
+        },
+      },
+    ]
+  );
+}
+
+async function startWaypointMapping() {
+  try {
+    setWaypointSaving(true);
+    setMeasureMode(false);
+    clearMeasure();
+    setSelectedPinId(null);
+    setIsAddMode(false);
+    setDraftCoord(null);
+    setFollowBackMode(false);
+    setSelectedWaypointPathId(null);
+    setWaypointLivePoints([]);
+    setWaypointStatus("Starting GPS...");
+
+    const controller = await startWaypointRecording({
+      userId: user?.uid,
+      onPointsChange: (points) => {
+        setWaypointLivePoints(points);
+      },
+      onStatus: (message) => {
+        setWaypointStatus(message);
+      },
+      onError: (err) => {
+        setWaypointStatus(err?.message || "Waypoint mapping failed.");
+      },
+    });
+
+    waypointControllerRef.current = controller;
+    setWaypointMode(true);
+    setWaypointStatus("Mapping path...");
+
+    trackMapEvent("waypoint_mapping_started", {
+      source: "map_button",
+      ...getRegionAnalytics(region),
+    });
+  } catch (err) {
+    Alert.alert(
+      "Waypoint Mapping Failed",
+      err?.message || "Could not start GPS path mapping."
+    );
+
+    setWaypointMode(false);
+    setWaypointLivePoints([]);
+    setWaypointStatus("");
+  } finally {
+    setWaypointSaving(false);
+  }
+}
+
+async function stopWaypointMapping() {
+  const controller = waypointControllerRef.current;
+
+  const currentSession =
+    controller && typeof controller.getSession === "function"
+      ? controller.getSession()
+      : null;
+
+  const currentPoints = Array.isArray(currentSession?.points)
+    ? currentSession.points
+    : Array.isArray(waypointLivePoints)
+      ? waypointLivePoints
+      : [];
+
+  const shouldSave = currentPoints.length >= 2;
+
+  try {
+    setWaypointSaving(true);
+    setWaypointStatus(shouldSave ? "Saving path..." : "Stopping path...");
+
+    let savedPath = null;
+
+    if (controller) {
+      if (shouldSave) {
+        savedPath = await stopWaypointRecording(controller, { save: true });
+      } else if (typeof controller.cancel === "function") {
+        await controller.cancel();
+      } else {
+        await stopWaypointRecording(controller, { save: false });
+      }
+    }
+
+    waypointControllerRef.current = null;
+    setWaypointMode(false);
+    setWaypointLivePoints([]);
+    setWaypointStatus("");
+    setWaypointSaving(false);
+    setFollowBackMode(false);
+
+    if (shouldSave && savedPath?.id) {
+  const pathPin = saveWaypointPathAsPin(savedPath);
+
+  await reloadWaypointPaths();
+  setSelectedWaypointPathId(savedPath.id);
+
+  if (pathPin?.id) {
+    setSelectedPinId(pathPin.id);
+    setIsEditingPin(false);
+    bottomSheetRef.current?.snapToIndex(SNAP_EXPANDED);
+  }
+} else {
+  setSelectedWaypointPathId(null);
+}
+
+    trackMapEvent(
+      shouldSave ? "waypoint_mapping_stopped" : "waypoint_mapping_cancelled",
+      {
+        pointCount: currentPoints.length,
+        saved: savedPath?.id ? 1 : 0,
+        ...getRegionAnalytics(region),
+      }
+    );
+  } catch (err) {
+    console.warn("Waypoint stop failed:", err?.message || err);
+
+    waypointControllerRef.current = null;
+    setWaypointMode(false);
+    setWaypointLivePoints([]);
+    setWaypointStatus("");
+    setWaypointSaving(false);
+    setSelectedWaypointPathId(null);
+    setFollowBackMode(false);
+  }
+}
+
+function getCleanWaypointPathCoordinates(path) {
+  const raw = Array.isArray(path?.coordinates)
+    ? path.coordinates
+    : Array.isArray(path?.points)
+      ? path.points
+      : [];
+
+  return raw.map(getCleanMeasureCoordinate).filter(Boolean);
+}
+
+function zoomToWaypointPath(path, useFollowBack = false) {
+  const coordinates = useFollowBack
+    ? getFollowBackCoordinates(path).map(getCleanMeasureCoordinate).filter(Boolean)
+    : getCleanWaypointPathCoordinates(path);
+
+  if (!coordinates.length) return;
+
+  requestAnimationFrame(() => {
+    if (coordinates.length >= 2 && typeof mapRef.current?.fitToCoordinates === "function") {
+      mapRef.current.fitToCoordinates(coordinates, {
+        edgePadding: {
+          top: 110,
+          right: 70,
+          bottom: sheetIndex === SNAP_COLLAPSED ? 190 : 340,
+          left: 70,
+        },
+        animated: true,
+      });
+
+      return;
+    }
+
+    const first = coordinates[0];
+
+    const nextRegion = {
+      latitude: first.latitude,
+      longitude: first.longitude,
+      latitudeDelta: 0.018,
+      longitudeDelta: 0.018,
+    };
+
+    setRegion(nextRegion);
+    mapRef.current?.animateToRegion(nextRegion, 500);
+  });
+}
+
+function showWaypointPath(path) {
+  if (!path?.id) return;
+
+  setShowWaypoints(true);
+  setSelectedWaypointPathId(path.id);
+  setFollowBackMode(false);
+
+  zoomToWaypointPath(path, false);
+
+  trackMapEvent("waypoint_path_shown", {
+    pathId: path.id,
+    pointCount: Array.isArray(path.coordinates) ? path.coordinates.length : 0,
+    ...getRegionAnalytics(region),
+  });
+}
+
+function followWaypointPathBack(path) {
+  if (!path?.id) return;
+
+  setShowWaypoints(true);
+  setSelectedWaypointPathId(path.id);
+  setFollowBackMode(true);
+
+  zoomToWaypointPath(path, true);
+
+  trackMapEvent("waypoint_path_follow_back", {
+    pathId: path.id,
+    pointCount: Array.isArray(path.coordinates) ? path.coordinates.length : 0,
+    ...getRegionAnalytics(region),
+  });
+}
+
+function saveWaypointPathAsPin(savedPath) {
+  if (!savedPath?.id || typeof setPins !== "function") return null;
+
+  const pathPin = buildWaypointPathPin(savedPath);
+
+  if (!pathPin) return null;
+
+  setPins((prev) => {
+    const existing = Array.isArray(prev) ? prev : [];
+
+    const withoutDuplicate = existing.filter((pin) => {
+      return (
+        pin.id !== pathPin.id &&
+        pin.waypointPathId !== pathPin.waypointPathId
+      );
+    });
+
+    return [pathPin, ...withoutDuplicate];
+  });
+
+  return pathPin;
+}
+
+function ensureWaypointPathPin(path) {
+  if (!path?.id) return null;
+
+  const existingPathPin = activePins.find((pin) => {
+    return (
+      isWaypointPathPin(pin) &&
+      (
+        pin.waypointPathId === path.id ||
+        pin.waypointPath?.id === path.id ||
+        pin.id === `path-pin-${path.id}`
+      )
+    );
+  });
+
+  if (existingPathPin) return existingPathPin;
+
+  const pathPin = buildWaypointPathPin(path);
+
+  if (!pathPin || typeof setPins !== "function") return null;
+
+  setPins((prev) => {
+    const existing = Array.isArray(prev) ? prev : [];
+
+    const withoutDuplicate = existing.filter((pin) => {
+      return (
+        pin.id !== pathPin.id &&
+        pin.waypointPathId !== pathPin.waypointPathId
+      );
+    });
+
+    return [pathPin, ...withoutDuplicate];
+  });
+
+  return pathPin;
+}
+
+function openWaypointPathAsPin(path) {
+  const pathPin = ensureWaypointPathPin(path);
+
+  if (!pathPin?.id) {
+    showWaypointPath(path);
+    return;
+  }
+
+  setSelectedPinId(pathPin.id);
+  setIsEditingPin(false);
+  setDraftCoord(null);
+  showWaypointPath(path);
+  bottomSheetRef.current?.snapToIndex(SNAP_EXPANDED);
+}
+
+function shareWaypointPathAsPin(path) {
+  const pathPin = ensureWaypointPathPin(path);
+
+  if (!pathPin) {
+    Alert.alert("Path Share Error", "Could not prepare this path for sharing.");
+    return;
+  }
+
+  const normalizedPin = normalizePinForShare(pathPin);
+
+  if (!normalizedPin) {
+    Alert.alert("Missing GPS", "This path is missing GPS coordinates.");
+    return;
+  }
+
+navigation.navigate("ShareScreen", {
+  shareType: "pin",
+  item: normalizedPin,
+  shareSessionId: `pin-${normalizedPin.originalId || normalizedPin.id || Date.now()}-${Date.now()}`,
+});
+}
+
+async function removeWaypointPath(pathId) {
+  try {
+    const nextPaths = await deleteWaypointPath(pathId, user?.uid);
+    setWaypointSavedPaths(nextPaths);
+
+    if (typeof setPins === "function") {
+      setPins((prev) =>
+        (Array.isArray(prev) ? prev : []).filter((pin) => {
+          return (
+            pin.waypointPathId !== pathId &&
+            pin.waypointPath?.id !== pathId &&
+            pin.id !== `path-pin-${pathId}`
+          );
+        })
+      );
+    }
+
+    if (selectedWaypointPathId === pathId) {
+      setSelectedWaypointPathId(null);
+      setFollowBackMode(false);
+    }
+
+    if (
+      selectedPin &&
+      (
+        selectedPin.waypointPathId === pathId ||
+        selectedPin.waypointPath?.id === pathId ||
+        selectedPin.id === `path-pin-${pathId}`
+      )
+    ) {
+      setSelectedPinId(null);
+      setIsEditingPin(false);
+      bottomSheetRef.current?.snapToIndex(SNAP_COLLAPSED);
+    }
+
+    trackMapEvent("waypoint_path_deleted", {
+      pathId,
+      ...getRegionAnalytics(region),
+    });
+  } catch {
+    Alert.alert("Delete Failed", "Could not delete this mapped path.");
+  }
+}
+
   function toggleParcels() {
     if (!REGRID_TILE_URL) {
       trackMapEvent("property_lines_not_configured");
@@ -1028,27 +2251,29 @@ export default function MapScreen({ pins = [], setPins, logs = [] }) {
       return;
     }
 
-    if (showParcels) {
-      setShowParcels(false);
-      setPropertySearchVisible(false);
-      setPropertySearchResults(null);
-      setSelectedPropertyFeatureId(null);
-      setExpandedPropertyFeatureId(null);
+if (showParcels) {
+  setShowParcels(false);
+  setShowPropertyHint(false);
+  setPropertySearchVisible(false);
+  setPropertySearchResults(null);
+  setSelectedPropertyFeatureId(null);
+  setExpandedPropertyFeatureId(null);
 
-      trackMapEvent("property_lines_disabled", {
-        source: "top_button",
-        ...getRegionAnalytics(region),
-      });
+  trackMapEvent("property_lines_disabled", {
+    source: "top_button",
+    ...getRegionAnalytics(region),
+  });
 
-      return;
-    }
+  return;
+}
 
     if (showRadar) {
       closeRadar("property_lines_enabled");
     }
 
-    setShowParcels(true);
-    setPropertySearchVisible(false);
+ setShowParcels(true);
+setShowPropertyHint(true);
+setPropertySearchVisible(false);
 
     trackMapEvent("property_lines_enabled", {
       source: "top_button",
@@ -1113,6 +2338,20 @@ export default function MapScreen({ pins = [], setPins, logs = [] }) {
     }
   }, [selectedPinId]);
 
+const reloadWaypointPaths = useCallback(async () => {
+  const paths = await loadWaypointPaths(user?.uid);
+  setWaypointSavedPaths(paths);
+
+  if (user?.uid) {
+    syncOfflineWaypointPaths(user.uid).catch(() => {});
+  }
+}, [user?.uid]);
+
+useEffect(() => {
+  reloadWaypointPaths();
+}, [reloadWaypointPaths]);
+
+
   function startAddPin() {
     if (!isPro && activePins.length >= FREE_PIN_LIMIT) {
       trackMapEvent("pin_limit_hit", {
@@ -1158,36 +2397,54 @@ export default function MapScreen({ pins = [], setPins, logs = [] }) {
     bottomSheetRef.current?.snapToIndex(SNAP_COLLAPSED);
   }
 
-  function onMapPress(e) {
-    const coord = e?.nativeEvent?.coordinate;
-    if (!coord) return;
+function onMapPress(e) {
+  const coord = e?.nativeEvent?.coordinate;
+  if (!coord) return;
 
-    trackMapEvent("map_tapped", {
-      mode: isAddMode ? "add_pin" : showParcels ? "property_lines" : "browse",
-      hasSelectedPin: selectedPin ? 1 : 0,
-      ...getRegionAnalytics(region),
-    });
-
-    if (isAddMode) {
-      setDraftCoord(coord);
-
-      trackMapEvent("add_pin_location_selected", {
-        draftType,
-        ...getRegionAnalytics(region),
-      });
-
+  if (measureMode) {
+    if (Date.now() < ignoreNextMeasureMapPressUntilRef.current) {
       return;
     }
 
-    if (showParcels) {
-      trackMapEvent("property_map_tap_ignored", {
-        source: "property_lines_bulk_search_only",
-        ...getRegionAnalytics(region),
-      });
-    }
+    addMeasureCoordinate(coord, "map");
+    return;
   }
 
+  if (showPropertyHint) setShowPropertyHint(false);
+
+  trackMapEvent("map_tapped", {
+    mode: measureMode
+      ? "measure"
+      : isAddMode
+        ? "add_pin"
+        : showParcels
+          ? "property_lines"
+          : "browse",
+    hasSelectedPin: selectedPin ? 1 : 0,
+    ...getRegionAnalytics(region),
+  });
+
+  if (isAddMode) {
+    setDraftCoord(coord);
+
+    trackMapEvent("add_pin_location_selected", {
+      draftType,
+      ...getRegionAnalytics(region),
+    });
+
+    return;
+  }
+
+  if (showParcels) {
+    trackMapEvent("property_map_tap_ignored", {
+      source: "property_lines_bulk_search_only",
+      ...getRegionAnalytics(region),
+    });
+  }
+}
+
   function savePin() {
+  Keyboard.dismiss();
     if (!isPro && activePins.length >= FREE_PIN_LIMIT) {
       trackMapEvent("pin_limit_hit", {
         limit: FREE_PIN_LIMIT,
@@ -1354,6 +2611,16 @@ export default function MapScreen({ pins = [], setPins, logs = [] }) {
     bottomSheetRef.current?.snapToIndex(SNAP_COLLAPSED);
   }
 
+  function backToPinList() {
+  trackMapEvent("pin_detail_back_to_list", {
+    ...(selectedPin ? getPinKpi(selectedPin, logs) : {}),
+  });
+
+  setSelectedPinId(null);
+  setIsEditingPin(false);
+  bottomSheetRef.current?.snapToIndex(SNAP_EXPANDED);
+}
+
   function centerOnPin(pin) {
     const coordinate = getPinCoordinate(pin);
     if (!coordinate) return;
@@ -1429,7 +2696,12 @@ export default function MapScreen({ pins = [], setPins, logs = [] }) {
       ...getPinKpi(normalizedPin, logs),
     });
 
-    Alert.alert("Share Pin", "How do you want to share this pin?", [
+    const isPathShare = isWaypointPathPin(selectedPin);
+
+Alert.alert(
+  isPathShare ? "Share Path" : "Share Pin",
+  isPathShare ? "How do you want to share this path?" : "How do you want to share this pin?",
+  [
       {
         text: "Share within App",
         onPress: () => {
@@ -1640,6 +2912,37 @@ export default function MapScreen({ pins = [], setPins, logs = [] }) {
     }
   }
 
+function flashMapToolLabel(label, topOffset = 0) {
+  if (!label) return;
+
+  setMapToolLabel({
+    text: label,
+    top: topOffset,
+  });
+
+  if (mapToolLabelTimerRef.current) {
+    clearTimeout(mapToolLabelTimerRef.current);
+  }
+
+  mapToolLabelTimerRef.current = setTimeout(() => {
+    setMapToolLabel(null);
+    mapToolLabelTimerRef.current = null;
+  }, 950);
+}
+
+function flashToggleRefreshNotice() {
+  setToggleRefreshNotice(true);
+
+  if (toggleRefreshNoticeTimerRef.current) {
+    clearTimeout(toggleRefreshNoticeTimerRef.current);
+  }
+
+  toggleRefreshNoticeTimerRef.current = setTimeout(() => {
+    setToggleRefreshNotice(false);
+    toggleRefreshNoticeTimerRef.current = null;
+  }, 1800);
+}
+
   function handlePropertyResultPress(feature, index) {
     const featureId = getPropertyFeatureId(feature, index);
 
@@ -1663,7 +2966,7 @@ export default function MapScreen({ pins = [], setPins, logs = [] }) {
     }
   }
 
-  const renderTypePicker = (value, onChange) => (
+    const renderTypePicker = (value, onChange) => (
     <View style={localStyles.typeRow}>
       {PIN_TYPES.map((type) => {
         const active = value === type.key;
@@ -1683,71 +2986,55 @@ export default function MapScreen({ pins = [], setPins, logs = [] }) {
     </View>
   );
 
+const renderMapToolButton = ({
+  keyName,
+  icon,
+  active = false,
+  disabled = false,
+  onPress,
+  label,
+  displayLabel,
+  labelTop = 0,
+  showRefreshNotice = false,
+}) => (
+
+  <Pressable
+    key={keyName}
+    style={[
+      localStyles.mapToolButton,
+      active ? localStyles.mapToolButtonActive : null,
+      disabled ? localStyles.mapToolButtonDisabled : null,
+    ]}
+    onPress={() => {
+      flashMapToolLabel(displayLabel || label, labelTop);
+
+if (showRefreshNotice) {
+  flashToggleRefreshNotice();
+}
+
+if (typeof onPress === "function") onPress();
+    }}
+    disabled={disabled}
+    accessibilityLabel={label}
+    accessibilityRole="button"
+  >
+    <Text style={localStyles.mapToolIcon}>{icon}</Text>
+  </Pressable>
+);
+
   return (
     <ScreenBackground source={ASSETS?.backgrounds?.map || ASSETS?.backgrounds?.today}>
-      <SafeAreaView style={localStyles.screen} edges={["top", "left", "right"]}>
-        <StatusBar barStyle="light-content" />
+      <SafeAreaView style={localStyles.screen} edges={["left", "right"]}>
+        <StatusBar barStyle="light-content" translucent backgroundColor="transparent" />
 
-        <View style={localStyles.mapWrap}>
-          <View style={localStyles.mapTopBarFixed}>
-            <View style={localStyles.mapHeaderLeft}>
-              {logoSource ? (
-                <Image source={logoSource} style={localStyles.mapLogoSmall} resizeMode="cover" />
-              ) : null}
-
-              <View style={localStyles.mapHeaderTextWrap}>
-                <Text style={localStyles.mapTitle}>MAP</Text>
-                <Text style={localStyles.mapSubtitle} numberOfLines={1}>
-                  Pins • Radar • Property Lines
-                </Text>
-              </View>
-            </View>
-
-            <View style={localStyles.mapIconRow}>
-              <Pressable
-                style={[localStyles.mapIconBtn, showRadar ? localStyles.mapIconBtnActive : null]}
-                onPress={toggleRadar}
-                accessibilityLabel={showRadar ? "Hide radar" : "Show radar"}
-                accessibilityRole="button"
-              >
-                <Text style={localStyles.mapIconBtnText}>🌧</Text>
-              </Pressable>
-
-              <Pressable
-                style={localStyles.mapIconBtn}
-                onPress={toggleMapType}
-                accessibilityLabel="Change map type"
-                accessibilityRole="button"
-              >
-                <Text style={localStyles.mapIconBtnText}>◩</Text>
-              </Pressable>
-
-              <Pressable
-                style={[
-                  localStyles.mapIconBtn,
-                  showParcels ? localStyles.mapIconBtnActive : null,
-                ]}
-                onPress={toggleParcels}
-                accessibilityLabel={showParcels ? "Hide property lines" : "Show property lines"}
-                accessibilityRole="button"
-              >
-                <Text style={localStyles.mapIconBtnText}>▦</Text>
-              </Pressable>
-
-              <Pressable
-                style={[
-                  localStyles.mapIconBtn,
-                  !userLoc ? localStyles.mapIconBtnDisabled : null,
-                ]}
-                onPress={goToUser}
-                disabled={!userLoc}
-                accessibilityLabel="Go to my location"
-                accessibilityRole="button"
-              >
-                <Text style={localStyles.mapIconBtnText}>◎</Text>
-              </Pressable>
-            </View>
-          </View>
+        <View
+  style={localStyles.mapWrap}
+  onTouchStart={() => {
+  if (showPropertyHint) setShowPropertyHint(false);
+  if (showPublicLandHint) setShowPublicLandHint(false);
+  if (showWaterLevelHint) setShowWaterLevelHint(false);
+}}
+>
 
 <MapView
   ref={mapRef}
@@ -1781,42 +3068,264 @@ export default function MapScreen({ pins = [], setPins, logs = [] }) {
               />
             ) : null}
 
-            {selectedPropertyGeojson ? (
-              <Geojson
-                geojson={selectedPropertyGeojson}
-                strokeColor="#FF7A00"
-                fillColor="rgba(255,122,0,0.22)"
-                strokeWidth={4}
-                zIndex={6}
-              />
-            ) : null}
+          {selectedPropertyGeojson ? (
+  <Geojson
+    geojson={selectedPropertyGeojson}
+    strokeColor="#FF7A00"
+    fillColor="rgba(255,122,0,0.22)"
+    strokeWidth={4}
+    zIndex={6}
+  />
+) : null}
+
+{showPublicLand && isPro && publicLandRegularGeojson && publicLandCount > 0 ? (
+  <Geojson
+    geojson={publicLandRegularGeojson}
+    strokeColor="#FFD700"
+    fillColor="rgba(57,255,20,0.32)"
+    strokeWidth={5}
+    zIndex={7}
+  />
+) : null}
+
+{showPublicLand && isPro && publicLandWmaGeojson && publicWmaCount > 0 ? (
+  <Geojson
+    geojson={publicLandWmaGeojson}
+    strokeColor="#89CFF0"
+    fillColor="rgba(137,207,240,0.24)"
+    strokeWidth={5}
+    zIndex={8}
+  />
+) : null}
+
+{measurePoints.length === 2 ? (
+  <Polyline
+    coordinates={measurePoints}
+    strokeColor="#FFD700"
+    strokeWidth={5}
+    zIndex={9}
+  />
+) : null}
+
+{measurePoints.map((point, index) => (
+  <Marker
+    key={`measure-point-${index}`}
+    coordinate={point}
+    pinColor="#FFD700"
+    title=""
+    description=""
+    tappable={false}
+    tracksViewChanges={false}
+    zIndex={20}
+  />
+))}
+
+{waypointLivePoints.length >= 2 ? (
+  <Polyline
+    coordinates={waypointLivePoints}
+    strokeColor="#D9A84C"
+    strokeWidth={5}
+    lineDashPattern={[10, 8]}
+    zIndex={10}
+  />
+) : null}
+
+{showWaypoints && selectedWaypointCoordinates.length >= 2 ? (
+  <Polyline
+    coordinates={selectedWaypointCoordinates}
+    strokeColor={followBackMode ? "#39FF14" : "#D9A84C"}
+    strokeWidth={5}
+    lineDashPattern={[10, 8]}
+    zIndex={8}
+  />
+) : null}
+
+{showWaypoints
+  ? waypointPathPins.map((pathPin) => {
+      const coordinates = getWaypointPathCoordinatesFromPin(pathPin);
+
+      if (coordinates.length < 2) return null;
+
+      const isSelectedPathPin = selectedPinId === pathPin.id;
+
+      return (
+        <Polyline
+          key={`saved-path-line-${pathPin.id}`}
+          coordinates={coordinates}
+          strokeColor={isSelectedPathPin ? "#39FF14" : "#4DA3FF"}
+          strokeWidth={isSelectedPathPin ? 6 : 4}
+          lineDashPattern={[10, 8]}
+          zIndex={isSelectedPathPin ? 11 : 7}
+        />
+      );
+    })
+  : null}
+
+{showWaypoints && selectedWaypointCoordinates.length >= 1 ? (
+  <Marker
+    coordinate={selectedWaypointCoordinates[0]}
+    title={followBackMode ? "Follow Back Start" : "Path Start"}
+    pinColor={followBackMode ? "#39FF14" : "#D9A84C"}
+  />
+) : null}
+
+{showWaypoints && selectedWaypointCoordinates.length >= 2 ? (
+  <Marker
+    coordinate={selectedWaypointCoordinates[selectedWaypointCoordinates.length - 1]}
+    title={followBackMode ? "Original Start" : "Path End"}
+    pinColor={followBackMode ? "#D9A84C" : "#39FF14"}
+  />
+) : null}
+
+{propertySearchFeatures.map((feature, index) => {
+  const coordinate = getPropertyFeatureCoordinate(feature);
+  if (!coordinate) return null;
+
+  const featureId = getPropertyFeatureId(feature, index);
+  const props = feature?.properties || {};
+  const isSelected = featureId === selectedPropertyFeatureId;
+
+  return (
+    <Marker
+      key={`property-marker-${featureId}`}
+      coordinate={coordinate}
+      title={`${index + 1}. ${props.ducksmartOwner || "Property Result"}`}
+      description={props.ducksmartAddress || props.headline || "Tap to view this parcel"}
+      anchor={{ x: 0.5, y: 0.5 }}
+      onPress={() => handlePropertyResultPress(feature, index)}
+    >
+      <View
+        style={[
+          localStyles.propertyMapMarker,
+          isSelected ? localStyles.propertyMapMarkerSelected : null,
+        ]}
+      >
+        <Text
+          style={[
+            localStyles.propertyMapMarkerText,
+            isSelected ? localStyles.propertyMapMarkerTextSelected : null,
+          ]}
+        >
+          {index + 1}
+        </Text>
+      </View>
+    </Marker>
+  );
+})}
+
+{showWaterLevels
+  ? waterLevelStations.map((item) => {
+      const coordinate = item?.coordinate;
+      if (!coordinate?.latitude || !coordinate?.longitude) return null;
+
+      const color = getWaterLevelMarkerColor(item);
+      const icon = getWaterLevelMarkerIcon(item);
+      const details = formatWaterLevelCallout(item)
+        .split("\n")
+        .filter(Boolean);
+
+      return (
+  <Marker
+    key={item.id || `${item.source}-${item.stationId}`}
+    coordinate={coordinate}
+    anchor={{ x: 0.5, y: 0.5 }}
+    title={Platform.OS === "ios" ? undefined : item.title || "Water Level"}
+    description={
+      Platform.OS === "ios"
+        ? undefined
+        : details.join(" • ")
+    }
+    onPress={(e) => {
+      e?.stopPropagation?.();
+
+      setSelectedWaterLevelStation(item);
+
+      trackMapEvent("water_level_marker_selected", {
+        source: item.source || "",
+        stationId: item.stationId || "",
+        kind: item.kind || "",
+        type: item.type || "",
+        ...getRegionAnalytics(region),
+      });
+    }}
+  >
+    <View style={[localStyles.waterLevelMarker, { borderColor: color }]}>
+      <Text style={localStyles.waterLevelMarkerText}>{icon}</Text>
+    </View>
+
+    {Platform.OS === "ios" ? (
+      <Callout tooltip={false}>
+        <View style={localStyles.waterLevelCallout}>
+          <Text style={localStyles.waterLevelCalloutTitle}>
+            {item.title || "Water Level"}
+          </Text>
+
+          {details.map((line, index) => (
+            <Text
+              key={`${item.id || item.stationId}-water-detail-${index}`}
+              style={
+                index === 1
+                  ? localStyles.waterLevelCalloutPrimary
+                  : localStyles.waterLevelCalloutText
+              }
+            >
+              {line}
+            </Text>
+          ))}
+        </View>
+      </Callout>
+    ) : null}
+    </Marker>
+);
+    })
+  : null}
 
             {activePins.map((p) => {
+              const isPathPin = isWaypointPathPin(p);
+
+              if (!showWaypoints && isPathPin) return null;
+
               const coordinate = getPinCoordinate(p);
               if (!coordinate) return null;
 
               const pinType = PIN_TYPES.find((t) => t.key === p.type);
-              const pinColor = pinType?.color || GREEN;
+              const pinColor = isPathPin ? "#4DA3FF" : pinType?.color || GREEN;
 
               return (
                 <Marker
                   key={p.id}
                   coordinate={coordinate}
                   title={p.title}
-                  description={`${p.type}${p.notes ? ` • ${p.notes}` : ""}`}
+                  description={
+  isPathPin
+    ? `Mapped Path${p.notes ? ` • ${p.notes}` : ""}`
+    : `${p.type}${p.notes ? ` • ${p.notes}` : ""}`
+}
                   pinColor={pinColor}
-                  onPress={() => {
-                    trackMapEvent("pin_selected", {
-                      source: "marker",
-                      ...getPinKpi(p, logs),
-                      hasDecoySpread: p.decoySpreadPlan ? 1 : 0,
-                    });
+                  onPress={(e) => {
+  e?.stopPropagation?.();
 
-                    setSelectedPinId(p.id);
-                    setIsAddMode(false);
-                    setDraftCoord(null);
-                    setIsEditingPin(false);
-                  }}
+  if (measureMode) {
+  const coordinate = getPinCoordinate(p);
+
+  ignoreNextMeasureMapPressUntilRef.current =
+    Date.now() + MEASURE_MARKER_PRESS_SUPPRESS_MS;
+
+  addMeasureCoordinate(coordinate, "pin");
+  return;
+}
+
+  trackMapEvent("pin_selected", {
+    source: "marker",
+    ...getPinKpi(p, logs),
+    hasDecoySpread: p.decoySpreadPlan ? 1 : 0,
+  });
+
+  setSelectedPinId(p.id);
+  setIsAddMode(false);
+  setDraftCoord(null);
+  setIsEditingPin(false);
+}}
                 />
               );
             })}
@@ -1837,18 +3346,312 @@ export default function MapScreen({ pins = [], setPins, logs = [] }) {
               />
             ) : null}
 
-            {showParcels && isPro && REGRID_TILE_URL ? (
-              <UrlTile
-                urlTemplate={REGRID_TILE_URL}
-                zIndex={2}
-                opacity={1}
-                minimumZ={10}
-                maximumZ={21}
-                maximumNativeZ={21}
-                tileSize={256}
-              />
-            ) : null}
-          </MapView>
+{showParcels && isPro && REGRID_TILE_URL ? (
+  <UrlTile
+    urlTemplate={REGRID_TILE_URL}
+    zIndex={2}
+    opacity={propertyTileOpacity}
+    minimumZ={10}
+    maximumZ={21}
+    maximumNativeZ={21}
+    tileSize={256}
+  />
+) : null}
+         </MapView>
+
+         {Platform.OS === "android" && selectedWaterLevelStation ? (
+  <View style={localStyles.waterLevelAndroidInfoCard}>
+    <View style={localStyles.waterLevelAndroidInfoHeader}>
+      <Text style={localStyles.waterLevelAndroidInfoTitle} numberOfLines={2}>
+        {selectedWaterLevelStation.title || "Water Level"}
+      </Text>
+
+      <Pressable onPress={() => setSelectedWaterLevelStation(null)}>
+        <Text style={localStyles.waterLevelAndroidInfoClose}>✕</Text>
+      </Pressable>
+    </View>
+
+    {formatWaterLevelCallout(selectedWaterLevelStation)
+      .split("\n")
+      .filter(Boolean)
+      .map((line, index) => (
+        <Text
+          key={`android-water-info-${selectedWaterLevelStation.id || selectedWaterLevelStation.stationId}-${index}`}
+          style={
+            index === 1
+              ? localStyles.waterLevelAndroidInfoPrimary
+              : localStyles.waterLevelAndroidInfoText
+          }
+        >
+          {line}
+        </Text>
+      ))}
+  </View>
+) : null}
+
+{!hideMapToolsForSheet ? (
+  <View style={localStyles.mapToolRail}>
+    {renderMapToolButton({
+      keyName: "map-type",
+      icon: "🛰️",
+      active: mapType !== "standard",
+      onPress: toggleMapType,
+      label: "Change map type",
+      displayLabel: "Satellite Map",
+      labelTop: 0,
+      showRefreshNotice: true,
+    })}
+
+    {renderMapToolButton({
+      keyName: "radar",
+      icon: "🌧️",
+      active: showRadar,
+      onPress: toggleRadar,
+      label: showRadar ? "Hide radar" : "Show radar",
+      displayLabel: "Radar",
+      labelTop: 53,
+      showRefreshNotice: true,
+    })}
+
+    {renderMapToolButton({
+      keyName: "regrid",
+      icon: "▦",
+      active: showParcels,
+      onPress: toggleParcels,
+      label: showParcels ? "Hide property lines" : "Show property lines",
+      displayLabel: "Property Lines",
+      labelTop: 106,
+      showRefreshNotice: true,
+    })}
+
+    {renderMapToolButton({
+      keyName: "public-land",
+      icon: "🟨",
+      active: showPublicLand,
+      disabled: publicLandLoading,
+      onPress: togglePublicLand,
+      label: showPublicLand ? "Hide public land" : "Show public land",
+      displayLabel: "Public Lands",
+      labelTop: 159,
+      showRefreshNotice: true,
+    })}
+
+    {renderMapToolButton({
+  keyName: "water-levels",
+  icon: "💧",
+  active: showWaterLevels,
+  disabled: waterLevelLoading,
+  onPress: toggleWaterLevels,
+  label: showWaterLevels ? "Hide water levels" : "Show water levels",
+  displayLabel: "Water Levels",
+  labelTop: 212,
+  showRefreshNotice: true,
+})}
+
+    {renderMapToolButton({
+      keyName: "add-pin",
+      icon: "📍",
+      active: isAddMode,
+      onPress: startAddPin,
+      label: "Add pin",
+      displayLabel: "Add Pin",
+      labelTop: 265,
+    })}
+
+    {renderMapToolButton({
+      keyName: "map-path",
+      icon: "👣",
+      active: waypointMode,
+      disabled: waypointSaving,
+      onPress: toggleWaypointMapping,
+      label: waypointMode ? "Stop mapping my path" : "Start mapping my path",
+      displayLabel: waypointMode ? "Stop Path" : "Map Path",
+      labelTop: 318,
+    })}
+
+    {renderMapToolButton({
+      keyName: "show-waypoints",
+      icon: "🧭",
+      active: showWaypoints,
+      onPress: () => setShowWaypoints((prev) => !prev),
+      label: showWaypoints ? "Hide waypoints" : "Show waypoints",
+      displayLabel: showWaypoints ? "Hide Paths" : "Show Paths",
+      labelTop: 371,
+    })}
+
+    {renderMapToolButton({
+      keyName: "measure",
+      icon: "📏",
+      active: measureMode,
+      onPress: toggleMeasureMode,
+      label: measureMode ? "Turn off measuring" : "Turn on measuring",
+      displayLabel: "Measure",
+      labelTop: 424,
+      showRefreshNotice: true,
+    })}
+
+    {renderMapToolButton({
+      keyName: "my-location",
+      icon: "🎯",
+      disabled: !userLoc,
+      onPress: goToUser,
+      label: "Go to my location",
+      displayLabel: "My Location",
+      labelTop: 477,
+    })}
+  </View>
+) : null}
+
+{mapToolLabel && !hideMapToolsForSheet ? (
+  <View
+    pointerEvents="none"
+    style={[
+      localStyles.mapToolLabelBubble,
+      { top: (Platform.OS === "ios" ? 54 : 34) + mapToolLabel.top + 5 },
+    ]}
+  >
+    <Text style={localStyles.mapToolLabelText}>{mapToolLabel.text}</Text>
+  </View>
+) : null}
+
+{toggleRefreshNotice && !hideMapToolsForSheet ? (
+  <View pointerEvents="none" style={localStyles.toggleRefreshNotice}>
+    <Text style={localStyles.toggleRefreshNoticeText}>
+      Turn Toggles On/Off to Refresh
+    </Text>
+  </View>
+) : null}
+
+{waypointMode || waypointStatus ? (
+  <View style={localStyles.waypointBadge}>
+    <Text style={localStyles.waypointBadgeText}>
+      {waypointStatus ||
+        `Mapping path... ${waypointLivePoints.length} points`}
+    </Text>
+  </View>
+) : null}
+
+{showWaypoints && selectedWaypointPath && sheetIndex === SNAP_COLLAPSED && !selectedPin ? (
+  <View
+    style={[
+      localStyles.waypointSelectedBadge,
+      {
+        bottom: sheetIndex === SNAP_COLLAPSED ? 138 : 306,
+      },
+    ]}
+  >
+    <Text style={localStyles.waypointBadgeText} numberOfLines={1}>
+      {followBackMode ? "Follow Back: " : "Path: "}
+      {getWaypointSummary(selectedWaypointPath).distanceText}
+    </Text>
+
+    <Pressable onPress={() => setFollowBackMode((prev) => !prev)}>
+      <Text style={localStyles.waypointBadgeAction}>
+        {followBackMode ? "Normal" : "Back"}
+      </Text>
+    </Pressable>
+
+    <Pressable
+      onPress={() => {
+        setSelectedWaypointPathId(null);
+        setFollowBackMode(false);
+      }}
+    >
+      <Text style={localStyles.waypointBadgeClose}>✕</Text>
+    </Pressable>
+  </View>
+) : null}
+
+          {showParcels && showPropertyHint ? (
+  <View pointerEvents="none" style={localStyles.propertyHintBubble}>
+    <Text style={localStyles.propertyHintText}>
+      Long Press a Property to Display Owner Details
+    </Text>
+  </View>
+) : null}
+
+{showPublicLand && showPublicLandHint && isPro ? (
+  <View pointerEvents="none" style={localStyles.publicLandHintBubble}>
+    <Text style={localStyles.publicLandHintText}>
+      Public Lands appear in{" "}
+      <Text style={localStyles.publicLandYellowText}>yellow</Text>
+      {" "}and Wildlife Management Areas appear in{" "}
+      <Text style={localStyles.publicLandBlueText}>blue</Text>.
+    </Text>
+
+    <Text style={localStyles.publicLandHintSubText}>
+      Toggle on and off to reload results.
+    </Text>
+  </View>
+) : null}
+
+{showPublicLand && isPro ? (
+  <View style={localStyles.publicLandCountBadge}>
+    <Text style={localStyles.publicLandCountText}>
+      Public: {publicLandCount}
+      {publicWmaCount > 0 ? ` • WMA: ${publicWmaCount}` : ""}
+    </Text>
+  </View>
+) : null}
+
+{showWaterLevels && showWaterLevelHint ? (
+  <View pointerEvents="none" style={localStyles.waterLevelHintBubble}>
+    <Text style={localStyles.waterLevelHintText}>
+      Water Levels show nearby USGS freshwater gauges and NOAA tide stations.
+    </Text>
+
+    <Text style={localStyles.waterLevelHintSubText}>
+      Tap a blue water marker to view current level details.
+    </Text>
+  </View>
+) : null}
+
+{showWaterLevels ? (
+  <View
+    style={[
+      localStyles.waterLevelCountBadge,
+      {
+        top:
+          showPublicLand && isPro
+            ? Platform.OS === "ios"
+              ? 164
+              : 158
+            : Platform.OS === "ios"
+              ? 132
+              : 126,
+      },
+    ]}
+  >
+    <Text style={localStyles.waterLevelCountText}>
+      Water: {waterLevelStations.length}
+    </Text>
+  </View>
+) : null}
+
+{measureMode || measureLabel ? (
+  <View style={localStyles.measureBadge}>
+    <Text style={localStyles.measureBadgeText}>
+      {measureLabel || "Touch Map or Select Pin"}
+    </Text>
+
+  {measureMode && userLoc ? (
+  <Pressable
+    style={localStyles.measureUseLocationBtn}
+    onPress={() => addMeasureCoordinate(userLoc, "current_location")}
+  >
+    <Text style={localStyles.measureUseLocationText}>
+      {measurePoints.length === 1 ? "User 📍 to End" : "User 📍 to Start"}
+    </Text>
+  </Pressable>
+) : null}
+
+    <Pressable onPress={clearMeasure}>
+      <Text style={localStyles.measureBadgeClose}>✕</Text>
+    </Pressable>
+  </View>
+) : null}
+
+
           {showParcels && isPro && REGRID_TILE_URL ? (
             <Pressable
               style={[
@@ -1873,7 +3676,14 @@ export default function MapScreen({ pins = [], setPins, logs = [] }) {
           ) : null}
 
           {propertySearchFeatures.length > 0 ? (
-            <View style={localStyles.propertyResultsPanel}>
+            <View
+  style={[
+    localStyles.propertyResultsPanel,
+    {
+      bottom: sheetIndex === SNAP_COLLAPSED ? 218 : 292,
+    },
+  ]}
+>
               <View style={localStyles.propertyResultsHeader}>
                 <View>
                   <Text style={localStyles.propertyResultsTitle}>Property Results</Text>
@@ -1956,17 +3766,6 @@ export default function MapScreen({ pins = [], setPins, logs = [] }) {
             onClear={clearPropertySearchResults}
           />
 
-          {showFloatingAddButton ? (
-            <Pressable
-              style={[localStyles.floatingAddBtn, { bottom: floatingAddBottom }]}
-              onPress={startAddPin}
-              accessibilityLabel="Add pin"
-              accessibilityRole="button"
-            >
-              <Text style={localStyles.floatingAddBtnText}>Add Pin</Text>
-            </Pressable>
-          ) : null}
-
           {showRadar ? (
             <View
               style={[
@@ -2006,13 +3805,16 @@ export default function MapScreen({ pins = [], setPins, logs = [] }) {
           ) : null}
 
           <BottomSheet
-            ref={bottomSheetRef}
-            index={SNAP_COLLAPSED}
-            snapPoints={snapPoints}
-            onChange={handleSheetChange}
-            backgroundStyle={localStyles.bottomSheetBg}
-            handleIndicatorStyle={localStyles.bottomSheetHandle}
-          >
+  ref={bottomSheetRef}
+  index={SNAP_COLLAPSED}
+  snapPoints={snapPoints}
+  onChange={handleSheetChange}
+  backgroundStyle={localStyles.bottomSheetBg}
+  handleIndicatorStyle={localStyles.bottomSheetHandle}
+  style={localStyles.bottomSheetContainer}
+  enableDynamicSizing={false}
+>
+
             <BottomSheetScrollView
               contentContainerStyle={[
                 localStyles.bottomSheetContent,
@@ -2040,13 +3842,16 @@ export default function MapScreen({ pins = [], setPins, logs = [] }) {
 
                   <Text style={localStyles.sectionLabel}>Notes</Text>
                   <TextInput
-                    value={draftNotes}
-                    onChangeText={setDraftNotes}
-                    placeholder="Add scouting notes..."
-                    placeholderTextColor="rgba(255,255,255,0.35)"
-                    style={[localStyles.input, localStyles.textArea]}
-                    multiline
-                  />
+  value={draftNotes}
+  onChangeText={setDraftNotes}
+  placeholder="Add scouting notes..."
+  placeholderTextColor="rgba(255,255,255,0.35)"
+  style={[localStyles.input, localStyles.textArea]}
+  multiline
+  returnKeyType="done"
+  blurOnSubmit
+  onSubmitEditing={Keyboard.dismiss}
+/>
 
                   <View style={localStyles.addCoordBox}>
                     <Text style={localStyles.coordTitle}>
@@ -2126,9 +3931,9 @@ export default function MapScreen({ pins = [], setPins, logs = [] }) {
                           </Text>
                         </View>
 
-                        <Pressable style={localStyles.clearResetBtn} onPress={closeDetail}>
-                          <Text style={localStyles.clearResetBtnText}>Close</Text>
-                        </Pressable>
+                        <Pressable style={localStyles.backToListBtn} onPress={backToPinList}>
+  <Text style={localStyles.backToListText}>‹ Pins</Text>
+</Pressable>
                       </View>
 
                       {selectedPin.notes ? (
@@ -2147,9 +3952,7 @@ export default function MapScreen({ pins = [], setPins, logs = [] }) {
                               </Text>
                             </View>
 
-                            <Pressable style={localStyles.clearResetBtn} onPress={closeSelectedPinSeason}>
-                              <Text style={localStyles.clearResetBtnText}>Close Season</Text>
-                            </Pressable>
+                            
                           </View>
 
                           <View style={localStyles.statPeriodBlock}>
@@ -2260,41 +4063,116 @@ export default function MapScreen({ pins = [], setPins, logs = [] }) {
                         </View>
                       ) : null}
 
-                      <View style={localStyles.pinActionGrid}>
-                        <Pressable style={localStyles.pinActionBtn} onPress={startEditSelectedPin}>
-                          <Text style={localStyles.pinActionBtnText}>Edit Notes</Text>
-                        </Pressable>
+{selectedPinIsWaypointPath && selectedPinWaypointPath ? (
+  <View style={localStyles.pinActionGrid}>
+    <Pressable
+      style={localStyles.pinActionBtn}
+      onPress={() => showWaypointPath(selectedPinWaypointPath)}
+    >
+      <Text style={localStyles.pinActionBtnText}>Show Path</Text>
+    </Pressable>
 
-                        <Pressable style={localStyles.pinActionBtn} onPress={addHuntForSelectedPin}>
-                          <Text style={localStyles.pinActionBtnText}>Add Hunt</Text>
-                        </Pressable>
+    <Pressable
+      style={localStyles.pinActionBtn}
+      onPress={() => followWaypointPathBack(selectedPinWaypointPath)}
+    >
+      <Text style={localStyles.pinActionBtnText}>Follow Back</Text>
+    </Pressable>
 
-                        <Pressable style={localStyles.pinActionBtn} onPress={() => centerOnPin(selectedPin)}>
-                          <Text style={localStyles.pinActionBtnText}>Center</Text>
-                        </Pressable>
+    <Pressable
+      style={localStyles.pinActionBtn}
+      onPress={() => centerOnPin(selectedPin)}
+    >
+      <Text style={localStyles.pinActionBtnText}>Center</Text>
+    </Pressable>
 
-                        <Pressable
-                          style={[
-                            localStyles.pinActionBtn,
-                            sharingPin ? localStyles.pinActionBtnDisabled : null,
-                          ]}
-                          onPress={shareSelectedPin}
-                          disabled={sharingPin}
-                        >
-                          <Text style={localStyles.pinActionBtnText}>
-                            {sharingPin ? "Sharing..." : "Share Pin"}
-                          </Text>
-                        </Pressable>
+    <Pressable
+      style={[
+        localStyles.pinActionBtn,
+        sharingPin ? localStyles.pinActionBtnDisabled : null,
+      ]}
+      onPress={shareSelectedPin}
+      disabled={sharingPin}
+    >
+      <Text style={localStyles.pinActionBtnText}>
+        {sharingPin ? "Sharing..." : "Share Path"}
+      </Text>
+    </Pressable>
 
-                        <Pressable
-                          style={[localStyles.pinActionBtn, localStyles.pinActionPrimary]}
-                          onPress={navigateToPin}
-                        >
-                          <Text style={[localStyles.pinActionBtnText, localStyles.pinActionPrimaryText]}>
-                            Navigate
-                          </Text>
-                        </Pressable>
-                      </View>
+    <Pressable
+      style={[localStyles.pinActionBtn, localStyles.pinActionDanger]}
+      onPress={() => {
+        const pathId =
+          selectedPinWaypointPath?.id ||
+          selectedPin?.waypointPathId ||
+          selectedPin?.waypointPath?.id;
+
+        if (!pathId) {
+          Alert.alert("Delete Failed", "This mapped path is missing its path ID.");
+          return;
+        }
+
+        Alert.alert(
+          "Delete Mapped Path?",
+          `Delete "${selectedPin.title}"?`,
+          [
+            { text: "Cancel", style: "cancel" },
+            {
+              text: "Delete",
+              style: "destructive",
+              onPress: () => removeWaypointPath(pathId),
+            },
+          ]
+        );
+      }}
+    >
+      <Text style={localStyles.pinActionDangerText}>Delete Path</Text>
+    </Pressable>
+  </View>
+) : (
+  <View style={localStyles.pinActionGrid}>
+    <Pressable style={localStyles.pinActionBtn} onPress={startEditSelectedPin}>
+      <Text style={localStyles.pinActionBtnText}>Edit Notes</Text>
+    </Pressable>
+
+    <Pressable style={localStyles.pinActionBtn} onPress={addHuntForSelectedPin}>
+      <Text style={localStyles.pinActionBtnText}>Add Hunt</Text>
+    </Pressable>
+
+    <Pressable style={localStyles.pinActionBtn} onPress={() => centerOnPin(selectedPin)}>
+      <Text style={localStyles.pinActionBtnText}>Center</Text>
+    </Pressable>
+
+    <Pressable
+      style={localStyles.pinActionBtn}
+      onPress={() => measureCurrentLocationToPin(selectedPin)}
+    >
+      <Text style={localStyles.pinActionBtnText}>Distance</Text>
+    </Pressable>
+
+    <Pressable
+      style={[
+        localStyles.pinActionBtn,
+        sharingPin ? localStyles.pinActionBtnDisabled : null,
+      ]}
+      onPress={shareSelectedPin}
+      disabled={sharingPin}
+    >
+      <Text style={localStyles.pinActionBtnText}>
+        {sharingPin ? "Sharing..." : "Share Pin"}
+      </Text>
+    </Pressable>
+
+    <Pressable
+      style={[localStyles.pinActionBtn, localStyles.pinActionPrimary]}
+      onPress={navigateToPin}
+    >
+      <Text style={[localStyles.pinActionBtnText, localStyles.pinActionPrimaryText]}>
+        Navigate
+      </Text>
+    </Pressable>
+  </View>
+)}
                     </>
                   )}
                 </>
@@ -2309,78 +4187,129 @@ export default function MapScreen({ pins = [], setPins, logs = [] }) {
                     }}
                   >
                     <Text style={[styles.sheetTitle || localStyles.sheetTitle, { textAlign: "center" }]}>
-                      {isPro
-                        ? `${activePins.length} Pins`
-                        : `${activePins.length}/${FREE_PIN_LIMIT} Pins`}
-                    </Text>
+  {isPro
+    ? `${normalPinRows.length} Pins`
+    : `${normalPinRows.length}/${FREE_PIN_LIMIT} Pins`}
+</Text>
                   </Pressable>
 
-                  {sheetIndex >= SNAP_PEEK ? (
-                    <>
-                      <View style={{ marginTop: 8 }}>
-                        <RowHeader
-                          title="Pins"
-                          pill={
-                            isPro
-                              ? `${activePins.length} saved`
-                              : `${activePins.length}/${FREE_PIN_LIMIT}`
-                          }
-                        />
-                      </View>
+  <>
+  <View style={{ marginTop: 8 }}>
+    <RowHeader
+  title="Pins"
+  pill={
+    isPro
+      ? `${normalPinRows.length} saved`
+      : `${normalPinRows.length}/${FREE_PIN_LIMIT}`
+  }
+/>
+  </View>
 
-                      <View style={localStyles.pinVerticalList}>
-                        {activePins.map((p) => {
-                          const pinType = PIN_TYPES.find((t) => t.key === p.type);
-                          const dotColor = pinType?.color || GREEN;
+  <View style={localStyles.pinVerticalList}>
+    {normalPinRows.map((p) => {
+      const pinType = PIN_TYPES.find((t) => t.key === p.type);
+      const dotColor = pinType?.color || GREEN;
 
-                          return (
-                            <Pressable
-                              key={p.id}
-                              style={localStyles.pinRow}
-                              onPress={() => {
-                                trackMapEvent("pin_selected_from_list", {
-                                  source: "bottom_sheet_list",
-                                  ...getPinKpi(p, logs),
-                                });
+      return (
+        <Pressable
+          key={p.id}
+          style={localStyles.pinRow}
+          onPress={() => {
+            trackMapEvent("pin_selected_from_list", {
+              source: "bottom_sheet_list",
+              ...getPinKpi(p, logs),
+            });
 
-                                setSelectedPinId(p.id);
-                                setIsEditingPin(false);
-                                centerOnPin(p);
-                              }}
-                            >
-                              <View style={[localStyles.pinDot, { backgroundColor: dotColor }]} />
+            setSelectedPinId(p.id);
+            setIsEditingPin(false);
+            centerOnPin(p);
+          }}
+        >
+          <View style={[localStyles.pinDot, { backgroundColor: dotColor }]} />
 
-                              <View style={{ flex: 1 }}>
-                                <Text style={localStyles.pinRowTitle} numberOfLines={1}>
-                                  {p.title}
-                                </Text>
-                                <Text style={localStyles.pinRowMeta} numberOfLines={1}>
-                                  {p.type} • {p.coordinate.latitude.toFixed(5)},{" "}
-                                  {p.coordinate.longitude.toFixed(5)}
-                                </Text>
-                              </View>
+          <View style={{ flex: 1 }}>
+            <Text style={localStyles.pinRowTitle} numberOfLines={1}>
+              {p.title}
+            </Text>
+            <Text style={localStyles.pinRowMeta} numberOfLines={1}>
+              {p.type} • {p.coordinate.latitude.toFixed(5)},{" "}
+              {p.coordinate.longitude.toFixed(5)}
+            </Text>
+          </View>
 
-                              <Text style={localStyles.pinRowChevron}>›</Text>
-                            </Pressable>
-                          );
-                        })}
-                      </View>
+          <Text style={localStyles.pinRowChevron}>›</Text>
+        </Pressable>
+      );
+    })}
+  </View>
 
-                      <Text style={styles.sheetHint || localStyles.sheetHint}>
-                        {!isPro && activePins.length >= FREE_PIN_LIMIT ? (
-                          "Pin limit reached — upgrade to Pro for unlimited pins."
-                        ) : (
-                          <>
-                            Tap{" "}
-                            <Text style={{ color: HUNT_TAN, fontWeight: "900" }}>
-                              Add Pin
-                            </Text>{" "}
-                            to add a scouting pin, or tap a marker to view details.
-                          </>
-                        )}
-                      </Text>
-                    </>
-                  ) : null}
+{mappedPathRows.length > 0 ? (
+  <View style={{ marginTop: 16 }}>
+    <RowHeader
+      title="Mapped Paths"
+      pill={`${mappedPathRows.length} saved`}
+    />
+
+    <View style={localStyles.pinVerticalList}>
+      {mappedPathRows.map(({ id, path, summary }, index) => (
+        <Pressable
+          key={`mapped-path-${id}-${index}`}
+          style={localStyles.pinRow}
+          onPress={() => openWaypointPathAsPin(path)}
+        >
+          <View style={[localStyles.pinDot, { backgroundColor: "#4DA3FF" }]} />
+
+          <View style={{ flex: 1, minWidth: 0 }}>
+            <Text style={localStyles.pinRowTitle} numberOfLines={1}>
+              {summary.title}
+            </Text>
+
+            <Text style={localStyles.pinRowMeta} numberOfLines={1}>
+              Path • {summary.distanceText} • {summary.pointCount} points
+            </Text>
+          </View>
+
+          <Pressable
+            style={localStyles.waypointDeleteBtn}
+            onPress={(e) => {
+              e?.stopPropagation?.();
+
+              Alert.alert(
+                "Delete Mapped Path?",
+                `Delete "${summary.title}"?`,
+                [
+                  { text: "Cancel", style: "cancel" },
+                  {
+                    text: "Delete",
+                    style: "destructive",
+                    onPress: () => removeWaypointPath(path.id || id),
+                  },
+                ]
+              );
+            }}
+          >
+            <Text style={localStyles.waypointDeleteText}>✕</Text>
+          </Pressable>
+        </Pressable>
+      ))}
+    </View>
+  </View>
+) : null}
+
+  <Text style={styles.sheetHint || localStyles.sheetHint}>
+    {!isPro && activePins.length >= FREE_PIN_LIMIT ? (
+      "Pin limit reached — upgrade to Pro for unlimited pins."
+    ) : (
+      <>
+        Tap{" "}
+        <Text style={{ color: HUNT_TAN, fontWeight: "900" }}>
+          Add Pin
+        </Text>{" "}
+        to add a scouting pin, or tap a marker to view details.
+      </>
+    )}
+  </Text>
+</>
                 </>
               )}
 
@@ -2406,6 +4335,101 @@ const localStyles = StyleSheet.create({
   mapFallback: {
     flex: 1,
   },
+    mapToolRail: {
+    position: "absolute",
+    top: Platform.OS === "ios" ? 54 : 34,
+    left: 10,
+    zIndex: 6,
+    gap: 9,
+  },
+  mapToolButton: {
+  width: 44,
+  height: 44,
+  borderRadius: 22,
+  backgroundColor: "rgba(30, 144, 255, 0.28)",
+  borderWidth: 1,
+  borderColor: "rgba(173, 216, 255, 0.55)",
+  alignItems: "center",
+  justifyContent: "center",
+},
+  mapToolButtonActive: {
+    backgroundColor: "rgba(217,168,76,0.82)",
+    borderColor: HUNT_TAN,
+  },
+  mapToolButtonDisabled: {
+    opacity: 0.45,
+  },
+  mapToolIcon: {
+    fontSize: 21,
+    fontWeight: "900",
+  },
+mapToolLabelBubble: {
+  position: "absolute",
+  left: 64,
+  zIndex: 7,
+  paddingVertical: 8,
+  paddingHorizontal: 12,
+  borderRadius: 999,
+  backgroundColor: "rgba(30, 144, 255, 0.78)",
+  borderWidth: 1,
+  borderColor: "rgba(173, 216, 255, 0.8)",
+},
+waterLevelAndroidInfoCard: {
+  position: "absolute",
+  left: 14,
+  right: 14,
+  top: Platform.OS === "android" ? 92 : 104,
+  zIndex: 120,
+  elevation: 120,
+  paddingVertical: 12,
+  paddingHorizontal: 14,
+  borderRadius: 16,
+  backgroundColor: WHITE,
+  borderWidth: 1,
+  borderColor: "#4DA3FF",
+  shadowColor: "#000",
+  shadowOpacity: 0.35,
+  shadowRadius: 8,
+},
+waterLevelAndroidInfoHeader: {
+  flexDirection: "row",
+  alignItems: "flex-start",
+  gap: 10,
+  marginBottom: 6,
+},
+waterLevelAndroidInfoTitle: {
+  flex: 1,
+  color: HUNT_BROWN_DEEP,
+  fontSize: 14,
+  fontWeight: "900",
+},
+waterLevelAndroidInfoClose: {
+  color: "#0077CC",
+  fontSize: 16,
+  fontWeight: "900",
+},
+waterLevelAndroidInfoPrimary: {
+  color: "#0077CC",
+  fontSize: 13,
+  fontWeight: "900",
+  marginTop: 3,
+},
+waterLevelAndroidInfoText: {
+  color: HUNT_BROWN_DEEP,
+  fontSize: 12,
+  fontWeight: "700",
+  marginTop: 3,
+  lineHeight: 16,
+},
+mapToolLabelText: {
+  color: WHITE,
+  fontSize: 12,
+  fontWeight: "900",
+},
+bottomSheetContainer: {
+  zIndex: 80,
+  elevation: 80,
+},
   bottomSheetBg: {
     backgroundColor: HUNT_BROWN,
     borderTopWidth: 1,
@@ -2421,7 +4445,7 @@ const localStyles = StyleSheet.create({
   },
     propertySearchFloatingBtn: {
     position: "absolute",
-    top: Platform.OS === "ios" ? 82 : 76,
+    top: Platform.OS === "ios" ? 174 : 168,
     right: 12,
     zIndex: 11,
     width: 44,
@@ -2433,6 +4457,82 @@ const localStyles = StyleSheet.create({
     alignItems: "center",
     justifyContent: "center",
   },
+publicLandFloatingBtn: {
+  position: "absolute",
+  top: Platform.OS === "ios" ? 82 : 76,
+  right: 12,
+  zIndex: 14,
+  minWidth: 72,
+  height: 44,
+  paddingHorizontal: 10,
+  borderRadius: 14,
+  backgroundColor: "rgba(22,14,9,0.92)",
+  borderWidth: 1,
+  borderColor: HUNT_BORDER,
+  alignItems: "center",
+  justifyContent: "center",
+},
+publicLandFloatingBtnActive: {
+  backgroundColor: "rgba(57,255,20,0.18)",
+  borderColor: "#39FF14",
+},
+publicLandFloatingBtnDisabled: {
+  opacity: 0.55,
+},
+publicLandFloatingBtnText: {
+  color: HUNT_TAN,
+  fontSize: 13,
+  fontWeight: "900",
+},
+measureFloatingBtn: {
+  position: "absolute",
+  top: Platform.OS === "ios" ? 82 : 76,
+  left: 12,
+  zIndex: 14,
+  minWidth: 82,
+  height: 44,
+  paddingHorizontal: 10,
+  borderRadius: 14,
+  backgroundColor: "rgba(22,14,9,0.92)",
+  borderWidth: 1,
+  borderColor: HUNT_BORDER,
+  alignItems: "center",
+  justifyContent: "center",
+},
+measureFloatingBtnActive: {
+  backgroundColor: HUNT_TAN_SOFT,
+  borderColor: HUNT_TAN,
+},
+measureFloatingBtnText: {
+  color: HUNT_TAN,
+  fontSize: 13,
+  fontWeight: "900",
+},
+measureBadge: {
+  position: "absolute",
+  top: Platform.OS === "ios" ? 132 : 126,
+  left: 12,
+  zIndex: 14,
+  flexDirection: "row",
+  alignItems: "center",
+  gap: 8,
+  paddingVertical: 8,
+  paddingHorizontal: 11,
+  borderRadius: 999,
+  backgroundColor: "rgba(22,14,9,0.94)",
+  borderWidth: 1,
+  borderColor: HUNT_TAN,
+},
+measureBadgeText: {
+  color: WHITE,
+  fontSize: 12,
+  fontWeight: "900",
+},
+measureBadgeClose: {
+  color: HUNT_TAN,
+  fontSize: 13,
+  fontWeight: "900",
+},
   propertySearchFloatingBtnActive: {
     backgroundColor: HUNT_TAN_SOFT,
     borderColor: HUNT_TAN,
@@ -2444,8 +4544,8 @@ propertySearchFloatingBtnText: {
   lineHeight: 32,
 },
   bottomSheetContentPad: {
-    paddingBottom: Platform.OS === "android" ? 108 : 44,
-  },
+  paddingBottom: Platform.OS === "android" ? 190 : 170,
+},
   mapTopBarFixed: {
     position: "absolute",
     top: 0,
@@ -2519,6 +4619,118 @@ propertySearchFloatingBtnText: {
     fontSize: 16,
     fontWeight: "900",
   },
+  waterLevelMarker: {
+  width: 34,
+  height: 34,
+  borderRadius: 17,
+  backgroundColor: "rgba(22,14,9,0.94)",
+  borderWidth: 2,
+  alignItems: "center",
+  justifyContent: "center",
+  shadowColor: "#000",
+  shadowOpacity: 0.35,
+  shadowRadius: 6,
+  elevation: 4,
+},
+waterLevelMarkerText: {
+  fontSize: 18,
+},
+waterLevelHintBubble: {
+  position: "absolute",
+  top: Platform.OS === "ios" ? 104 : 92,
+  left: 62,
+  right: 14,
+  zIndex: 15,
+  paddingVertical: 12,
+  paddingHorizontal: 14,
+  borderRadius: 18,
+  backgroundColor: "rgba(22,14,9,0.95)",
+  borderWidth: 1,
+  borderColor: "#4DA3FF",
+  alignItems: "center",
+  shadowColor: "#000",
+  shadowOpacity: 0.35,
+  shadowRadius: 8,
+  elevation: 5,
+},
+waterLevelCallout: {
+  width: 240,
+  paddingVertical: 10,
+  paddingHorizontal: 11,
+  borderRadius: 12,
+  backgroundColor: WHITE,
+},
+waterLevelCalloutTitle: {
+  color: HUNT_BROWN_DEEP,
+  fontSize: 14,
+  fontWeight: "900",
+  marginBottom: 5,
+},
+waterLevelCalloutPrimary: {
+  color: "#0077CC",
+  fontSize: 13,
+  fontWeight: "900",
+  marginTop: 3,
+},
+waterLevelCalloutText: {
+  color: HUNT_BROWN_DEEP,
+  fontSize: 12,
+  fontWeight: "700",
+  marginTop: 3,
+  lineHeight: 16,
+},
+toggleRefreshNotice: {
+  position: "absolute",
+  top: Platform.OS === "ios" ? 54 : 34,
+  alignSelf: "center",
+  zIndex: 20,
+  paddingVertical: 10,
+  paddingHorizontal: 16,
+  borderRadius: 999,
+  backgroundColor: "rgba(22,14,9,0.94)",
+  borderWidth: 1,
+  borderColor: HUNT_TAN,
+  shadowColor: "#000",
+  shadowOpacity: 0.35,
+  shadowRadius: 8,
+  elevation: 6,
+},
+toggleRefreshNoticeText: {
+  color: WHITE,
+  fontSize: 13,
+  fontWeight: "900",
+  textAlign: "center",
+},
+waterLevelHintText: {
+  color: WHITE,
+  fontSize: 13,
+  fontWeight: "900",
+  textAlign: "center",
+  lineHeight: 18,
+},
+waterLevelHintSubText: {
+  color: "#4DA3FF",
+  fontSize: 12,
+  fontWeight: "900",
+  textAlign: "center",
+  marginTop: 5,
+},
+waterLevelCountBadge: {
+  position: "absolute",
+  right: 12,
+  zIndex: 14,
+  paddingVertical: 7,
+  paddingHorizontal: 10,
+  borderRadius: 999,
+  backgroundColor: "rgba(22,14,9,0.92)",
+  borderWidth: 1,
+  borderColor: "#4DA3FF",
+},
+waterLevelCountText: {
+  color: "#4DA3FF",
+  fontSize: 11,
+  fontWeight: "900",
+},
   floatingAddBtn: {
     position: "absolute",
     right: 16,
@@ -2539,6 +4751,74 @@ propertySearchFloatingBtnText: {
     fontSize: 13,
     fontWeight: "900",
   },
+  propertyHintBubble: {
+  position: "absolute",
+  top: Platform.OS === "ios" ? 116 : 104,
+  left: 18,
+  right: 18,
+  zIndex: 13,
+  paddingVertical: 11,
+  paddingHorizontal: 14,
+  borderRadius: 18,
+  backgroundColor: "rgba(33,21,13,0.95)",
+  borderWidth: 1,
+  borderColor: HUNT_TAN,
+  alignItems: "center",
+  shadowColor: "#000",
+  shadowOpacity: 0.35,
+  shadowRadius: 8,
+  elevation: 5,
+},
+
+propertyHintText: {
+  color: WHITE,
+  fontSize: 13,
+  fontWeight: "900",
+  textAlign: "center",
+},
+publicLandHintBubble: {
+  position: "absolute",
+  top: Platform.OS === "ios" ? 104 : 92,
+  left: 62,
+  right: 14,
+  zIndex: 15,
+  paddingVertical: 12,
+  paddingHorizontal: 14,
+  borderRadius: 18,
+  backgroundColor: "rgba(22,14,9,0.95)",
+  borderWidth: 1,
+  borderColor: "#89CFF0",
+  alignItems: "center",
+  shadowColor: "#000",
+  shadowOpacity: 0.35,
+  shadowRadius: 8,
+  elevation: 5,
+},
+
+publicLandHintText: {
+  color: WHITE,
+  fontSize: 13,
+  fontWeight: "900",
+  textAlign: "center",
+  lineHeight: 18,
+},
+publicLandYellowText: {
+  color: "#FFD700",
+  fontWeight: "900",
+},
+
+publicLandBlueText: {
+  color: "#89CFF0",
+  fontWeight: "900",
+},
+
+publicLandHintSubText: {
+  color: "#89CFF0",
+  fontSize: 12,
+  fontWeight: "900",
+  textAlign: "center",
+  marginTop: 5,
+},
   overlayBadge: {
     position: "absolute",
     alignSelf: "center",
@@ -2553,6 +4833,23 @@ propertySearchFloatingBtnText: {
     borderWidth: 1,
     borderColor: HUNT_BORDER,
   },
+  publicLandCountBadge: {
+  position: "absolute",
+  top: Platform.OS === "ios" ? 132 : 126,
+  right: 12,
+  zIndex: 14,
+  paddingVertical: 7,
+  paddingHorizontal: 10,
+  borderRadius: 999,
+  backgroundColor: "rgba(22,14,9,0.92)",
+  borderWidth: 1,
+  borderColor: "#39FF14",
+},
+publicLandCountText: {
+  color: "#39FF14",
+  fontSize: 11,
+  fontWeight: "900",
+},
   overlayBadgeText: {
     color: WHITE,
     fontSize: 12,
@@ -2563,19 +4860,19 @@ propertySearchFloatingBtnText: {
     fontSize: 14,
     fontWeight: "900",
   },
-  propertyResultsPanel: {
-    position: "absolute",
-    left: 12,
-    right: 12,
-    top: Platform.OS === "ios" ? 116 : 104,
-    maxHeight: 280,
-    zIndex: 9,
-    padding: 12,
-    borderRadius: 18,
-    backgroundColor: "rgba(33,21,13,0.95)",
-    borderWidth: 1,
-    borderColor: HUNT_BORDER,
-  },
+propertyResultsPanel: {
+  position: "absolute",
+  left: 12,
+  right: 12,
+  height: 230,
+  zIndex: 9,
+  padding: 12,
+  borderRadius: 18,
+  backgroundColor: "rgba(33,21,13,0.95)",
+  borderWidth: 1,
+  borderColor: HUNT_BORDER,
+  overflow: "hidden",
+},
   propertyResultsHeader: {
     flexDirection: "row",
     alignItems: "center",
@@ -2648,6 +4945,120 @@ propertySearchFloatingBtnText: {
     marginTop: 2,
     lineHeight: 15,
   },
+  waypointFloatingBtn: {
+  position: "absolute",
+  top: Platform.OS === "ios" ? 132 : 126,
+  left: 12,
+  zIndex: 14,
+  minWidth: 82,
+  height: 44,
+  paddingHorizontal: 10,
+  borderRadius: 14,
+  backgroundColor: "rgba(22,14,9,0.92)",
+  borderWidth: 1,
+  borderColor: HUNT_BORDER,
+  alignItems: "center",
+  justifyContent: "center",
+},
+waypointFloatingBtnActive: {
+  backgroundColor: HUNT_TAN_SOFT,
+  borderColor: HUNT_TAN,
+},
+waypointFloatingBtnDisabled: {
+  opacity: 0.55,
+},
+waypointFloatingBtnText: {
+  color: HUNT_TAN,
+  fontSize: 13,
+  fontWeight: "900",
+},
+waypointBadge: {
+  position: "absolute",
+  top: Platform.OS === "ios" ? 182 : 176,
+  left: 12,
+  right: 12,
+  maxWidth: 260,
+  zIndex: 14,
+  flexDirection: "row",
+  alignItems: "center",
+  gap: 8,
+  paddingVertical: 8,
+  paddingHorizontal: 11,
+  borderRadius: 999,
+  backgroundColor: "rgba(22,14,9,0.94)",
+  borderWidth: 1,
+  borderColor: HUNT_TAN,
+},
+waypointSelectedBadge: {
+  position: "absolute",
+  left: 12,
+  right: 12,
+  zIndex: 14,
+  flexDirection: "row",
+  alignItems: "center",
+  gap: 8,
+  paddingVertical: 8,
+  paddingHorizontal: 11,
+  borderRadius: 999,
+  backgroundColor: "rgba(22,14,9,0.94)",
+  borderWidth: 1,
+  borderColor: HUNT_TAN,
+},
+waypointBadgeText: {
+  flex: 1,
+  color: WHITE,
+  fontSize: 12,
+  fontWeight: "900",
+},
+waypointBadgeAction: {
+  color: "#39FF14",
+  fontSize: 12,
+  fontWeight: "900",
+},
+waypointBadgeClose: {
+  color: HUNT_TAN,
+  fontSize: 13,
+  fontWeight: "900",
+},
+waypointRow: {
+  flexDirection: "row",
+  alignItems: "center",
+  gap: 10,
+  paddingVertical: 12,
+  paddingHorizontal: 12,
+  borderRadius: 15,
+  borderWidth: 1,
+  borderColor: HUNT_BORDER,
+  backgroundColor: HUNT_BROWN_CARD,
+},
+waypointRowBtn: {
+  paddingVertical: 7,
+  paddingHorizontal: 10,
+  borderRadius: 999,
+  backgroundColor: HUNT_TAN_SOFT,
+  borderWidth: 1,
+  borderColor: HUNT_TAN,
+},
+waypointRowBtnText: {
+  color: HUNT_TAN,
+  fontSize: 11,
+  fontWeight: "900",
+},
+waypointDeleteBtn: {
+  width: 28,
+  height: 28,
+  borderRadius: 10,
+  alignItems: "center",
+  justifyContent: "center",
+  backgroundColor: "rgba(255,80,80,0.08)",
+  borderWidth: 1,
+  borderColor: "rgba(255,80,80,0.24)",
+},
+waypointDeleteText: {
+  color: "#FF6B6B",
+  fontSize: 12,
+  fontWeight: "900",
+},
   propertyResultChevron: {
     color: HUNT_TAN,
     fontSize: 18,
@@ -2963,6 +5374,19 @@ propertySearchFloatingBtnText: {
     fontSize: 22,
     fontWeight: "900",
   },
+  measureUseLocationBtn: {
+  paddingVertical: 5,
+  paddingHorizontal: 8,
+  borderRadius: 999,
+  backgroundColor: HUNT_TAN_SOFT,
+  borderWidth: 1,
+  borderColor: HUNT_TAN,
+},
+measureUseLocationText: {
+  color: HUNT_TAN,
+  fontSize: 11,
+  fontWeight: "900",
+},
   pinActionGrid: {
     flexDirection: "row",
     flexWrap: "wrap",
@@ -2993,13 +5417,56 @@ propertySearchFloatingBtnText: {
   pinActionPrimaryText: {
     color: HUNT_TAN,
   },
+  
+  propertyMapMarker: {
+  minWidth: 30,
+  height: 30,
+  borderRadius: 15,
+  backgroundColor: "rgba(33,21,13,0.94)",
+  borderWidth: 2,
+  borderColor: HUNT_TAN,
+  alignItems: "center",
+  justifyContent: "center",
+  shadowColor: "#000",
+  shadowOpacity: 0.35,
+  shadowRadius: 6,
+  elevation: 4,
+},
+propertyMapMarkerSelected: {
+  backgroundColor: HUNT_TAN,
+  borderColor: WHITE,
+  transform: [{ scale: 1.12 }],
+},
+propertyMapMarkerText: {
+  color: HUNT_TAN,
+  fontSize: 13,
+  fontWeight: "900",
+},
+propertyMapMarkerTextSelected: {
+  color: HUNT_BROWN_DEEP,
+},
   privacyDisclaimer: {
-    color: "rgba(255,255,255,0.42)",
-    fontSize: 11,
-    fontWeight: "700",
-    lineHeight: 16,
-    textAlign: "center",
-    marginTop: 14,
-    paddingHorizontal: 8,
-  },
+  color: "rgba(255,255,255,0.42)",
+  fontSize: 11,
+  fontWeight: "700",
+  lineHeight: 16,
+  textAlign: "center",
+  marginTop: 14,
+  marginBottom: 36,
+  paddingHorizontal: 8,
+},
+backToListBtn: {
+  paddingVertical: 7,
+  paddingHorizontal: 10,
+  borderRadius: 999,
+  borderWidth: 1,
+  borderColor: HUNT_BORDER,
+  backgroundColor: HUNT_BROWN_DEEP,
+},
+
+backToListText: {
+  color: HUNT_TAN,
+  fontSize: 12,
+  fontWeight: "900",
+},
 });

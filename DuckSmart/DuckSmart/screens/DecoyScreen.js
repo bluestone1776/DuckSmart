@@ -282,7 +282,7 @@ export default function DecoyScreen({
   pins = [],
   setPins,
 }) {
-  const { isPro, purchase } = usePremium();
+  const { isPro, loading: premiumLoading, purchase } = usePremium();
 
   const [dWater, setDWater] = useState(WATER_TYPES[0]);
   const [dWeather, setDWeather] = useState(WEATHER_OPTIONS[0]);
@@ -381,12 +381,12 @@ export default function DecoyScreen({
   const selectedJournalEntries = getSpreadEntries(selectedJournalPin);
 
   useEffect(() => {
-    return () => {
-      if (!isPro) {
-        showInterstitialAd();
-      }
-    };
-  }, [isPro]);
+  return () => {
+    if (!premiumLoading && !isPro) {
+      showInterstitialAd({ isPro, premiumLoading });
+    }
+  };
+}, [isPro, premiumLoading]);
 
   async function handleAISpreadAnalyzer(useCamera) {
     if (!isPro) {

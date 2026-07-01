@@ -1,5 +1,6 @@
 const { onRequest } = require("firebase-functions/v2/https");
 const { onSchedule } = require("firebase-functions/v2/scheduler");
+const { onDocumentWritten } = require("firebase-functions/v2/firestore");
 const { defineSecret } = require("firebase-functions/params");
 const logger = require("firebase-functions/logger");
 const admin = require("firebase-admin");
@@ -17,10 +18,13 @@ const REGRID_API_BASE = "https://app.regrid.com/api/v2/parcels";
 const REGRID_TILE_BASE =
   "https://tiles.regrid.com/api/v1/sources/parcel/layers/b3c35a56df012059b62eeab44fd9b9539d87a87e";
 const OPENAI_CHAT_COMPLETIONS_URL = "https://api.openai.com/v1/chat/completions";
+const HUBSPOT_BASE = "https://api.hubapi.com";
+const HUBSPOT_SYNC_VERSION = "2026-07-01-v2";
 
 const OWM_API_KEY = defineSecret("DUCKSMART_OWM_API_KEY");
 const REGRID_TOKEN = defineSecret("REGRID_TOKEN");
 const OPENAI_API_KEY = defineSecret("OPENAI_API_KEY");
+const HUBSPOT_PRIVATE_APP_TOKEN = defineSecret("HUBSPOT_PRIVATE_APP_TOKEN");
 
 const PRESSURE_POINT_THRESHOLD = 2;
 
@@ -378,6 +382,134 @@ function getOpenAiApiKey() {
   }
 
   return key;
+}
+
+function getHubSpotToken() {
+  const token = HUBSPOT_PRIVATE_APP_TOKEN.value();
+
+  if (!token) {
+    throw new Error("Missing HUBSPOT_PRIVATE_APP_TOKEN Firebase secret");
+  }
+
+  return token;
+}
+
+function cleanHubSpotString(value, maxLength = 500) {
+  if (value === undefined || value === null) return "";
+  return String(value).trim().slice(0, maxLength);
+}
+
+function splitDisplayName(displayName = "") {
+  const safe = cleanHubSpotString(displayName, 160);
+  if (!safe) return { firstName: "", lastName: "" };
+
+  const parts = safe.split(/\s+/).filter(Boolean);
+  if (parts.length <= 1) return { firstName: parts[0] || "", lastName: "" };
+
+  return {
+    firstName: parts[0],
+    lastName: parts.slice(1).join(" "),
+  };
+}
+
+function buildHubSpotContactProperties({ uid, profile = {} }) {
+  const email = cleanEmail(profile.emailLower || profile.email || "");
+  const displayName = cleanHubSpotString(profile.displayName || "", 160);
+  const names = splitDisplayName(displayName);
+
+  const properties = {
+    email,
+  };
+
+  if (displayName) properties.firstname = names.firstName || displayName;
+  if (names.lastName) properties.lastname = names.lastName;
+
+  return properties;
+}
+
+async function hubSpotRequest(path, options = {}) {
+  const response = await fetch(`${HUBSPOT_BASE}${path}`, {
+    ...options,
+    headers: {
+      Authorization: `Bearer ${getHubSpotToken()}`,
+      "Content-Type": "application/json",
+      ...(options.headers || {}),
+    },
+  });
+
+  const text = await response.text();
+  let data = null;
+
+  try {
+    data = text ? JSON.parse(text) : null;
+  } catch (_) {
+    data = text;
+  }
+
+  if (!response.ok) {
+    const message =
+      data?.message ||
+      data?.error ||
+      `HubSpot request failed with status ${response.status}`;
+
+    const err = new Error(message);
+    err.status = response.status;
+    err.data = data;
+    throw err;
+  }
+
+  return data;
+}
+
+async function upsertHubSpotContact({ uid, profile }) {
+  const properties = buildHubSpotContactProperties({ uid, profile });
+  const email = properties.email;
+
+  if (!email || !email.includes("@")) {
+    throw new Error("Missing valid email for HubSpot contact sync.");
+  }
+
+  try {
+    return await hubSpotRequest(
+      `/crm/v3/objects/contacts/${encodeURIComponent(email)}?idProperty=email`,
+      {
+        method: "PATCH",
+        body: JSON.stringify({ properties }),
+      }
+    );
+  } catch (err) {
+    if (err.status !== 404) throw err;
+
+    try {
+      return await hubSpotRequest("/crm/v3/objects/contacts", {
+        method: "POST",
+        body: JSON.stringify({ properties }),
+      });
+    } catch (createErr) {
+      if (createErr.status !== 409) throw createErr;
+
+      return await hubSpotRequest(
+        `/crm/v3/objects/contacts/${encodeURIComponent(email)}?idProperty=email`,
+        {
+          method: "PATCH",
+          body: JSON.stringify({ properties }),
+        }
+      );
+    }
+  }
+}
+
+function cleanEmail(value) {
+  return String(value || "").trim().toLowerCase();
+}
+
+function escapeHtml(value) {
+  return String(value || "")
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#039;");
 }
 
 async function verifyFirebaseAuth(req) {
@@ -838,6 +970,109 @@ async function runWeatherAlertCheck() {
     ticketCount: tickets.length,
   };
 }
+
+exports.syncDuckSmartSignupToHubSpot = onDocumentWritten(
+  {
+    document: "users/{uid}/profile/private",
+    region: "us-central1",
+    timeoutSeconds: 60,
+    memory: "256MiB",
+    secrets: [HUBSPOT_PRIVATE_APP_TOKEN],
+  },
+  async (event) => {
+    const afterSnap = event.data?.after;
+
+    if (!afterSnap || !afterSnap.exists) {
+      logger.warn("syncDuckSmartSignupToHubSpot skipped: no after snapshot");
+      return;
+    }
+
+    const uid = event.params.uid;
+    const profile = afterSnap.data() || {};
+    const syncStatus = String(profile.hubspotSyncStatus || "").toLowerCase();
+    const syncVersion = String(profile.hubspotSyncVersion || "");
+
+    if (syncStatus === "synced" && syncVersion === HUBSPOT_SYNC_VERSION) {
+      logger.info("syncDuckSmartSignupToHubSpot skipped: already synced", {
+        uid,
+        hubspotContactId: profile.hubspotContactId || "",
+      });
+      return;
+    }
+
+    if (syncStatus === "error" && syncVersion === HUBSPOT_SYNC_VERSION) {
+      logger.info("syncDuckSmartSignupToHubSpot skipped: previous error already recorded", {
+        uid,
+        error: profile.hubspotSyncError || "",
+      });
+      return;
+    }
+
+    const email = cleanEmail(profile.emailLower || profile.email || "");
+
+    if (!email || !email.includes("@")) {
+      await afterSnap.ref.set(
+        {
+          hubspotSyncStatus: "error",
+          hubspotSyncVersion: HUBSPOT_SYNC_VERSION,
+          hubspotSyncError: "Missing valid email.",
+          hubspotSyncAttemptedAt: Date.now(),
+          hubspotSyncAttemptedAtServer: admin.firestore.FieldValue.serverTimestamp(),
+        },
+        { merge: true }
+      );
+
+      logger.warn("syncDuckSmartSignupToHubSpot skipped: invalid email", {
+        uid,
+        email,
+      });
+
+      return;
+    }
+
+    try {
+      const contact = await upsertHubSpotContact({ uid, profile });
+
+      await afterSnap.ref.set(
+        {
+          hubspotSyncStatus: "synced",
+          hubspotSyncVersion: HUBSPOT_SYNC_VERSION,
+          hubspotContactId: contact?.id || "",
+          hubspotSyncedAt: Date.now(),
+          hubspotSyncedAtServer: admin.firestore.FieldValue.serverTimestamp(),
+          hubspotSyncError: "",
+        },
+        { merge: true }
+      );
+
+      logger.info("DuckSmart signup synced to HubSpot", {
+        uid,
+        email,
+        hubspotContactId: contact?.id || "",
+      });
+    } catch (err) {
+      const message = err.message || "Unknown HubSpot sync error";
+
+      await afterSnap.ref.set(
+        {
+          hubspotSyncStatus: "error",
+          hubspotSyncVersion: HUBSPOT_SYNC_VERSION,
+          hubspotSyncError: message,
+          hubspotSyncAttemptedAt: Date.now(),
+          hubspotSyncAttemptedAtServer: admin.firestore.FieldValue.serverTimestamp(),
+        },
+        { merge: true }
+      );
+
+      logger.error("DuckSmart signup HubSpot sync failed", {
+        uid,
+        email,
+        error: message,
+        status: err.status || null,
+      });
+    }
+  }
+);
 
 exports.getWeather = onRequest(
   {

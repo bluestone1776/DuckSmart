@@ -47,6 +47,7 @@ import {
   loadAllInAppNotifications,
   markInAppNotificationRead,
 } from "../services/in_app_notifications";
+import { getSharedItem } from "../services/shareImport";
 
 const GOLD = "#D9A84C";
 const RED = "#FF4D4D";
@@ -137,6 +138,28 @@ function getShareTypeFromNotificationType(type) {
     default:
       return "shared_item";
   }
+}
+
+function getShareTypeFromCloudItemType(type) {
+  const normalized = String(type || "").toLowerCase();
+
+  if (normalized === "huntlog" || normalized === "hunt_log" || normalized === "hunt") {
+    return "hunt_log";
+  }
+
+  if (normalized === "pin" || normalized === "map_pin" || normalized === "mappin") {
+    return "pin";
+  }
+
+  if (normalized === "scouting_log" || normalized === "scout_log" || normalized === "scout") {
+    return "scouting_log";
+  }
+
+  if (normalized === "decoy_spread" || normalized === "decoyspread" || normalized === "decoy") {
+    return "decoy_spread";
+  }
+
+  return "shared_item";
 }
 
 function formatDate(value) {
@@ -585,6 +608,9 @@ export default function GroupScreen({ openSettings }) {
   const [sharedLoading, setSharedLoading] = useState(false);
   const [sharedItems, setSharedItems] = useState([]);
 
+  const [shareCodeInput, setShareCodeInput] = useState("");
+  const [shareCodeLoading, setShareCodeLoading] = useState(false);
+
   const unreadNotifications = useMemo(() => {
     return (Array.isArray(notifications) ? notifications : []).filter(
       (item) => String(item?.status || "").toLowerCase() === "unread"
@@ -938,6 +964,43 @@ export default function GroupScreen({ openSettings }) {
       memberUid: member.uid || item.senderUid || item.recipientUid || item.sharedWithUid || "",
       direction: item.direction,
     });
+  }
+
+  async function handleFindSharedCode() {
+    if (!user?.uid || shareCodeLoading) return;
+
+    const code = shareCodeInput.trim().replace(/\s/g, "");
+
+    if (!code) {
+      Alert.alert("Share Code Needed", "Enter the DuckSmart Share Code first.");
+      return;
+    }
+
+    setShareCodeLoading(true);
+
+    try {
+      const sharedItem = await getSharedItem(code);
+      const shareType = getShareTypeFromCloudItemType(sharedItem?.type);
+
+      navigation.navigate("ShareScreen", {
+        mode: "view_shared",
+        readOnly: true,
+        shareType,
+        item: sharedItem.payload || sharedItem,
+        sharedNotification: null,
+        shareId: sharedItem.id || code,
+        source: "share_code",
+      });
+
+      setShareCodeInput("");
+    } catch (err) {
+      Alert.alert(
+        "Shared Log Not Found",
+        err?.message || "Could not find a shared DuckSmart item with that code."
+      );
+    } finally {
+      setShareCodeLoading(false);
+    }
   }
 
   async function handleRetry() {
@@ -1312,6 +1375,52 @@ export default function GroupScreen({ openSettings }) {
                   </Text>
                 </View>
               )}
+            </View>
+
+            <View style={s.section}>
+              <SectionHeader
+                eyebrow="SHARE CODE"
+                title="Find Shared Logs With Code"
+                subtitle="Enter the DuckSmart Share Code from a text message to open and save the shared item."
+              />
+
+              <View style={s.shareCodeBox}>
+                <TextInput
+                  value={shareCodeInput}
+                  onChangeText={setShareCodeInput}
+                  placeholder="Enter DuckSmart Share Code..."
+                  placeholderTextColor="rgba(255,255,255,0.34)"
+                  autoCapitalize="none"
+                  autoCorrect={false}
+                  style={s.shareCodeInput}
+                  editable={!shareCodeLoading}
+                />
+
+                {shareCodeInput ? (
+                  <Pressable
+                    style={s.clearShareCodeBtn}
+                    onPress={() => setShareCodeInput("")}
+                    disabled={shareCodeLoading}
+                  >
+                    <Text style={s.clearShareCodeText}>×</Text>
+                  </Pressable>
+                ) : null}
+              </View>
+
+              <Pressable
+                style={[
+                  s.shareCodeBtn,
+                  (!shareCodeInput.trim() || shareCodeLoading) ? s.disabledBtn : null,
+                ]}
+                onPress={handleFindSharedCode}
+                disabled={!shareCodeInput.trim() || shareCodeLoading}
+              >
+                {shareCodeLoading ? (
+                  <ActivityIndicator color={BG} size="small" />
+                ) : (
+                  <Text style={s.shareCodeBtnText}>Open Shared Log</Text>
+                )}
+              </Pressable>
             </View>
 
             <Pressable style={s.blockedButton} onPress={openBlockedScreen}>
@@ -1917,6 +2026,49 @@ const s = StyleSheet.create({
     color: BLUE,
   },
 
+  shareCodeBox: {
+    minHeight: 48,
+    borderRadius: 15,
+    borderWidth: 1,
+    borderColor: GOLD_BORDER,
+    backgroundColor: "rgba(255,255,255,0.04)",
+    paddingHorizontal: 12,
+    flexDirection: "row",
+    alignItems: "center",
+    marginBottom: 10,
+  },
+  shareCodeInput: {
+    flex: 1,
+    color: COLORS.white,
+    fontSize: 14,
+    fontWeight: "800",
+    paddingVertical: 11,
+  },
+  clearShareCodeBtn: {
+    width: 32,
+    height: 32,
+    borderRadius: 16,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  clearShareCodeText: {
+    color: MUTED,
+    fontSize: 22,
+    fontWeight: "900",
+  },
+  shareCodeBtn: {
+    minHeight: 46,
+    borderRadius: 14,
+    backgroundColor: GOLD,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  shareCodeBtnText: {
+    color: BG,
+    fontSize: 13,
+    fontWeight: "900",
+  },
+
   blockedButton: {
     minHeight: 86,
     borderRadius: 18,
@@ -1924,10 +2076,10 @@ const s = StyleSheet.create({
     borderWidth: 1,
     borderColor: "rgba(255,77,77,0.34)",
     paddingHorizontal: 13,
-    paddingVertical: 12,
+    paddingVertical: 14,
     flexDirection: "row",
     alignItems: "center",
-    marginTop: 2,
+    marginTop: 8,
     marginBottom: 8,
   },
   blockedButtonKicker: {

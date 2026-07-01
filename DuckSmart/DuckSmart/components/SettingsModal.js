@@ -4,7 +4,7 @@
 // Feedback form, App info, and Logout.
 // Triggered by the gear button on any screen.
 
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useRef } from "react";
 import {
   View,
   Text,
@@ -29,6 +29,7 @@ import { ref, uploadBytes, getDownloadURL, deleteObject } from "firebase/storage
 
 import { COLORS } from "../constants/theme";
 import { submitFeedback } from "../services/feedback";
+import { isAdminUnlockText, verifyCurrentAdmin } from "../services/adminLogin";
 import { useAuth } from "../context/AuthContext";
 import { usePremium } from "../context/PremiumContext";
 import { logFeedbackSubmitted } from "../services/analytics";
@@ -57,6 +58,72 @@ const MUTED_DARK = "rgba(255,255,255,0.42)";
 const SETTINGS_RATE_PROMPT_SEEN_KEY = "@ducksmart_settings_rate_prompt_seen_v1";
 const STATE_REGS_STORAGE_PATH = "state_regs.json";
 const FLYING_DUCKS_IMAGE = require("../assets/flying_ducks.png");
+
+const HISTORY_SEASON_STATE_KEY = "@ducksmart_history_season_state_v1";
+
+function getDefaultSeasonStartTimestamp() {
+  const now = new Date();
+  const seasonStartYear = now.getMonth() >= 8 ? now.getFullYear() : now.getFullYear() - 1;
+  return new Date(seasonStartYear, 8, 1, 0, 0, 0, 0).getTime();
+}
+
+function createDefaultSeasonState() {
+  return {
+    currentSeasonStart: getDefaultSeasonStartTimestamp(),
+    lastSeasonStart: null,
+    lastSeasonClosedAt: null,
+    undo: null,
+  };
+}
+
+function normalizeSeasonState(value) {
+  const fallback = createDefaultSeasonState();
+
+  if (!value || typeof value !== "object") return fallback;
+
+  return {
+    currentSeasonStart:
+      Number.isFinite(Number(value.currentSeasonStart))
+        ? Number(value.currentSeasonStart)
+        : fallback.currentSeasonStart,
+    lastSeasonStart:
+      Number.isFinite(Number(value.lastSeasonStart))
+        ? Number(value.lastSeasonStart)
+        : null,
+    lastSeasonClosedAt:
+      Number.isFinite(Number(value.lastSeasonClosedAt))
+        ? Number(value.lastSeasonClosedAt)
+        : null,
+    undo:
+      value.undo && typeof value.undo === "object"
+        ? normalizeSeasonState({ ...value.undo, undo: null })
+        : null,
+  };
+}
+
+function getLogDate(log) {
+  const raw = log?.dateTime || log?.createdAt || Date.now();
+  const date = typeof raw === "number" ? new Date(raw) : new Date(raw);
+  return Number.isNaN(date.getTime()) ? new Date() : date;
+}
+
+function getLogTimestamp(log) {
+  return getLogDate(log).getTime();
+}
+
+function isCurrentSeasonLog(log, seasonState) {
+  return getLogTimestamp(log) >= Number(seasonState.currentSeasonStart || 0);
+}
+
+function getSupportNotificationId(notification) {
+  return String(
+    notification?.id ||
+      notification?.relatedId ||
+      notification?.feedbackId ||
+      notification?.createdAt ||
+      ""
+  ).trim();
+}
 
 const DEFAULT_WEATHER_ALERT_SETTINGS = {
   freezeWarning: false,
@@ -250,7 +317,18 @@ async function removeLicensePhotoFromFirebase(uid) {
   }
 }
 
-export default function SettingsModal({ visible, onClose, onLogout }) {
+export default function SettingsModal({
+  visible,
+  onClose,
+  onLogout,
+  logs = [],
+  pins = [],
+  setPins,
+  dogs = [],
+  supportMessageNotification = null,
+  onOpenSupportMessage,
+  refreshSupportNotifications,
+}) {
   const navigation = useNavigation();
   const { deleteAccount, user } = useAuth();
   const {
@@ -288,6 +366,61 @@ export default function SettingsModal({ visible, onClose, onLogout }) {
 
   const [huntingPartyRequestsEnabled, setHuntingPartyRequestsEnabled] = useState(true);
   const [huntingPartyRequestsLoaded, setHuntingPartyRequestsLoaded] = useState(false);
+
+  const [seasonState, setSeasonState] = useState(createDefaultSeasonState());
+  const [seasonReady, setSeasonReady] = useState(false);
+
+  const handledSupportNotificationIdsRef = useRef(new Set());
+  const supportOpenTimerRef = useRef(null);
+
+  useEffect(() => {
+    if (!visible) return;
+
+    if (typeof refreshSupportNotifications === "function") {
+      refreshSupportNotifications();
+    }
+  }, [visible, refreshSupportNotifications]);
+
+  useEffect(() => {
+    if (!visible || !supportMessageNotification) return;
+
+    const notificationId = getSupportNotificationId(supportMessageNotification);
+
+    if (!notificationId) return;
+    if (handledSupportNotificationIdsRef.current.has(notificationId)) return;
+
+    handledSupportNotificationIdsRef.current.add(notificationId);
+
+    clearTimeout(supportOpenTimerRef.current);
+
+    supportOpenTimerRef.current = setTimeout(() => {
+      if (typeof onOpenSupportMessage === "function") {
+        onOpenSupportMessage(supportMessageNotification);
+      }
+    }, 250);
+
+    return () => {
+      clearTimeout(supportOpenTimerRef.current);
+    };
+  }, [visible, supportMessageNotification, onOpenSupportMessage]);
+
+  const activeDogs = Array.isArray(dogs)
+    ? dogs.filter((dog) => !dog?.deletedAt && dog?.active !== false)
+    : [];
+
+  const firstDog = activeDogs[0] || null;
+  const firstDogPhoto =
+    firstDog?.photoUri ||
+    firstDog?.photoURL ||
+    firstDog?.photoUrl ||
+    firstDog?.imageUri ||
+    firstDog?.imageUrl ||
+    null;
+
+  const dogNamesText = activeDogs
+    .map((dog) => String(dog?.name || "").trim())
+    .filter(Boolean)
+    .join(", ");
 
   useEffect(() => {
     if (!visible) return;
@@ -329,6 +462,37 @@ export default function SettingsModal({ visible, onClose, onLogout }) {
 
     return () => {
       cancelled = true;
+    };
+  }, [visible]);
+
+  useEffect(() => {
+    if (!visible) return;
+
+    let mounted = true;
+
+    async function loadSeasonState() {
+      try {
+        const raw = await AsyncStorage.getItem(HISTORY_SEASON_STATE_KEY);
+        const parsed = raw ? JSON.parse(raw) : null;
+
+        if (mounted) {
+          setSeasonState(normalizeSeasonState(parsed));
+        }
+      } catch {
+        if (mounted) {
+          setSeasonState(createDefaultSeasonState());
+        }
+      } finally {
+        if (mounted) {
+          setSeasonReady(true);
+        }
+      }
+    }
+
+    loadSeasonState();
+
+    return () => {
+      mounted = false;
     };
   }, [visible]);
 
@@ -535,6 +699,42 @@ export default function SettingsModal({ visible, onClose, onLogout }) {
     }, 150);
   }
 
+  function openDogScreen() {
+    onClose?.();
+
+    setTimeout(() => {
+      try {
+        navigation.navigate("DogScreen");
+      } catch (err) {
+        console.log("DuckSmart dog navigation error:", err?.message || err);
+      }
+    }, 150);
+  }
+
+  async function openAdminReportsScreen() {
+    try {
+      await verifyCurrentAdmin();
+
+      setFeedbackMsg("");
+      setCategory("Bug");
+      onClose?.();
+
+      setTimeout(() => {
+        try {
+          navigation.navigate("AdminReportsScreen");
+        } catch (err) {
+          console.log("DuckSmart admin navigation error:", err?.message || err);
+          Alert.alert("Admin Error", "Could not open the admin reports screen.");
+        }
+      }, 150);
+    } catch (err) {
+      Alert.alert(
+        "Admin Access Denied",
+        err?.message || "This account is not allowed to open the admin portal."
+      );
+    }
+  }
+
   function handleSelectStateReg(code) {
     setSelectedStateCode(code);
     setStatePickerVisible(false);
@@ -704,8 +904,91 @@ export default function SettingsModal({ visible, onClose, onLogout }) {
     ]);
   }
 
+  async function saveSeasonState(nextState) {
+    const normalized = normalizeSeasonState(nextState);
+    setSeasonState(normalized);
+
+    try {
+      await AsyncStorage.setItem(HISTORY_SEASON_STATE_KEY, JSON.stringify(normalized));
+    } catch {
+      Alert.alert("Season Error", "Could not save the season change. Please try again.");
+    }
+  }
+
+  function closeCurrentSeasonFromSettings() {
+    const currentSeasonLogs = logs.filter((log) => isCurrentSeasonLog(log, seasonState));
+
+    if (currentSeasonLogs.length === 0) {
+      Alert.alert(
+        "No Current Season Data",
+        "There are no hunt logs in Current Season yet, so there is nothing to close."
+      );
+      return;
+    }
+
+    Alert.alert(
+      "Close Current Season?",
+      "Once the season is closed, Current Season will reset and the results from this season will move into Last Season.",
+      [
+        { text: "Cancel", style: "cancel" },
+        {
+          text: "Close Season",
+          style: "destructive",
+          onPress: async () => {
+            const closedAt = Date.now();
+
+            const nextState = {
+              currentSeasonStart: closedAt,
+              lastSeasonStart: seasonState.currentSeasonStart,
+              lastSeasonClosedAt: closedAt,
+              undo: {
+                currentSeasonStart: seasonState.currentSeasonStart,
+                lastSeasonStart: seasonState.lastSeasonStart,
+                lastSeasonClosedAt: seasonState.lastSeasonClosedAt,
+              },
+            };
+
+            const currentSeasonPinIds = new Set(
+              currentSeasonLogs
+                .map((log) => log.pinId)
+                .filter(Boolean)
+            );
+
+            if (typeof setPins === "function" && currentSeasonPinIds.size > 0) {
+              setPins((prevPins) =>
+                prevPins.map((pin) =>
+                  currentSeasonPinIds.has(pin.id)
+                    ? {
+                        ...pin,
+                        archivedAt: closedAt,
+                        archivedSeason: "lastSeason",
+                        archivedSeasonStart: seasonState.currentSeasonStart,
+                        archivedSeasonClosedAt: closedAt,
+                      }
+                    : pin
+                )
+              );
+            }
+
+            await saveSeasonState(nextState);
+
+            Alert.alert(
+              "Season Closed",
+              "Current Season has been reset. This season's logs now appear under Last Season."
+            );
+          },
+        },
+      ]
+    );
+  }
+
   async function handleSubmitFeedback() {
     const msg = feedbackMsg.trim();
+
+    if (isAdminUnlockText(msg)) {
+      openAdminReportsScreen();
+      return;
+    }
 
     if (!msg) {
       Alert.alert("Empty Feedback", "Please write something before submitting.");
@@ -854,8 +1137,8 @@ export default function SettingsModal({ visible, onClose, onLogout }) {
 
               <View style={ms.groupsContent}>
                 <View style={{ flex: 1 }}>
-                  <Text style={ms.groupsKicker}>COMMUNITY</Text>
-                  <Text style={ms.groupsTitle}>Groups / Shared Logs</Text>
+                  <Text style={ms.groupsKicker}>DUCKSMART COMMUNITY</Text>
+                  <Text style={ms.groupsTitle}>Comms Check</Text>
                   <Text style={ms.groupsSub}>
                     View your DuckSmart ID, shared hunts, and future hunting groups.
                   </Text>
@@ -864,6 +1147,34 @@ export default function SettingsModal({ visible, onClose, onLogout }) {
                 <View style={ms.groupsArrowCircle}>
                   <Text style={ms.groupsArrow}>›</Text>
                 </View>
+              </View>
+            </Pressable>
+
+            <Pressable style={ms.dogCard} onPress={openDogScreen}>
+              {firstDogPhoto ? (
+                <Image source={{ uri: firstDogPhoto }} style={ms.dogAvatar} resizeMode="cover" />
+              ) : (
+                <View style={ms.dogIconWrap}>
+                  <Text style={ms.dogIcon}>🐾</Text>
+                </View>
+              )}
+
+              <View style={{ flex: 1, minWidth: 0 }}>
+                <Text style={ms.dogKicker}>DOG PORTAL</Text>
+                <Text style={ms.dogTitle} numberOfLines={2}>
+                  {activeDogs.length > 0
+                    ? dogNamesText || "Manage Hunting Dogs"
+                    : "Add Hunting Dog"}
+                </Text>
+                <Text style={ms.dogSub} numberOfLines={2}>
+                  {activeDogs.length > 0
+                    ? `${activeDogs.length} hunting dog${activeDogs.length === 1 ? "" : "s"} added. Track retrieves, birds recovered, and dog history.`
+                    : "Add your hunting dog to unlock dog retrieve tracking inside Hunt Logs."}
+                </Text>
+              </View>
+
+              <View style={ms.groupsArrowCircle}>
+                <Text style={ms.groupsArrow}>›</Text>
               </View>
             </Pressable>
 
@@ -1027,6 +1338,24 @@ export default function SettingsModal({ visible, onClose, onLogout }) {
               ) : null}
             </View>
 
+            <View style={ms.section}>
+              <Text style={ms.sectionTitle}>Season Controls</Text>
+              <Text style={ms.sectionSub}>
+                Close Current Season when your season is over. Current Season resets and these results move to Last Season.
+              </Text>
+
+              <Pressable
+                style={[
+                  ms.upgradeBtn,
+                  (!seasonReady || logs.length === 0) ? { opacity: 0.45 } : null,
+                ]}
+                onPress={closeCurrentSeasonFromSettings}
+                disabled={!seasonReady || logs.length === 0}
+              >
+                <Text style={ms.upgradeBtnText}>Close Current Season</Text>
+              </Pressable>
+            </View>
+
             <Modal visible={licenseViewer} transparent={false} animationType="fade" onRequestClose={() => setLicenseViewer(false)}>
               <View style={ms.licenseViewerBg}>
                 <Image source={{ uri: licenseUri }} style={ms.licenseViewerImage} resizeMode="contain" />
@@ -1132,6 +1461,33 @@ export default function SettingsModal({ visible, onClose, onLogout }) {
                 Report a bug, suggest a feature, or ask a question. We read every message.
               </Text>
 
+              {supportMessageNotification ? (
+                <Pressable
+                  style={ms.supportMessageCard}
+                  onPress={() => {
+                    if (typeof onOpenSupportMessage === "function") {
+                      onOpenSupportMessage(supportMessageNotification);
+                    }
+                  }}
+                >
+                  <View style={{ flex: 1, minWidth: 0 }}>
+                    <Text style={ms.supportMessageKicker}>DUCKSMART ADMIN</Text>
+                    <Text style={ms.supportMessageTitle} numberOfLines={1}>
+                      {supportMessageNotification.title || "Admin replied"}
+                    </Text>
+                    <Text style={ms.supportMessageSub} numberOfLines={2}>
+                      {supportMessageNotification.message || "Tap to view your support conversation."}
+                    </Text>
+                  </View>
+
+                  <View style={ms.supportMessageBadge}>
+                    <Text style={ms.supportMessageBadgeText}>OPEN</Text>
+                  </View>
+
+                  <Text style={ms.supportMessageArrow}>›</Text>
+                </Pressable>
+              ) : null}
+
               <Text style={ms.label}>Category</Text>
               <View style={ms.chipRow}>
                 {CATEGORIES.map((cat) => (
@@ -1168,7 +1524,7 @@ export default function SettingsModal({ visible, onClose, onLogout }) {
 
             <View style={ms.section}>
               <Text style={ms.sectionTitle}>About DuckSmart</Text>
-              <Text style={ms.infoText}>Version 1.2.1</Text>
+              <Text style={ms.infoText}>Version 1.3.3</Text>
               <Text style={ms.infoText}>Built for duck hunters, by duck hunters.</Text>
               <Text style={ms.infoTextMuted}>
                 Weather data provided by OpenWeatherMap. Prediction scores are estimates
@@ -1206,7 +1562,55 @@ const ms = StyleSheet.create({
     paddingTop: Platform.OS === "ios" ? 30 : 34,
     paddingBottom: 100,
   },
-
+  supportMessageCard: {
+    minHeight: 76,
+    borderRadius: 15,
+    backgroundColor: "rgba(217,168,76,0.12)",
+    borderWidth: 1,
+    borderColor: GOLD,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 10,
+    marginBottom: 10,
+  },
+  supportMessageKicker: {
+    color: GOLD,
+    fontSize: 10,
+    fontWeight: "900",
+    letterSpacing: 1,
+  },
+  supportMessageTitle: {
+    color: COLORS.white,
+    fontSize: 15,
+    fontWeight: "900",
+    marginTop: 3,
+  },
+  supportMessageSub: {
+    color: "rgba(255,255,255,0.72)",
+    fontSize: 12,
+    fontWeight: "700",
+    lineHeight: 17,
+    marginTop: 3,
+  },
+  supportMessageBadge: {
+    paddingHorizontal: 8,
+    paddingVertical: 5,
+    borderRadius: 999,
+    backgroundColor: GOLD,
+  },
+  supportMessageBadgeText: {
+    color: BG,
+    fontSize: 10,
+    fontWeight: "900",
+  },
+  supportMessageArrow: {
+    color: GOLD,
+    fontSize: 24,
+    fontWeight: "900",
+    marginLeft: -2,
+  },
   headerRow: {
     flexDirection: "row",
     alignItems: "center",
@@ -1369,6 +1773,61 @@ const ms = StyleSheet.create({
     fontSize: 28,
     fontWeight: "900",
     marginTop: -2,
+  },
+
+  dogCard: {
+    minHeight: 98,
+    borderRadius: 18,
+    backgroundColor: CARD,
+    borderWidth: 1,
+    borderColor: GOLD_BORDER,
+    marginBottom: 8,
+    paddingHorizontal: 13,
+    paddingVertical: 12,
+    flexDirection: "row",
+    alignItems: "center",
+  },
+  dogAvatar: {
+    width: 58,
+    height: 58,
+    borderRadius: 18,
+    backgroundColor: BG,
+    borderWidth: 1,
+    borderColor: GOLD_BORDER,
+    marginRight: 11,
+  },
+  dogIconWrap: {
+    width: 58,
+    height: 58,
+    borderRadius: 18,
+    backgroundColor: "rgba(217,168,76,0.12)",
+    borderWidth: 1,
+    borderColor: GOLD_BORDER,
+    alignItems: "center",
+    justifyContent: "center",
+    marginRight: 11,
+  },
+  dogIcon: {
+    fontSize: 29,
+  },
+  dogKicker: {
+    color: GOLD,
+    fontSize: 10,
+    fontWeight: "900",
+    letterSpacing: 1.1,
+  },
+  dogTitle: {
+    color: COLORS.white,
+    fontSize: 18,
+    fontWeight: "900",
+    marginTop: 3,
+  },
+  dogSub: {
+    color: "rgba(255,255,255,0.76)",
+    fontSize: 12,
+    fontWeight: "800",
+    lineHeight: 17,
+    marginTop: 4,
   },
 
   statusPill: {

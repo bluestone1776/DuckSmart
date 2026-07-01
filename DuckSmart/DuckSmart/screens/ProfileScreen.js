@@ -1,7 +1,8 @@
 // DuckSmart — Profile Screen
 //
 // Simple account/profile screen opened from Settings.
-// Shows editable user info, profile photo, DuckSmart ID, and current subscription summary.
+// Shows editable user info, profile photo, DuckSmart ID, current subscription summary,
+// and onX GPX import tools.
 
 import React, { useEffect, useState } from "react";
 import {
@@ -30,6 +31,11 @@ import {
   loadUserProfile,
   uploadProfilePhoto,
 } from "../services/profile";
+import {
+  getOnXImportSummaryText,
+  mergeOnXImportedPins,
+  pickAndParseOnXGpxFile,
+} from "../services/onx_import";
 
 const GOLD = "#D9A84C";
 const BG = "#05090A";
@@ -76,6 +82,10 @@ function getInitials(value) {
   return String(parts[0]?.[0] || "D").toUpperCase();
 }
 
+function pluralize(count, singular, plural = `${singular}s`) {
+  return Number(count) === 1 ? singular : plural;
+}
+
 function openSubscriptionManager() {
   const url =
     Platform.OS === "ios"
@@ -116,7 +126,11 @@ async function loadOrCreateProfileWithDuckId(user) {
   return createdProfile;
 }
 
-export default function ProfileScreen({ openSettings }) {
+export default function ProfileScreen({
+  openSettings,
+  pins = [],
+  setPins,
+}) {
   const navigation = useNavigation();
   const { user } = useAuth();
   const {
@@ -139,19 +153,22 @@ export default function ProfileScreen({ openSettings }) {
   const [loading, setLoading] = useState(true);
   const [setupError, setSetupError] = useState("");
   const [saving, setSaving] = useState(false);
-function handleBackPress() {
-  if (typeof openSettings === "function") {
-    navigation.navigate("Today");
+  const [importingOnX, setImportingOnX] = useState(false);
 
-    setTimeout(() => {
-      openSettings();
-    }, 150);
+  function handleBackPress() {
+    if (typeof openSettings === "function") {
+      navigation.navigate("Today");
 
-    return;
+      setTimeout(() => {
+        openSettings();
+      }, 150);
+
+      return;
+    }
+
+    navigation.goBack();
   }
 
-  navigation.goBack();
-}
   useEffect(() => {
     let mounted = true;
 
@@ -396,11 +413,77 @@ function handleBackPress() {
     }
   }
 
-  function handleCorporateInfo() {
-    Alert.alert(
-      "Corporate Teams",
-      "$250/year includes 5 users.\n\nAdditional users: $30/year each.\n\nThis account type will be added June 10th."
-    );
+  async function handleImportOnXData() {
+    if (importingOnX) return;
+
+    if (typeof setPins !== "function") {
+      Alert.alert(
+        "Import Not Ready",
+        "The profile screen still needs to receive map pin storage from App.js before onX imports can be saved."
+      );
+      return;
+    }
+
+    try {
+      setImportingOnX(true);
+
+      const result = await pickAndParseOnXGpxFile();
+
+      if (result?.canceled) {
+        return;
+      }
+
+      const importedMapItems = Array.isArray(result?.allPins)
+        ? result.allPins
+        : [
+            ...(Array.isArray(result?.pins) ? result.pins : []),
+            ...(Array.isArray(result?.pathPins) ? result.pathPins : []),
+          ];
+
+      if (importedMapItems.length === 0) {
+        Alert.alert(
+          "No onX Data Found",
+          "No pins or paths were found in this GPX file."
+        );
+        return;
+      }
+
+      const currentPins = Array.isArray(pins) ? pins : [];
+      const mergedPins = mergeOnXImportedPins(currentPins, importedMapItems);
+      const addedCount = Math.max(0, mergedPins.length - currentPins.length);
+
+      setPins(mergedPins);
+
+      const summaryText = getOnXImportSummaryText(result);
+
+      if (addedCount <= 0) {
+        Alert.alert(
+          "Already Imported",
+          "These onX pins and paths already appear to be saved on your DuckSmart map."
+        );
+        return;
+      }
+
+      Alert.alert(
+        "onX Import Complete",
+        `${summaryText}\n\nAdded ${addedCount} new ${pluralize(
+          addedCount,
+          "map item"
+        )} to your DuckSmart map.`
+      );
+    } catch (err) {
+      console.error("DuckSmart onX import error:", err);
+      Alert.alert(
+        "onX Import Failed",
+        err?.message || "Could not import this onX GPX file."
+      );
+    } finally {
+      setImportingOnX(false);
+    }
+  }
+
+  function openPartyScreen() {
+    navigation.navigate("PartyScreen");
   }
 
   const planName = isPro ? "DuckSmart Pro" : "Free Account";
@@ -538,6 +621,39 @@ function handleBackPress() {
             </View>
 
             <View style={s.section}>
+              <Text style={s.sectionTitle}>Import onX Data</Text>
+              <Text style={s.sectionSub}>
+                Import a GPX export from onX to add its pins and paths to your DuckSmart map.
+              </Text>
+
+              <View style={s.importCard}>
+                <Text style={s.importTitle}>Supported Import</Text>
+                <Text style={s.importText}>
+                  onX GPX waypoints become DuckSmart pins. onX tracks and routes become mapped paths.
+                </Text>
+              </View>
+
+              <Pressable
+                style={[
+                  s.secondaryBtnGold,
+                  importingOnX ? s.disabledBtn : null,
+                ]}
+                onPress={handleImportOnXData}
+                disabled={importingOnX}
+              >
+                {importingOnX ? (
+                  <ActivityIndicator color={GOLD} />
+                ) : (
+                  <Text style={s.secondaryBtnGoldText}>Import onX GPX File</Text>
+                )}
+              </Pressable>
+
+              <Text style={s.helperText}>
+                Export your markups from onX as a GPX file, then choose that file here.
+              </Text>
+            </View>
+
+            <View style={s.section}>
               <Text style={s.sectionTitle}>Subscription</Text>
               <Text style={s.sectionSub}>{planSub}</Text>
 
@@ -583,20 +699,20 @@ function handleBackPress() {
             </View>
 
             <View style={s.section}>
-              <Text style={s.sectionTitle}>Corporate Teams</Text>
+              <Text style={s.sectionTitle}>Hunting Party</Text>
               <Text style={s.sectionSub}>
-                Future setup for outfitters, lodges, and guide teams that need shared pins and hunt logs.
+                Set up a lodge, club, or guide team with shared pins, shared hunt logs, invite codes, and hunter access.
               </Text>
 
-              <View style={s.corporateCard}>
-                <Text style={s.corporateTitle}>Corporate Plan Placeholder</Text>
-                <Text style={s.corporateText}>
-                  $250/year includes 5 users. Additional users are $30/year each.
+              <View style={s.partyCard}>
+                <Text style={s.partyTitle}>DuckSmart Group</Text>
+                <Text style={s.partyText}>
+                  Includes 5 hunters, shared pins, shared hunt logs, and group access tools.
                 </Text>
               </View>
 
-              <Pressable style={s.secondaryBtnGold} onPress={handleCorporateInfo}>
-                <Text style={s.secondaryBtnGoldText}>View Corporate Info</Text>
+              <Pressable style={s.secondaryBtnGold} onPress={openPartyScreen}>
+                <Text style={s.secondaryBtnGoldText}>Manage Hunting Party</Text>
               </Pressable>
             </View>
           </>
@@ -854,6 +970,27 @@ const s = StyleSheet.create({
     opacity: 0.55,
   },
 
+  importCard: {
+    borderRadius: 15,
+    borderWidth: 1,
+    borderColor: GOLD_BORDER,
+    backgroundColor: "rgba(217,168,76,0.08)",
+    padding: 11,
+    marginBottom: 4,
+  },
+  importTitle: {
+    color: GOLD,
+    fontSize: 14,
+    fontWeight: "900",
+  },
+  importText: {
+    color: MUTED,
+    fontSize: 12,
+    fontWeight: "700",
+    lineHeight: 17,
+    marginTop: 5,
+  },
+
   planCard: {
     minHeight: 64,
     borderRadius: 15,
@@ -925,19 +1062,19 @@ const s = StyleSheet.create({
     fontSize: 13,
   },
 
-  corporateCard: {
+  partyCard: {
     borderRadius: 15,
     borderWidth: 1,
     borderColor: GOLD_BORDER,
     backgroundColor: "rgba(217,168,76,0.08)",
     padding: 11,
   },
-  corporateTitle: {
+  partyTitle: {
     color: GOLD,
     fontSize: 14,
     fontWeight: "900",
   },
-  corporateText: {
+  partyText: {
     color: MUTED,
     fontSize: 12,
     fontWeight: "700",
