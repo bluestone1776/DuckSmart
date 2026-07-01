@@ -695,8 +695,8 @@ function buildWaypointPathPin(path) {
 
     shareType: "pin",
     itemType: "shared_pin",
-    icon: "👣",
-    emoji: "👣",
+    icon: "🦶",
+    emoji: "🦶",
 
     createdAt: path.createdAt || path.startedAt || Date.now(),
     updatedAt: Date.now(),
@@ -902,7 +902,7 @@ const [measureLabel, setMeasureLabel] = useState("");
 const [waypointMode, setWaypointMode] = useState(false);
 const [waypointLivePoints, setWaypointLivePoints] = useState([]);
 const [waypointSavedPaths, setWaypointSavedPaths] = useState([]);
-const [showWaypoints, setShowWaypoints] = useState(true);
+const [showWaypoints, setShowWaypoints] = useState(false);
 const [selectedWaypointPathId, setSelectedWaypointPathId] = useState(null);
 const [followBackMode, setFollowBackMode] = useState(false);
 const [waypointStatus, setWaypointStatus] = useState("");
@@ -1861,6 +1861,22 @@ async function toggleWaterLevels() {
   } finally {
     setWaterLevelLoading(false);
   }
+}
+
+function toggleShowWaypoints() {
+  const next = !showWaypoints;
+
+  if (!next) {
+    setSelectedWaypointPathId(null);
+    setFollowBackMode(false);
+  }
+
+  setShowWaypoints(next);
+
+  trackMapEvent(next ? "waypoint_paths_enabled" : "waypoint_paths_disabled", {
+    source: "map_button",
+    ...getRegionAnalytics(region),
+  });
 }
 
 async function toggleWaypointMapping() {
@@ -3391,6 +3407,7 @@ if (typeof onPress === "function") onPress();
 
 {!hideMapToolsForSheet ? (
   <View style={localStyles.mapToolRail}>
+
     {renderMapToolButton({
       keyName: "map-type",
       icon: "🛰️",
@@ -3415,7 +3432,7 @@ if (typeof onPress === "function") onPress();
 
     {renderMapToolButton({
       keyName: "regrid",
-      icon: "▦",
+      icon: "🗂️",
       active: showParcels,
       onPress: toggleParcels,
       label: showParcels ? "Hide property lines" : "Show property lines",
@@ -3426,7 +3443,7 @@ if (typeof onPress === "function") onPress();
 
     {renderMapToolButton({
       keyName: "public-land",
-      icon: "🟨",
+      icon: "🏕️",
       active: showPublicLand,
       disabled: publicLandLoading,
       onPress: togglePublicLand,
@@ -3437,20 +3454,20 @@ if (typeof onPress === "function") onPress();
     })}
 
     {renderMapToolButton({
-  keyName: "water-levels",
-  icon: "💧",
-  active: showWaterLevels,
-  disabled: waterLevelLoading,
-  onPress: toggleWaterLevels,
-  label: showWaterLevels ? "Hide water levels" : "Show water levels",
-  displayLabel: "Water Levels",
-  labelTop: 212,
-  showRefreshNotice: true,
-})}
+      keyName: "water-levels",
+      icon: "💧",
+      active: showWaterLevels,
+      disabled: waterLevelLoading,
+      onPress: toggleWaterLevels,
+      label: showWaterLevels ? "Hide water levels" : "Show water levels",
+      displayLabel: "Water Levels",
+      labelTop: 212,
+      showRefreshNotice: true,
+    })}
 
     {renderMapToolButton({
       keyName: "add-pin",
-      icon: "📍",
+      icon: "📌",
       active: isAddMode,
       onPress: startAddPin,
       label: "Add pin",
@@ -3460,7 +3477,7 @@ if (typeof onPress === "function") onPress();
 
     {renderMapToolButton({
       keyName: "map-path",
-      icon: "👣",
+      icon: "🦶",
       active: waypointMode,
       disabled: waypointSaving,
       onPress: toggleWaypointMapping,
@@ -3471,14 +3488,14 @@ if (typeof onPress === "function") onPress();
 
     {renderMapToolButton({
       keyName: "show-waypoints",
-      icon: "🧭",
+      icon: "🗺️",
       active: showWaypoints,
-      onPress: () => setShowWaypoints((prev) => !prev),
-      label: showWaypoints ? "Hide waypoints" : "Show waypoints",
-      displayLabel: showWaypoints ? "Hide Paths" : "Show Paths",
+      onPress: toggleShowWaypoints,
+      label: showWaypoints ? "Hide paths" : "Display paths",
+      displayLabel: showWaypoints ? "Hide Paths" : "Display Paths",
       labelTop: 371,
     })}
-
+    
     {renderMapToolButton({
       keyName: "measure",
       icon: "📏",
@@ -3492,7 +3509,7 @@ if (typeof onPress === "function") onPress();
 
     {renderMapToolButton({
       keyName: "my-location",
-      icon: "🎯",
+      icon: "🧭",
       disabled: !userLoc,
       onPress: goToUser,
       label: "Go to my location",
@@ -3783,7 +3800,7 @@ if (typeof onPress === "function") onPress();
 
           {showParcels && isPro ? (
             <View style={[localStyles.overlayBadge, { bottom: overlayBadgeBottom }]}>
-              <Text style={localStyles.overlayBadgeText}>▦ Property Lines</Text>
+              <Text style={localStyles.overlayBadgeText}>🏕️ Property Lines</Text>
 
               <Pressable
                 onPress={() => {
@@ -4359,10 +4376,12 @@ const localStyles = StyleSheet.create({
   mapToolButtonDisabled: {
     opacity: 0.45,
   },
-  mapToolIcon: {
-    fontSize: 21,
-    fontWeight: "900",
-  },
+ mapToolIcon: {
+  fontSize: 26,
+  lineHeight: 30,
+  fontWeight: "900",
+  textAlign: "center",
+},
 mapToolLabelBubble: {
   position: "absolute",
   left: 64,
@@ -4681,9 +4700,9 @@ waterLevelCalloutText: {
 },
 toggleRefreshNotice: {
   position: "absolute",
-  top: Platform.OS === "ios" ? 54 : 34,
+  top: Platform.OS === "ios" ? 14 : 10,
   alignSelf: "center",
-  zIndex: 20,
+  zIndex: 30,
   paddingVertical: 10,
   paddingHorizontal: 16,
   borderRadius: 999,
@@ -4693,7 +4712,7 @@ toggleRefreshNotice: {
   shadowColor: "#000",
   shadowOpacity: 0.35,
   shadowRadius: 8,
-  elevation: 6,
+  elevation: 30,
 },
 toggleRefreshNoticeText: {
   color: WHITE,
